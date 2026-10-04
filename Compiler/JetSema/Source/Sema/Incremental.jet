@@ -1,7 +1,7 @@
 // Rust Sema/Bundle.rs:766–1155 and Bundle/Validation.rs:528–605.
 // Cache body products, not module verdicts: failure/effect/policy solving stays
 // downstream of replay and runs against every module's current call facts.
-use jet_foundation.[Diagnostic, Func, Item, Stmt, SymbolID, TFuncKind, CanonicalDebugBytes, canonical_ast_fragment, canonical_ast_incremental_module_metadata, build_snapshot_write_check_debug]
+use jet_foundation.[Diagnostic, EverySchedule, Func, Item, Stmt, SymbolID, TFuncKind, CanonicalDebugBytes, canonical_ast_fragment, canonical_ast_incremental_module_metadata, build_snapshot_write_check_debug]
 
 pub struct SemaIncrementalSemaStats {
     pub hits: Int
@@ -18,6 +18,7 @@ struct SemaCachedFunctionBody {
     call_facts: [SemaCallSiteFact]
     comptime_requests: [SemaComptimeRequest]
     name_references: [SemaNameReferenceFact]
+    every_schedule: EverySchedule?
     retained_bytes: Int
 }
 
@@ -222,14 +223,16 @@ fn sema_incremental_work_identity(environment: SemaScopeEnvironment, owner_id: S
 // Rust check_func_body_cached: every product belongs to this body and must
 // travel together. The SemaFunctionResult retains failure/compute/hardware,
 // copy/exact-Int facts, TIR and incomplete reasons, not merely the function.
-fn sema_incremental_function_check(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
-    storage :: environment.incremental_cache ?? return sema_function_check_uncached(func, owner_id, function_kind, raw_protocol_return, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
-    input :: "{func:Debug}:{function_kind:Debug}:{raw_protocol_return}:{environment.generic_params:Debug}"
-    cache_allowed :: !func.is_comptime && !sema_incremental_syntax_facts(func.body).has_comptime
+fn sema_incremental_function_check(func: &Func, body_input: String, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    storage :: environment.incremental_cache ?? return sema_function_check_uncached(&func, owner_id, function_kind, raw_protocol_return, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    // Fingerprint the immutable body input, never the later checked stamp.
+    input :: body_input
+    cache_allowed :: input != ""
     if !environment.incremental_probe && cache_allowed {
         permit := storage.guard_edit()
         if permit.value.functions.get(owner_id.key) == .Val(hit) {
             if hit.input == input {
+                if &func.every == .Val(every) -> every.resolved = hit.every_schedule
                 permit.value.hits += 1
                 loop diagnostic in hit.diagnostics -> &diagnostics.push(diagnostic)
                 loop fact in hit.call_facts -> &call_facts.push(fact)
@@ -243,7 +246,7 @@ fn sema_incremental_function_check(func: Func, owner_id: SymbolID, function_kind
     call_start :: call_facts.len()
     request_start :: comptime_requests.len()
     reference_start :: name_references.len()
-    result :: sema_function_check_uncached(func, owner_id, function_kind, raw_protocol_return, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    result :: sema_function_check_uncached(&func, owner_id, function_kind, raw_protocol_return, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
     if environment.incremental_probe -> return result
     body_diagnostics :: loop index in diagnostic_start..<diagnostics.len() -> diagnostics[index]
     body_calls :: loop index in call_start..<call_facts.len() -> call_facts[index]
@@ -252,8 +255,9 @@ fn sema_incremental_function_check(func: Func, owner_id: SymbolID, function_kind
     permit := storage.guard_edit()
     sema_incremental_record_recompute(&permit.value, sema_incremental_work_identity(environment, owner_id, func))
     if !cache_allowed || result.comptime_body_sources.len() > 0 || body_requests.len() > 0 -> return result
-    retained :: input.bytes().len() + "{result:Debug}{body_diagnostics:Debug}{body_calls:Debug}{body_requests:Debug}{body_references:Debug}".bytes().len()
-    permit.value.functions[owner_id.key] = SemaCachedFunctionBody{input: input, result: ~result, diagnostics: body_diagnostics, call_facts: body_calls, comptime_requests: body_requests, name_references: body_references, retained_bytes: retained}
+    schedule :: if func.every == .Val(every) -> every.resolved else -> None
+    retained :: input.bytes().len() + "{result:Debug}{body_diagnostics:Debug}{body_calls:Debug}{body_requests:Debug}{body_references:Debug}{schedule:Debug}".bytes().len()
+    permit.value.functions[owner_id.key] = SemaCachedFunctionBody{input: input, result: ~result, diagnostics: body_diagnostics, call_facts: body_calls, comptime_requests: body_requests, name_references: body_references, every_schedule: schedule, retained_bytes: retained}
     permit.value.owners[owner_id.key] = environment.module_identity
     result
 }

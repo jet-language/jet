@@ -1,0 +1,201 @@
+// PORT-PENDING 2163 crates-jet-parser-tests-package-fingerprints: crates/jet-parser/tests/package_fingerprints.rs:1-197
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2517 S1: package identity and fingerprints over parsed sources.
+//RS //!
+//RS //! A whitespace or comment edit changes no fingerprint. A body edit changes
+//RS //! the item's source fingerprint but not its interface fingerprint or the
+//RS //! package interface digest. A signature edit changes both. Identities and
+//RS //! digests do not depend on where the checkout lives.
+//RS 
+//RS use jet_foundation::AST::{CFfi, Item, LoadedModule, NameLedger, ProgramBundle};
+//RS use jet_foundation::PackageIdentity::{
+//RS     item_interface_fingerprint, item_source_fingerprint, PackageGraph, PackageKind, CORE_PACKAGE,
+//RS };
+//RS use jet_parser::{Lexer, Parser};
+//RS use std::collections::{BTreeMap, HashMap, HashSet};
+//RS use std::path::Path;
+//RS 
+//RS fn module(path: &Path, source: &str) -> LoadedModule {
+//RS     let (tokens, diagnostics) = Lexer::lex(source);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS     let mut program = Parser::parse(&tokens).expect("parses");
+//RS     LoadedModule {
+//RS         path: path.to_path_buf(),
+//RS         display: path.display().to_string(),
+//RS         source: source.to_string(),
+//RS         alias: path.file_stem().unwrap().to_string_lossy().into_owned(),
+//RS         imports: std::mem::take(&mut program.imports),
+//RS         items: std::mem::take(&mut program.items),
+//RS         script_body: std::mem::take(&mut program.script_body),
+//RS         block_spans: std::mem::take(&mut program.block_spans),
+//RS         web_target_ceiling: program.web_target_ceiling,
+//RS         pub_file: program.pub_file,
+//RS         no_prelude: program.no_prelude,
+//RS         default_target: program.default_target.clone(),
+//RS         html_path: program.html_path.clone(),
+//RS         policy_declarations: program.policy_declarations.clone(),
+//RS         user_policy_declarations: program.user_policy_declarations.clone(),
+//RS         rule_facts: std::mem::take(&mut program.rule_facts),
+//RS     }
+//RS }
+//RS 
+//RS fn items(source: &str) -> Vec<Item> {
+//RS     module(Path::new("x.jet"), source).items
+//RS }
+//RS 
+//RS fn only_item(source: &str) -> Item {
+//RS     let mut items = items(source);
+//RS     assert_eq!(items.len(), 1);
+//RS     items.remove(0)
+//RS }
+//RS 
+//RS /// A bundle with one directory package (`lib/`, two files), the entry as a
+//RS /// loose file importing it, and one Core module.
+//RS fn bundle(root: &Path, lib_a: &str) -> ProgramBundle {
+//RS     let lib = root.join("lib");
+//RS     let modules = vec![
+//RS         module(&root.join("main.jet"), "fn run() {\n    print(\"hi\")\n}\n"),
+//RS         module(&lib.join("a.jet"), lib_a),
+//RS         module(&lib.join("b.jet"), "pub fn b() -> Int {\n    2\n}\n"),
+//RS         module(Path::new("<corelib>/text.jet"), "pub fn len() -> Int {\n    0\n}\n"),
+//RS     ];
+//RS     let mut name_ledger = NameLedger::default();
+//RS     name_ledger.set_module_namespace(1, lib.display().to_string());
+//RS     name_ledger.set_module_namespace(2, lib.display().to_string());
+//RS     name_ledger.record_import_target(0, jet_foundation::Diagnostics::Span::new(0, 1), 1);
+//RS     ProgramBundle {
+//RS         entry: 0,
+//RS         project_root: root.to_path_buf(),
+//RS         modules,
+//RS         devtools_registry: Default::default(),
+//RS         parse_teaching: Vec::new(),
+//RS         used_core: HashSet::new(),
+//RS         ffi_callback_fns: HashSet::new(),
+//RS         cffi: CFfi::default(),
+//RS         comptime_inputs: Vec::new(),
+//RS         name_ledger,
+//RS         layer_ceiling: None,
+//RS         inferred_layer: jet_foundation::RingLayer::RuntimeLayer::Core,
+//RS         web_partitions: HashMap::new(),
+//RS         web_partition_enforced: false,
+//RS         web_partition_report: None,
+//RS         dep_roots: HashMap::new(),
+//RS         package_guarantees: Default::default(),
+//RS         program_allocator: Default::default(),
+//RS         active_os: jet_foundation::OSTarget::OSTarget::host(),
+//RS         build_facts: Default::default(),
+//RS         edition: "2027".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS const LIB_A: &str = "pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn helper() -> Int {\n    1\n}\n";
+//RS 
+//RS #[test]
+//RS fn item_fingerprints_ignore_whitespace_and_comments() {
+//RS     let plain = only_item("pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
+//RS     let spaced = only_item(
+//RS         "// adds two numbers\n\n\npub fn add(a: Int,   b: Int) -> Int {\n\n    // the sum\n    a  +  b\n}\n",
+//RS     );
+//RS     assert_eq!(item_source_fingerprint(&plain), item_source_fingerprint(&spaced));
+//RS     assert_eq!(
+//RS         item_interface_fingerprint(&plain, false),
+//RS         item_interface_fingerprint(&spaced, false)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn body_edit_keeps_interface_fingerprint_and_signature_edit_changes_it() {
+//RS     let plain = only_item("pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
+//RS     let body = only_item("pub fn add(a: Int, b: Int) -> Int {\n    b + a\n}\n");
+//RS     let signature = only_item("pub fn add(a: Int, b: Int, c: Int) -> Int {\n    a + b\n}\n");
+//RS     assert_ne!(item_source_fingerprint(&plain), item_source_fingerprint(&body));
+//RS     assert_eq!(
+//RS         item_interface_fingerprint(&plain, false),
+//RS         item_interface_fingerprint(&body, false)
+//RS     );
+//RS     assert_ne!(
+//RS         item_interface_fingerprint(&plain, false),
+//RS         item_interface_fingerprint(&signature, false)
+//RS     );
+//RS     // Generic bodies are templates importers instantiate, so they stay in the
+//RS     // interface.
+//RS     let generic = only_item("pub fn same<T>(x: T) -> T {\n    x\n}\n");
+//RS     let generic_body = only_item("pub fn same<T>(x: T) -> T {\n    y :: x\n    y\n}\n");
+//RS     assert_ne!(
+//RS         item_interface_fingerprint(&generic, false),
+//RS         item_interface_fingerprint(&generic_body, false)
+//RS     );
+//RS     // A private function is not part of the interface.
+//RS     assert_eq!(item_interface_fingerprint(&only_item("fn hidden() -> Int {\n    1\n}\n"), false), None);
+//RS }
+//RS 
+//RS #[test]
+//RS fn package_graph_partitions_by_namespace_and_orders_dependencies_first() {
+//RS     let bundle = bundle(Path::new("/work/a/project"), LIB_A);
+//RS     let graph = PackageGraph::from_bundle(&bundle);
+//RS     let identities = graph
+//RS         .packages
+//RS         .iter()
+//RS         .map(|package| (package.identity.as_str(), package.kind, package.modules.clone()))
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         identities,
+//RS         [
+//RS             (CORE_PACKAGE, PackageKind::Core, vec![3]),
+//RS             ("file:main.jet", PackageKind::File, vec![0]),
+//RS             ("pkg:lib", PackageKind::Manifest, vec![1, 2]),
+//RS         ]
+//RS     );
+//RS     // main depends on lib and Core; lib depends on Core.
+//RS     assert_eq!(graph.packages[1].dependencies, [0, 2]);
+//RS     assert_eq!(graph.packages[2].dependencies, [0]);
+//RS     assert!(graph.is_acyclic());
+//RS     assert_eq!(graph.components(), [vec![0], vec![2], vec![1]]);
+//RS     assert_eq!(graph.member_label(&bundle, 2), "b.jet");
+//RS }
+//RS 
+//RS #[test]
+//RS fn digests_are_equal_across_checkout_paths_and_edits_cut_off_correctly() {
+//RS     let digests = |root: &str, lib_a: &str| {
+//RS         let bundle = bundle(Path::new(root), lib_a);
+//RS         let graph = PackageGraph::from_bundle(&bundle);
+//RS         let lib = graph
+//RS             .packages
+//RS             .iter()
+//RS             .position(|package| package.identity == "pkg:lib")
+//RS             .unwrap();
+//RS         (
+//RS             graph.source_digest(&bundle, lib, Some(b"package { name: \"lib\" }\n")),
+//RS             graph.interface_digest(&bundle, lib, &BTreeMap::new()),
+//RS         )
+//RS     };
+//RS     let (source, interface) = digests("/work/a/project", LIB_A);
+//RS     assert_eq!(digests("/elsewhere/b/project", LIB_A), (source.clone(), interface.clone()));
+//RS 
+//RS     // A comment edit changes the source digest only.
+//RS     let commented = LIB_A.replace("fn helper", "// the helper\nfn helper");
+//RS     let (comment_source, comment_interface) = digests("/work/a/project", &commented);
+//RS     assert_ne!(comment_source, source);
+//RS     assert_eq!(comment_interface, interface);
+//RS 
+//RS     // A private body edit and a new private function keep the interface.
+//RS     let private = LIB_A.replace("    1\n", "    2\n") + "\nfn other() -> Int {\n    3\n}\n";
+//RS     assert_eq!(digests("/work/a/project", &private).1, interface);
+//RS 
+//RS     // A public signature edit, or a new public function, changes it.
+//RS     let signature = LIB_A.replace("b: Int) -> Int", "b: Int) -> Float");
+//RS     assert_ne!(digests("/work/a/project", &signature).1, interface);
+//RS     let added = format!("{LIB_A}\npub fn more() -> Int {{\n    4\n}}\n");
+//RS     assert_ne!(digests("/work/a/project", &added).1, interface);
+//RS 
+//RS     // An inferred fact importers depend on changes the digest through the
+//RS     // checker's summaries.
+//RS     let bundle = bundle(Path::new("/work/a/project"), LIB_A);
+//RS     let graph = PackageGraph::from_bundle(&bundle);
+//RS     let lib = graph.packages.iter().position(|p| p.identity == "pkg:lib").unwrap();
+//RS     let summaries = BTreeMap::from([("pkg:lib::a.jet::add".to_string(), "effects:FS".to_string())]);
+//RS     assert_ne!(graph.interface_digest(&bundle, lib, &summaries), interface);
+//RS }
+//RS 
+// END-PORT-PENDING 2163 crates/jet-parser/tests/package_fingerprints.rs:1-197
+

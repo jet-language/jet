@@ -1,1827 +1,436 @@
-// PORT-PENDING 0086 crates-jet-foundation-src-policy-slice-1: crates/jet-foundation/src/Policy.rs:1-1823
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Compiler-owned scoped policy registry and resolution ladder (D-MARK-SCOPE1).
-//RS 
-//RS use crate::Diagnostics::{Span, TextEdit};
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::sync::LazyLock;
-//RS 
-//RS pub use crate::Authority::Scope as PolicyScope;
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-//RS pub enum PolicyKey {
-//RS     Unsafe,
-//RS     Impure,
-//RS     Nondeterministic,
-//RS     ScopedGc,
-//RS     ExplicitUnits,
-//RS     Copies,
-//RS     Sentries,
-//RS }
-//RS 
-//RS impl PolicyKey {
-//RS     pub const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Unsafe => "unsafe",
-//RS             Self::Impure => "impure",
-//RS             Self::Nondeterministic => "nondeterministic",
-//RS             Self::ScopedGc => "gc",
-//RS             Self::ExplicitUnits => "explicit_units",
-//RS             Self::Copies => "copies",
-//RS             Self::Sentries => "sentries",
-//RS         }
-//RS     }
-//RS     pub fn parse(name: &str) -> Option<Self> {
-//RS         match name {
-//RS             "unsafe" => Some(Self::Unsafe),
-//RS             "impure" => Some(Self::Impure),
-//RS             "nondeterministic" => Some(Self::Nondeterministic),
-//RS             "gc" => Some(Self::ScopedGc),
-//RS             "explicit_units" => Some(Self::ExplicitUnits),
-//RS             "copies" => Some(Self::Copies),
-//RS             "sentries" => Some(Self::Sentries),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     pub const fn is_audited_gate(self) -> bool {
-//RS         matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-//RS pub enum PolicyValue {
-//RS     Enabled,
-//RS     Limit(u64),
-//RS     Forbid,
-//RS     Default,
-//RS     GateOnly,
-//RS     Obligations,
-//RS     Relaxed,
-//RS     PerSite,
-//RS     Track,
-//RS     Skip,
-//RS     Allow,
-//RS     On,
-//RS     Off,
-//RS     Explicit,
-//RS }
-//RS 
-//RS impl PolicyValue {
-//RS     pub fn display(self) -> String {
-//RS         match self {
-//RS             Self::Enabled => "true".into(),
-//RS             Self::Limit(n) => n.to_string(),
-//RS             Self::Forbid => ".Forbid".into(),
-//RS             Self::Default => ".Default".into(),
-//RS             Self::GateOnly => ".GateOnly".into(),
-//RS             Self::Obligations => ".Obligations".into(),
-//RS             Self::Relaxed => ".Relaxed".into(),
-//RS             Self::PerSite => ".PerSite".into(),
-//RS             Self::Track => ".Track".into(),
-//RS             Self::Skip => ".Skip".into(),
-//RS             Self::Allow => ".Allow".into(),
-//RS             Self::On => ".On".into(),
-//RS             Self::Off => ".Off".into(),
-//RS             Self::Explicit => ".Explicit".into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The six lexical source rungs used by every build fact. Package is the
-//RS /// outermost source and Item is the nearest source.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-//RS pub enum SourceScope {
-//RS     Package,
-//RS     File,
-//RS     Module,
-//RS     Function,
-//RS     Block,
-//RS     Item,
-//RS }
-//RS 
-//RS impl SourceScope {
-//RS     pub const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Package => "package",
-//RS             Self::File => "file",
-//RS             Self::Module => "module",
-//RS             Self::Function => "function",
-//RS             Self::Block => "block",
-//RS             Self::Item => "item",
-//RS         }
-//RS     }
-//RS 
-//RS     const fn rank(self) -> u8 {
-//RS         match self {
-//RS             Self::Package => 0,
-//RS             Self::File => 1,
-//RS             Self::Module => 2,
-//RS             Self::Function => 3,
-//RS             Self::Block => 4,
-//RS             Self::Item => 5,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Contribution layers are ordered from least to most explicit. A later
-//RS /// layer may replace an earlier layer; two different values at one deciding
-//RS /// layer are a hard conflict.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-//RS pub enum ContributionLayer {
-//RS     Declaration,
-//RS     OptimizationBundle,
-//RS     Workspace,
-//RS     Environment,
-//RS     System,
-//RS     Fleet,
-//RS     CommandLine,
-//RS }
-//RS 
-//RS impl ContributionLayer {
-//RS     pub const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Declaration => "declaration",
-//RS             Self::OptimizationBundle => "optimization bundle",
-//RS             Self::Workspace => "workspace",
-//RS             Self::Environment => "environment",
-//RS             Self::System => "system",
-//RS             Self::Fleet => "fleet",
-//RS             Self::CommandLine => "command line",
-//RS         }
-//RS     }
-//RS 
-//RS     const fn rank(self) -> u8 {
-//RS         match self {
-//RS             Self::Declaration => 0,
-//RS             Self::OptimizationBundle => 1,
-//RS             Self::Workspace => 2,
-//RS             Self::Environment => 3,
-//RS             Self::System => 4,
-//RS             Self::Fleet => 5,
-//RS             Self::CommandLine => 6,
-//RS         }
-//RS     }
-//RS 
-//RS     const fn can_force(self) -> bool {
-//RS         matches!(self, Self::System | Self::Fleet)
-//RS     }
-//RS }
-//RS 
-//RS /// How a fact combines across the contribution ladder.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-//RS pub enum FactMerge {
-//RS     Override,
-//RS     TightenOnly,
-//RS }
-//RS 
-//RS /// A fact key carries its resolver merge direction and an optional resolver-
-//RS /// owned default writer; contributors supply only a value and provenance.
-//RS #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-//RS pub struct FactKey {
-//RS     pub name: String,
-//RS     merge: FactMerge,
-//RS     default: Option<(FactValue, String)>,
-//RS }
-//RS 
-//RS impl FactKey {
-//RS     pub fn new(name: impl Into<String>) -> Self {
-//RS         let name = name.into();
-//RS         Self {
-//RS             merge: FactMerge::Override,
-//RS             name,
-//RS             default: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn tighten_only(name: impl Into<String>) -> Self {
-//RS         let mut key = Self::new(name);
-//RS         key.merge = FactMerge::TightenOnly;
-//RS         key
-//RS     }
-//RS 
-//RS     /// Set the resolver-owned declaration default for this fact.
-//RS     pub fn with_default(name: impl Into<String>, value: FactValue) -> Self {
-//RS         Self::with_default_source(name, value, "<default>")
-//RS     }
-//RS 
-//RS     /// Set the resolver-owned declaration default and preserve its source label
-//RS     /// for the explanation chain.
-//RS     pub fn with_default_source(
-//RS         name: impl Into<String>,
-//RS         value: FactValue,
-//RS         source: impl Into<String>,
-//RS     ) -> Self {
-//RS         let mut key = Self::new(name);
-//RS         key.default = Some((value, source.into()));
-//RS         key
-//RS     }
-//RS }
-//RS 
-//RS /// Tier-0 values that can travel through the contribution law. Facts erase
-//RS /// before runtime; this carrier exists only for folding and explanation.
-//RS #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-//RS pub enum FactValue {
-//RS     Bool(bool),
-//RS     Int(i64),
-//RS     Char(char),
-//RS     Text(String),
-//RS     Enum(String),
-//RS     OptionalText(Option<String>),
-//RS     Policy(PolicyValue),
-//RS }
-//RS 
-//RS impl FactValue {
-//RS     pub fn display(&self) -> String {
-//RS         match self {
-//RS             Self::Bool(value) => value.to_string(),
-//RS             Self::Int(value) => value.to_string(),
-//RS             Self::Char(value) => format!("'{value}'"),
-//RS             Self::Text(value) => format!("\"{value}\""),
-//RS             Self::Enum(value) => format!(".{value}"),
-//RS             Self::OptionalText(Some(value)) => format!("Some(\"{value}\")"),
-//RS             Self::OptionalText(None) => "None".to_string(),
-//RS             Self::Policy(value) => value.display(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn safety_relation(&self, next: &Self) -> SafetyRelation {
-//RS         if self == next {
-//RS             return SafetyRelation::Same;
-//RS         }
-//RS         match (self, next) {
-//RS             (Self::Bool(outer), Self::Bool(inner)) => {
-//RS                 if *outer && !*inner {
-//RS                     SafetyRelation::Tighten
-//RS                 } else {
-//RS                     SafetyRelation::Widen
-//RS                 }
-//RS             }
-//RS             (Self::Int(outer), Self::Int(inner)) => {
-//RS                 if inner < outer {
-//RS                     SafetyRelation::Tighten
-//RS                 } else {
-//RS                     SafetyRelation::Widen
-//RS                 }
-//RS             }
-//RS             (Self::Policy(outer), Self::Policy(inner)) => {
-//RS                 if gate_widens(*outer, *inner) {
-//RS                     SafetyRelation::Widen
-//RS                 } else {
-//RS                     SafetyRelation::Tighten
-//RS                 }
-//RS             }
-//RS             _ => SafetyRelation::Incomparable,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS enum SafetyRelation {
-//RS     Same,
-//RS     Tighten,
-//RS     Widen,
-//RS     Incomparable,
-//RS }
-//RS 
-//RS /// One written contributor to one fact. `target` lets a source-scoped value
-//RS /// identify the item it governs without changing the global ordering law.
-//RS #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-//RS pub struct FactContribution {
-//RS     pub key: String,
-//RS     pub value: FactValue,
-//RS     pub scope: SourceScope,
-//RS     pub layer: ContributionLayer,
-//RS     pub span: Span,
-//RS     pub target: Option<Span>,
-//RS     pub source: String,
-//RS     /// Human-readable reason retained for explain and lock provenance. The
-//RS     /// caller supplies this only when the writer is computed rather than a
-//RS     /// manifest or command-line declaration.
-//RS     pub reason: Option<String>,
-//RS     pub force: bool,
-//RS     pub force_reason: Option<String>,
-//RS     default: bool,
-//RS }
-//RS 
-//RS impl FactContribution {
-//RS     pub fn new(
-//RS         key: impl Into<String>,
-//RS         value: FactValue,
-//RS         scope: SourceScope,
-//RS         layer: ContributionLayer,
-//RS         source: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             key: key.into(),
-//RS             value,
-//RS             scope,
-//RS             layer,
-//RS             span: Span::new(0, 0),
-//RS             target: None,
-//RS             source: source.into(),
-//RS             reason: None,
-//RS             force: false,
-//RS             force_reason: None,
-//RS             default: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn at(mut self, span: Span) -> Self {
-//RS         self.span = span;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn for_target(mut self, target: Span) -> Self {
-//RS         self.target = Some(target);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn force_with_reason(mut self, reason: impl Into<String>) -> Self {
-//RS         self.force = true;
-//RS         self.force_reason = Some(reason.into());
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn force(self) -> Self {
-//RS         self.force_with_reason(".Force")
-//RS     }
-//RS 
-//RS     pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
-//RS         self.reason = Some(reason.into());
-//RS         self
-//RS     }
-//RS 
-//RS     fn default_for(key: &FactKey, value: FactValue, source: String) -> Self {
-//RS         let mut contribution = Self::new(
-//RS             key.name.clone(),
-//RS             value,
-//RS             SourceScope::Package,
-//RS             ContributionLayer::Declaration,
-//RS             source,
-//RS         );
-//RS         contribution.default = true;
-//RS         contribution
-//RS     }
-//RS }
-//RS 
-//RS /// The resolved value plus the complete writer chain. `effective` indexes
-//RS /// `provenance`, so explain output can mark exactly one writer.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct EffectiveFact {
-//RS     pub key: FactKey,
-//RS     pub value: FactValue,
-//RS     pub provenance: Vec<FactContribution>,
-//RS     pub effective: usize,
-//RS     pub forced: bool,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum FactError {
-//RS     InvalidForce {
-//RS         key: String,
-//RS         layer: ContributionLayer,
-//RS         source: String,
-//RS     },
-//RS     Conflict {
-//RS         key: String,
-//RS         layer: ContributionLayer,
-//RS         first: FactContribution,
-//RS         second: FactContribution,
-//RS     },
-//RS     SafetyWidening {
-//RS         key: String,
-//RS         previous: FactContribution,
-//RS         next: FactContribution,
-//RS     },
-//RS     SafetyIncomparable {
-//RS         key: String,
-//RS         previous: FactContribution,
-//RS         next: FactContribution,
-//RS     },
-//RS }
-//RS 
-//RS impl FactError {
-//RS     pub fn message(&self) -> String {
-//RS         match self {
-//RS             Self::InvalidForce { key, layer, source } => format!(
-//RS                 "fact `{key}` uses `.Force` at the unsupported {} layer ({source})",
-//RS                 layer.name()
-//RS             ),
-//RS             Self::Conflict {
-//RS                 key,
-//RS                 layer,
-//RS                 first,
-//RS                 second,
-//RS             } => format!(
-//RS                 "fact `{key}` has conflicting values at the {} layer: {}:{} and {}:{}",
-//RS                 layer.name(),
-//RS                 first.source,
-//RS                 first.span.start,
-//RS                 second.source,
-//RS                 second.span.start
-//RS             ),
-//RS             Self::SafetyWidening {
-//RS                 key,
-//RS                 previous,
-//RS                 next,
-//RS             } => format!(
-//RS                 "fact `{key}` widens from {} at {} to {} at {}",
-//RS                 previous.value.display(),
-//RS                 previous.source,
-//RS                 next.value.display(),
-//RS                 next.source
-//RS             ),
-//RS             Self::SafetyIncomparable {
-//RS                 key,
-//RS                 previous,
-//RS                 next,
-//RS             } => format!(
-//RS                 "fact `{key}` has unrelated safety values at {} and {}",
-//RS                 previous.source, next.source
-//RS             ),
-//RS         }
-//RS     }
-//RS 
-//RS     /// The same typed conflict reaches the product diagnostic and names both
-//RS     /// written locations. Other resolver failures remain typed resolver errors.
-//RS     pub fn diagnostic(&self) -> Option<crate::Diagnostics::Diagnostic> {
-//RS         let Self::Conflict {
-//RS             key,
-//RS             layer,
-//RS             first,
-//RS             second,
-//RS         } = self
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         Some(crate::Diagnostics::Diagnostic::error(
-//RS             "E3521",
-//RS             format!("fact `{key}` has conflicting values at the {} layer", layer.name()),
-//RS             format!("`{}` writes {} at {}:{}; `{}` writes {} at {}:{}.", first.source, first.value.display(), first.span.start, first.span.end, second.source, second.value.display(), second.span.start, second.span.end),
-//RS             "make same-layer writers agree, or move one value to a more explicit contribution layer".to_string(),
-//RS             Some(second.span),
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum PolicyCombine {
-//RS     Tighten,
-//RS     Override,
-//RS     Merge,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct PolicyRule {
-//RS     pub key: PolicyKey,
-//RS     pub scopes: &'static [PolicyScope],
-//RS     pub combine: PolicyCombine,
-//RS }
-//RS 
-//RS const PACKAGE_SCOPES: &[PolicyScope] = &[
-//RS     PolicyScope::Package,
-//RS     PolicyScope::Module,
-//RS     PolicyScope::Function,
-//RS     PolicyScope::Block,
-//RS ];
-//RS const ALL_SCOPES: &[PolicyScope] = &[
-//RS     PolicyScope::Organization,
-//RS     PolicyScope::Package,
-//RS     PolicyScope::Module,
-//RS     PolicyScope::Function,
-//RS     PolicyScope::Block,
-//RS ];
-//RS pub const POLICY_RULES: &[PolicyRule] = &[
-//RS     PolicyRule {
-//RS         key: PolicyKey::Unsafe,
-//RS         scopes: ALL_SCOPES,
-//RS         combine: PolicyCombine::Tighten,
-//RS     },
-//RS     PolicyRule {
-//RS         key: PolicyKey::Impure,
-//RS         scopes: ALL_SCOPES,
-//RS         combine: PolicyCombine::Tighten,
-//RS     },
-//RS     PolicyRule {
-//RS         key: PolicyKey::Nondeterministic,
-//RS         scopes: ALL_SCOPES,
-//RS         combine: PolicyCombine::Tighten,
-//RS     },
-//RS     PolicyRule {
-//RS         key: PolicyKey::ScopedGc,
-//RS         scopes: PACKAGE_SCOPES,
-//RS         combine: PolicyCombine::Override,
-//RS     },
-//RS     PolicyRule {
-//RS         key: PolicyKey::ExplicitUnits,
-//RS         scopes: PACKAGE_SCOPES,
-//RS         combine: PolicyCombine::Tighten,
-//RS     },
-//RS     PolicyRule {
-//RS         key: PolicyKey::Copies,
-//RS         scopes: PACKAGE_SCOPES,
-//RS         combine: PolicyCombine::Tighten,
-//RS     },
-//RS     PolicyRule {
-//RS         key: PolicyKey::Sentries,
-//RS         scopes: PACKAGE_SCOPES,
-//RS         combine: PolicyCombine::Tighten,
-//RS     },
-//RS ];
-//RS 
-//RS pub const AUDITED_GATE_KEYS: &[PolicyKey] = &[
-//RS     PolicyKey::Unsafe,
-//RS     PolicyKey::Impure,
-//RS     PolicyKey::Nondeterministic,
-//RS ];
-//RS 
-//RS pub fn rule(key: PolicyKey) -> &'static PolicyRule {
-//RS     POLICY_RULES
-//RS         .iter()
-//RS         .find(|r| r.key == key)
-//RS         .expect("registered policy key")
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct PolicyDeclaration {
-//RS     pub key: PolicyKey,
-//RS     pub value: PolicyValue,
-//RS     pub scope: PolicyScope,
-//RS     pub span: Span,
-//RS     /// Span of the function/block governed by this declaration; module/package use `None`.
-//RS     pub target: Option<Span>,
-//RS     /// Stable source identity (`package.jet` or module display path) for explain provenance.
-//RS     pub source: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct EffectivePolicy {
-//RS     pub key: PolicyKey,
-//RS     pub value: PolicyValue,
-//RS     /// Outer-to-inner declaration chain, including overridden declarations.
-//RS     pub provenance: Vec<PolicyDeclaration>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum PolicyError {
-//RS     ProhibitedScope {
-//RS         key: PolicyKey,
-//RS         scope: PolicyScope,
-//RS         span: Span,
-//RS     },
-//RS     Conflict {
-//RS         key: PolicyKey,
-//RS         scope: PolicyScope,
-//RS         first: Span,
-//RS         second: Span,
-//RS     },
-//RS     Widening {
-//RS         key: PolicyKey,
-//RS         outer: PolicyValue,
-//RS         inner: PolicyValue,
-//RS         span: Span,
-//RS     },
-//RS }
-//RS 
-//RS /// Resolve declarations ordered outer-to-inner. One effective value is returned,
-//RS /// while every shadowed/tightened declaration remains available to explain tools.
-//RS fn resolve_policy(
-//RS     key: PolicyKey,
-//RS     declarations: impl IntoIterator<Item = PolicyDeclaration>,
-//RS ) -> Result<Option<EffectivePolicy>, PolicyError> {
-//RS     let mut declarations = declarations
-//RS         .into_iter()
-//RS         .filter(|d| d.key == key)
-//RS         .collect::<Vec<_>>();
-//RS     declarations.sort_by_key(|declaration| declaration.scope.rank());
-//RS     let mut chain = Vec::new();
-//RS     let mut effective = None;
-//RS     for declaration in declarations {
-//RS         if !rule(key).scopes.contains(&declaration.scope) {
-//RS             return Err(PolicyError::ProhibitedScope {
-//RS                 key,
-//RS                 scope: declaration.scope,
-//RS                 span: declaration.span,
-//RS             });
-//RS         }
-//RS         if let Some(previous) = chain.iter().find(|previous: &&PolicyDeclaration| {
-//RS             previous.scope == declaration.scope && previous.target == declaration.target
-//RS         }) {
-//RS             return Err(PolicyError::Conflict {
-//RS                 key,
-//RS                 scope: declaration.scope,
-//RS                 first: previous.span,
-//RS                 second: declaration.span,
-//RS             });
-//RS         }
-//RS         let mut next = declaration.value;
-//RS         if let Some(outer) = effective {
-//RS             let widens = match (key, outer, declaration.value) {
-//RS                 (
-//RS                     PolicyKey::ScopedGc | PolicyKey::ExplicitUnits,
-//RS                     PolicyValue::Enabled,
-//RS                     PolicyValue::Enabled,
-//RS                 ) => false,
-//RS                 (PolicyKey::Copies, PolicyValue::Explicit, PolicyValue::Explicit) => false,
-//RS                 (PolicyKey::Sentries, PolicyValue::On, PolicyValue::On | PolicyValue::Off) => false,
-//RS                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::On) => true,
-//RS                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::Off) => false,
-//RS                 (
-//RS                     PolicyKey::Unsafe | PolicyKey::Impure | PolicyKey::Nondeterministic,
-//RS                     outer,
-//RS                     inner,
-//RS                 ) => gate_widens(outer, inner),
-//RS                 _ => true,
-//RS             };
-//RS             if rule(key).combine == PolicyCombine::Tighten && widens {
-//RS                 return Err(PolicyError::Widening {
-//RS                     key,
-//RS                     outer,
-//RS                     inner: declaration.value,
-//RS                     span: declaration.span,
-//RS                 });
-//RS             }
-//RS             if rule(key).combine == PolicyCombine::Merge {
-//RS                 next = match (outer, declaration.value) {
-//RS                     (PolicyValue::Limit(a), PolicyValue::Limit(b)) => PolicyValue::Limit(a.min(b)),
-//RS                     (PolicyValue::Enabled, PolicyValue::Enabled) => PolicyValue::Enabled,
-//RS                     (PolicyValue::Forbid, PolicyValue::Forbid) => PolicyValue::Forbid,
-//RS                     _ => {
-//RS                         return Err(PolicyError::Conflict {
-//RS                             key,
-//RS                             scope: declaration.scope,
-//RS                             first: chain.last().unwrap().span,
-//RS                             second: declaration.span,
-//RS                         })
-//RS                     }
-//RS                 };
-//RS             }
-//RS         }
-//RS         effective = Some(next);
-//RS         chain.push(declaration);
-//RS     }
-//RS     Ok(effective.map(|value| EffectivePolicy {
-//RS         key,
-//RS         value,
-//RS         provenance: chain,
-//RS     }))
-//RS }
-//RS 
-//RS /// One resolver seam for policies and build facts. The key selects the
-//RS /// contribution law; no caller gets to choose a second merge algorithm.
-//RS pub trait ResolutionKey: Sized {
-//RS     type Declaration;
-//RS     type Effective;
-//RS     type Error;
-//RS 
-//RS     fn resolve_key(
-//RS         key: Self,
-//RS         declarations: Vec<Self::Declaration>,
-//RS     ) -> Result<Option<Self::Effective>, Self::Error>;
-//RS }
-//RS 
-//RS impl ResolutionKey for PolicyKey {
-//RS     type Declaration = PolicyDeclaration;
-//RS     type Effective = EffectivePolicy;
-//RS     type Error = PolicyError;
-//RS 
-//RS     fn resolve_key(
-//RS         key: Self,
-//RS         declarations: Vec<Self::Declaration>,
-//RS     ) -> Result<Option<Self::Effective>, Self::Error> {
-//RS         resolve_policy(key, declarations)
-//RS     }
-//RS }
-//RS 
-//RS impl ResolutionKey for FactKey {
-//RS     type Declaration = FactContribution;
-//RS     type Effective = EffectiveFact;
-//RS     type Error = FactError;
-//RS 
-//RS     fn resolve_key(
-//RS         key: Self,
-//RS         declarations: Vec<Self::Declaration>,
-//RS     ) -> Result<Option<Self::Effective>, Self::Error> {
-//RS         resolve_fact(key, declarations)
-//RS     }
-//RS }
-//RS 
-//RS pub fn resolve<K, I>(key: K, declarations: I) -> Result<Option<K::Effective>, K::Error>
-//RS where
-//RS     K: ResolutionKey,
-//RS     I: IntoIterator<Item = K::Declaration>,
-//RS {
-//RS     K::resolve_key(key, declarations.into_iter().collect())
-//RS }
-//RS 
-//RS fn resolve_fact(
-//RS     key: FactKey,
-//RS     declarations: Vec<FactContribution>,
-//RS ) -> Result<Option<EffectiveFact>, FactError> {
-//RS     let mut chain = declarations
-//RS         .into_iter()
-//RS         .filter(|declaration| declaration.key == key.name)
-//RS         .collect::<Vec<_>>();
-//RS     if let Some((default, source)) = key.default.clone() {
-//RS         if !chain.iter().any(|declaration| declaration.default) {
-//RS             chain.push(FactContribution::default_for(&key, default, source));
-//RS         }
-//RS     }
-//RS     if chain.is_empty() {
-//RS         return Ok(None);
-//RS     }
-//RS     chain.sort_by(|left, right| {
-//RS         left.layer
-//RS             .rank()
-//RS             .cmp(&right.layer.rank())
-//RS             .then_with(|| left.scope.rank().cmp(&right.scope.rank()))
-//RS             .then_with(|| left.source.cmp(&right.source))
-//RS             .then_with(|| left.span.start.cmp(&right.span.start))
-//RS             .then_with(|| left.span.end.cmp(&right.span.end))
-//RS     });
-//RS 
-//RS     for declaration in &chain {
-//RS         if declaration.force && !declaration.layer.can_force() {
-//RS             return Err(FactError::InvalidForce {
-//RS                 key: key.name.clone(),
-//RS                 layer: declaration.layer,
-//RS                 source: declaration.source.clone(),
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     let mut group: Option<(ContributionLayer, SourceScope)> = None;
-//RS     let mut first_in_group: Option<&FactContribution> = None;
-//RS     for declaration in &chain {
-//RS         let identity = (declaration.layer, declaration.scope);
-//RS         if group != Some(identity) {
-//RS             group = Some(identity);
-//RS             first_in_group = Some(declaration);
-//RS         } else if declaration.value
-//RS             != first_in_group
-//RS                 .expect("fact conflict group has a first writer")
-//RS                 .value
-//RS         {
-//RS             let first = first_in_group.expect("fact conflict group has a first writer");
-//RS             return Err(FactError::Conflict {
-//RS                 key: key.name.clone(),
-//RS                 layer: declaration.layer,
-//RS                 first: first.clone(),
-//RS                 second: declaration.clone(),
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     let force_layer = chain
-//RS         .iter()
-//RS         .filter(|declaration| declaration.force)
-//RS         .map(|declaration| declaration.layer.rank())
-//RS         .max();
-//RS     let eligible = |declaration: &FactContribution| {
-//RS         force_layer.map_or(true, |layer| declaration.layer.rank() <= layer)
-//RS     };
-//RS 
-//RS     let effective_layer = chain
-//RS         .iter()
-//RS         .filter(|declaration| eligible(declaration))
-//RS         .map(|declaration| declaration.layer.rank())
-//RS         .max()
-//RS         .expect("non-empty fact chain");
-//RS     let effective_scope = chain
-//RS         .iter()
-//RS         .filter(|declaration| eligible(declaration) && declaration.layer.rank() == effective_layer)
-//RS         .map(|declaration| declaration.scope.rank())
-//RS         .max()
-//RS         .expect("non-empty effective fact layer");
-//RS     let candidates = chain
-//RS         .iter()
-//RS         .filter(|declaration| {
-//RS             eligible(declaration)
-//RS                 && declaration.layer.rank() == effective_layer
-//RS                 && declaration.scope.rank() == effective_scope
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let first = candidates
-//RS         .first()
-//RS         .expect("non-empty effective fact candidates");
-//RS     for second in candidates.iter().skip(1) {
-//RS         if second.value != first.value {
-//RS             return Err(FactError::Conflict {
-//RS                 key: key.name.clone(),
-//RS                 layer: first.layer,
-//RS                 first: (**first).clone(),
-//RS                 second: (**second).clone(),
-//RS             });
-//RS         }
-//RS     }
-//RS     if key.merge == FactMerge::TightenOnly {
-//RS         let mut previous: Option<&FactContribution> = None;
-//RS         for declaration in chain.iter().filter(|declaration| eligible(declaration)) {
-//RS             if let Some(previous) = previous {
-//RS                 match previous.value.safety_relation(&declaration.value) {
-//RS                     SafetyRelation::Same | SafetyRelation::Tighten => {}
-//RS                     SafetyRelation::Widen => {
-//RS                         return Err(FactError::SafetyWidening {
-//RS                             key: key.name.clone(),
-//RS                             previous: previous.clone(),
-//RS                             next: declaration.clone(),
-//RS                         });
-//RS                     }
-//RS                     SafetyRelation::Incomparable => {
-//RS                         return Err(FactError::SafetyIncomparable {
-//RS                             key: key.name.clone(),
-//RS                             previous: previous.clone(),
-//RS                             next: declaration.clone(),
-//RS                         });
-//RS                     }
-//RS                 }
-//RS             }
-//RS             previous = Some(declaration);
-//RS         }
-//RS     }
-//RS     let effective = chain
-//RS         .iter()
-//RS         .position(|declaration| std::ptr::eq(declaration, *first))
-//RS         .expect("effective fact candidate belongs to chain");
-//RS     let value = first.value.clone();
-//RS     let forced = first.force || force_layer.is_some();
-//RS     drop(candidates);
-//RS     Ok(Some(EffectiveFact {
-//RS         key,
-//RS         value,
-//RS         provenance: chain,
-//RS         effective,
-//RS         forced,
-//RS     }))
-//RS }
-//RS 
-//RS fn gate_widens(outer: PolicyValue, inner: PolicyValue) -> bool {
-//RS     use PolicyValue::*;
-//RS     match (outer, inner) {
-//RS         (Forbid, Allow) => true,
-//RS         (_, Allow) => false,
-//RS         (Forbid, Forbid) => false,
-//RS         (Forbid, _) => true,
-//RS         (Obligations, Obligations | Track) => false,
-//RS         (Obligations, _) => true,
-//RS         (PerSite, Track | Skip) => false,
-//RS         (PerSite, PerSite) => false,
-//RS         (Default | GateOnly | Relaxed, Track | Obligations) => false,
-//RS         (Default | GateOnly | Relaxed, Default | GateOnly | Relaxed | Skip) => false,
-//RS         (Track, Track) | (Skip, Skip) => false,
-//RS         (On, On | Off) | (Off, Off) => false,
-//RS         (Off, On) => true,
-//RS         _ => true,
-//RS     }
-//RS }
-//RS 
-//RS pub fn default_gate_value(key: PolicyKey) -> PolicyValue {
-//RS     match key {
-//RS         PolicyKey::Unsafe => PolicyValue::Default,
-//RS         PolicyKey::Impure | PolicyKey::Nondeterministic => PolicyValue::GateOnly,
-//RS         PolicyKey::Sentries => PolicyValue::On,
-//RS         _ => PolicyValue::Enabled,
-//RS     }
-//RS }
-//RS 
-//RS pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
-//RS     let raw = raw.trim();
-//RS     match key {
-//RS         PolicyKey::ScopedGc | PolicyKey::ExplicitUnits if raw == "true" => Ok(PolicyValue::Enabled),
-//RS         PolicyKey::Copies => match raw {
-//RS             ".Explicit" => Ok(PolicyValue::Explicit),
-//RS             _ => Err("`copies` must be `.Explicit`".to_string()),
-//RS         },
-//RS         PolicyKey::Sentries => match raw {
-//RS             ".On" => Ok(PolicyValue::On),
-//RS             ".Off" => Ok(PolicyValue::Off),
-//RS             _ => Err("`sentries` must be `.On` or `.Off`".to_string()),
-//RS         },
-//RS         key if key.is_audited_gate() => match raw {
-//RS             ".Forbid" => Ok(PolicyValue::Forbid),
-//RS             ".Default" => Ok(PolicyValue::Default),
-//RS             ".GateOnly" => Ok(PolicyValue::GateOnly),
-//RS             ".Obligations" => Ok(PolicyValue::Obligations),
-//RS             ".Relaxed" => Ok(PolicyValue::Relaxed),
-//RS             ".PerSite" => Ok(PolicyValue::PerSite),
-//RS             ".Track" => Ok(PolicyValue::Track),
-//RS             ".Skip" => Ok(PolicyValue::Skip),
-//RS             _ => Err(format!("`{}` must be one of `.Forbid`, `.Default`, `.GateOnly`, `.Obligations`, `.Relaxed`, `.PerSite`, `.Track`, or `.Skip`", key.name())),
-//RS         },
-//RS         _ => Err(format!("package policy `{}` has an unsupported value", key.name())),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-//RS pub struct GateSet {
-//RS     bits: u8,
-//RS }
-//RS 
-//RS impl GateSet {
-//RS     pub fn allow(key: PolicyKey) -> Self {
-//RS         let mut gates = Self::default();
-//RS         gates.insert(key);
-//RS         gates
-//RS     }
-//RS 
-//RS     fn bit(key: PolicyKey) -> u8 {
-//RS         match key {
-//RS             PolicyKey::Unsafe => 1,
-//RS             PolicyKey::Impure => 2,
-//RS             PolicyKey::Nondeterministic => 4,
-//RS             _ => 0,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn insert(&mut self, key: PolicyKey) {
-//RS         self.bits |= Self::bit(key);
-//RS     }
-//RS 
-//RS     /// Resolve an invocation allowance through the same policy resolver used
-//RS     /// by package and organization declarations. The bitset is only the
-//RS     /// transport shape; it is not a second policy mechanism.
-//RS     pub fn allows(self, key: PolicyKey) -> bool {
-//RS         resolve_invocation(key, &self).unwrap_or(false)
-//RS     }
-//RS 
-//RS     fn contains(self, key: PolicyKey) -> bool {
-//RS         self.bits & Self::bit(key) != 0
-//RS     }
-//RS     pub fn is_empty(self) -> bool {
-//RS         self.bits == 0
-//RS     }
-//RS 
-//RS     /// Parse one CLI `name=allow` entry. The synthetic declaration goes
-//RS     /// through the same resolver as package and organization policy.
-//RS     pub fn parse(spec: &str) -> Result<PolicyKey, String> {
-//RS         let (name, value) = spec
-//RS             .split_once('=')
-//RS             .ok_or_else(|| "use `--gate name=allow`".to_string())?;
-//RS         let key = PolicyKey::parse(name.trim())
-//RS             .ok_or_else(|| format!("`{}` is not an audited gate", name.trim()))?;
-//RS         if !key.is_audited_gate() || value.trim() != "allow" {
-//RS             return Err(format!(
-//RS                 "`--gate {spec}` must name an audited gate with `=allow`"
-//RS             ));
-//RS         }
-//RS         resolve_invocation(key, &Self::allow(key))
-//RS             .map_err(|error| format!("invalid gate `{spec}`: {error:?}"))?;
-//RS         Ok(key)
-//RS     }
-//RS }
-//RS 
-//RS /// Resolve one invocation gate with the canonical policy ladder. This is the
-//RS /// only bridge from the CLI gate transport to policy semantics.
-//RS pub fn resolve_invocation(key: PolicyKey, gates: &GateSet) -> Result<bool, PolicyError> {
-//RS     if !gates.contains(key) {
-//RS         return Ok(false);
-//RS     }
-//RS     let declaration = PolicyDeclaration {
-//RS         key,
-//RS         value: PolicyValue::Allow,
-//RS         scope: PolicyScope::Block,
-//RS         span: Span::new(0, 0),
-//RS         target: None,
-//RS         source: "<invocation>".to_string(),
-//RS     };
-//RS     resolve(key, [declaration]).map(|_| true)
-//RS }
-//RS 
-//RS pub fn resolve_with_gates(
-//RS     key: PolicyKey,
-//RS     declarations: impl IntoIterator<Item = PolicyDeclaration>,
-//RS     gates: &GateSet,
-//RS ) -> Result<Option<EffectivePolicy>, PolicyError> {
-//RS     let declarations = declarations.into_iter().collect::<Vec<_>>();
-//RS     let effective = resolve(key, declarations.clone())?;
-//RS     if gates.contains(key) {
-//RS         let mut invocation_chain = declarations;
-//RS         invocation_chain.push(PolicyDeclaration {
-//RS             key,
-//RS             value: PolicyValue::Allow,
-//RS             scope: PolicyScope::Block,
-//RS             span: Span::new(0, 0),
-//RS             target: None,
-//RS             source: "<invocation>".to_string(),
-//RS         });
-//RS         // The invocation allowance is checked by the same ladder, but its
-//RS         // synthetic value is not returned as the effective package policy.
-//RS         resolve(key, invocation_chain)?;
-//RS     }
-//RS     Ok(effective)
-//RS }
-//RS 
-//RS pub trait ExplainableResolution {
-//RS     fn explain_resolution(&self) -> String;
-//RS }
-//RS 
-//RS impl ExplainableResolution for EffectivePolicy {
-//RS     fn explain_resolution(&self) -> String {
-//RS         let mut out = format!("{} = {}", self.key.name(), self.value.display());
-//RS         for (index, declaration) in self.provenance.iter().enumerate() {
-//RS             let status = if index + 1 == self.provenance.len() {
-//RS                 "effective"
-//RS             } else {
-//RS                 "shadowed"
-//RS             };
-//RS             out.push_str(&format!(
-//RS                 "\n  [{status}] {} {} at {}:{}..{}",
-//RS                 declaration.scope.name(),
-//RS                 declaration.value.display(),
-//RS                 declaration.source,
-//RS                 declaration.span.start,
-//RS                 declaration.span.end
-//RS             ));
-//RS         }
-//RS         out
-//RS     }
-//RS }
-//RS 
-//RS impl ExplainableResolution for EffectiveFact {
-//RS     fn explain_resolution(&self) -> String {
-//RS         let mut out = format!("{} = {}", self.key.name, self.value.display());
-//RS         for (index, contribution) in self.provenance.iter().enumerate() {
-//RS             let status = if index == self.effective {
-//RS                 "effective"
-//RS             } else if contribution.force {
-//RS                 "pinned"
-//RS             } else {
-//RS                 "shadowed"
-//RS             };
-//RS             let pin = contribution
-//RS                 .force_reason
-//RS                 .as_deref()
-//RS                 .map_or(String::new(), |reason| format!(" pin={reason}"));
-//RS             let reason = contribution
-//RS                 .reason
-//RS                 .as_deref()
-//RS                 .map_or(String::new(), |reason| format!(" reason={reason}"));
-//RS             out.push_str(&format!(
-//RS                 "\n  [{status}] {} / {} {} at {}:{}..{}{}{}",
-//RS                 contribution.layer.name(),
-//RS                 contribution.scope.name(),
-//RS                 contribution.value.display(),
-//RS                 contribution.source,
-//RS                 contribution.span.start,
-//RS                 contribution.span.end,
-//RS                 pin,
-//RS                 reason
-//RS             ));
-//RS         }
-//RS         out
-//RS     }
-//RS }
-//RS 
-//RS pub fn explain<R: ExplainableResolution>(resolution: &R) -> String {
-//RS     resolution.explain_resolution()
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-//RS pub enum RuleSite {
-//RS     Package,
-//RS     File,
-//RS     Module,
-//RS     Function,
-//RS     Method,
-//RS     Block,
-//RS     Statement,
-//RS     Expression,
-//RS     Type,
-//RS     Impl,
-//RS     Declaration,
-//RS     Constant,
-//RS     Field,
-//RS     Variant,
-//RS     Parameter,
-//RS     Test,
-//RS     Operation,
-//RS     Text,
-//RS }
-//RS 
-//RS impl RuleSite {
-//RS     pub const ALL: [Self; 18] = [
-//RS         Self::Package,
-//RS         Self::File,
-//RS         Self::Module,
-//RS         Self::Function,
-//RS         Self::Method,
-//RS         Self::Block,
-//RS         Self::Statement,
-//RS         Self::Expression,
-//RS         Self::Type,
-//RS         Self::Impl,
-//RS         Self::Declaration,
-//RS         Self::Constant,
-//RS         Self::Field,
-//RS         Self::Variant,
-//RS         Self::Parameter,
-//RS         Self::Test,
-//RS         Self::Operation,
-//RS         Self::Text,
-//RS     ];
-//RS 
-//RS     pub const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Package => "Package",
-//RS             Self::File => "File",
-//RS             Self::Module => "Module",
-//RS             Self::Function => "Function",
-//RS             Self::Method => "Method",
-//RS             Self::Block => "Block",
-//RS             Self::Statement => "Statement",
-//RS             Self::Expression => "Expression",
-//RS             Self::Type => "Type",
-//RS             Self::Impl => "Impl",
-//RS             Self::Declaration => "Declaration",
-//RS             Self::Constant => "Constant",
-//RS             Self::Field => "Field",
-//RS             Self::Variant => "Variant",
-//RS             Self::Parameter => "Parameter",
-//RS             Self::Test => "Test",
-//RS             Self::Operation => "Operation",
-//RS             Self::Text => "Text",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-META-FORM1=A / D-MARKER-SITES1=B: `$sites` on a `marker` declaration takes `[Site]`, so the
-//RS /// eighteen attachment points are published as an ordinary `core.compiler.lang` enum
-//RS /// beside the other marker-argument menus (D-RULEARG-TYPES1=A). `RuleSite::ALL`
-//RS /// stays the one source; `site_variants_match_the_enum` proves this list is it.
-//RS pub const SITE_VARIANTS: &[&str] = &[
-//RS     "Package",
-//RS     "File",
-//RS     "Module",
-//RS     "Function",
-//RS     "Method",
-//RS     "Block",
-//RS     "Statement",
-//RS     "Expression",
-//RS     "Type",
-//RS     "Impl",
-//RS     "Declaration",
-//RS     "Constant",
-//RS     "Field",
-//RS     "Variant",
-//RS     "Parameter",
-//RS     "Test",
-//RS     "Operation",
-//RS     "Text",
-//RS ];
-//RS 
-//RS /// D-MARK-FORM1=A: one placement law. A marker, or one bracket group, is
-//RS /// written immediately before its target; the registry says which targets it
-//RS /// accepts; parentheses appear exactly when arguments are written. There is no
-//RS /// written-form column — the signature and the site list carry everything the
-//RS /// five retired `RuleForm` categories used to approximate.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct AppliedRule {
-//RS     pub name: &'static str,
-//RS     /// Executable source signature shared by parsing, diagnostics, and explain.
-//RS     pub signature: RuleSignature,
-//RS     /// Non-empty only for rules that participate in lexical policy inheritance.
-//RS     pub policy_scopes: &'static [PolicyScope],
-//RS     /// Exact sound attachment sites for non-inheriting rules.
-//RS     pub sites: &'static [RuleSite],
-//RS     /// D-MARK-REPEAT1=A: may this rule be written more than once on one target?
-//RS     pub repeatable: bool,
-//RS     /// This rule teaches its own argument menu downstream, so the shared binder
-//RS     /// stays quiet about an unknown variant and lets the rule's product
-//RS     /// diagnostic explain it (`#FFI` → E3220, `#RenameAll` → E2409).
-//RS     pub owns_menu: bool,
-//RS     /// One extra legal site that opens only when a companion rule sits on the
-//RS     /// same target. `#Doc` describes CLI fields/types/variants and can also
-//RS     /// describe a `#Job`.
-//RS     pub companion_site: Option<CompanionSite>,
-//RS     pub status: RuleStatus,
-//RS     pub inherits: bool,
-//RS     pub resolution: RuleResolution,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum RuleStatus {
-//RS     Active,
-//RS     Retired { replacement: &'static str },
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum RuleResolution {
-//RS     SiteBound,
-//RS     Override,
-//RS     Merge,
-//RS     Tighten,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum RuleArgType {
-//RS     Any,
-//RS     String,
-//RS     Path,
-//RS     Ident,
-//RS     Bool,
-//RS     Int,
-//RS     DurationOrString,
-//RS     /// D-TESTFAULT1=A: a closed list of effect-root operation paths used by
-//RS     /// the test harness. This is a marker contract shape, not a runtime type.
-//RS     EffectRoots,
-//RS }
-//RS 
-//RS /// D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler vocabulary is published as
-//RS /// ordinary generated enums in `core.compiler.lang`. Marker signatures point at these
-//RS /// declarations; diagnostics, reflection, and editor tools read the same rows.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct RuleArgDeclaration {
-//RS     pub name: &'static str,
-//RS     pub variants: &'static [&'static str],
-//RS     /// Which segment of a written path names the variant. `core.compiler.lang.Target.Web`
-//RS     /// and `Effect.FS` are read from the front because their variants own
-//RS     /// nested names; every other menu reads the last segment.
-//RS     pub variant_segment: VariantSegment,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum VariantSegment {
-//RS     First,
-//RS     Last,
-//RS }
-//RS 
-//RS /// An extra attachment site that a rule earns from a companion on the same
-//RS /// target (D-TASKS-LIST1=A: `#Doc` describes a `#Job`).
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct CompanionSite {
-//RS     pub rule: &'static str,
-//RS     pub site: RuleSite,
-//RS }
-//RS 
-//RS fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
-//RS     Some(match name {
-//RS         "ABI" => &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"],
-//RS         "Effect" => crate::Authority::EFFECT_ROOTS.as_slice(),
-//RS         "ArithmeticMode" => &["Checked", "Wrapping", "Saturating"],
-//RS         "FFILanguage" => &["c", "cpp", "asm"],
-//RS         "InlineMode" => &["Hint", "Always", "Never"],
-//RS         "JobScope" => crate::Syntax::JOB_SCOPE_VARIANTS,
-//RS         "KernelMode" => &["parallel"],
-//RS         "MemoBound" => &["Default", "none"],
-//RS         "IntType" => &[
-//RS             "I8", "I16", "I32", "I64", "I128", "U8", "U16", "U32", "U64", "U128",
-//RS         ],
-//RS         "Layout" => &[crate::Syntax::LAYOUT_C, crate::Syntax::LAYOUT_COLUMNAR],
-//RS         "Maturity" => &["Experimental", "Tested", "Hardened"],
-//RS         "NamingCase" => &[
-//RS             crate::Syntax::RENAME_ALL_CAMEL,
-//RS             crate::Syntax::RENAME_ALL_SNAKE,
-//RS             crate::Syntax::RENAME_ALL_PASCAL,
-//RS             crate::Syntax::RENAME_ALL_KEBAB,
-//RS             crate::Syntax::RENAME_ALL_SCREAMING,
-//RS         ],
-//RS         "ObligationMode" => &[
-//RS             "None",
-//RS             "GateOnly",
-//RS             "Obligations",
-//RS             "PerSite",
-//RS             "Track",
-//RS             "Skip",
-//RS         ],
-//RS         "Site" => SITE_VARIANTS,
-//RS         "PolicySetting" => &[
-//RS             "unsafe",
-//RS             "gc",
-//RS             "explicit_units",
-//RS             "copies",
-//RS             "sentries",
-//RS             "Explicit",
-//RS             "On",
-//RS             "Off",
-//RS         ],
-//RS         "Path" => &[],
-//RS         "State" => &[],
-//RS         "TaintKind" => crate::Syntax::BUILTIN_TAGS,
-//RS         "Target" => &["Native", "Web", "Wasm", "JS", "Freestanding", "OS"],
-//RS         "Track" => &["Frontend", "Backend", "Runtime", "Tooling"],
-//RS         _ => return None,
-//RS     })
-//RS }
-//RS 
-//RS /// Source argument kinds that are checked by the language itself instead of
-//RS /// published as closed menus in `core.compiler.lang`. `Type` is the ordinary
-//RS /// declared-type slot for `#SQL` (D-SQL-ARG1=B), not a language enum.
-//RS ///
-//RS /// Only the declaration-coverage test reads this: production code asks
-//RS /// `rule_arg_declaration` for a menu and gets `None` when there is none.
-//RS #[cfg(test)]
-//RS const RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION: &[&str] = &[
-//RS     "Value",
-//RS     "String",
-//RS     "Ident",
-//RS     "Bool",
-//RS     "Int",
-//RS     "Duration | String",
-//RS     "[Effect]",
-//RS     "Type",
-//RS     "T.default",
-//RS ];
-//RS 
-//RS #[cfg(test)]
-//RS fn rule_arg_needs_core_declaration(name: &str) -> bool {
-//RS     !RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION.contains(&name)
-//RS }
-//RS 
-//RS /// Generated from the active/retired applied-rule signatures. `Track` is the
-//RS /// compatibility reflection enum retained by D-RULEARG-TYPES1.
-//RS pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::new(|| {
-//RS     // `Site` is published for `$sites` on a `marker` declaration (D-META-FORM1=A)
-//RS     // and `Track` for reflection; neither appears in a marker signature, so both
-//RS     // are seeded rather than found.
-//RS     let mut names = std::collections::BTreeSet::from(["Site", "Track"]);
-//RS     for row in APPLIED_RULES.iter() {
-//RS         names.extend(
-//RS             row.signature
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|parameter| parameter.source_type),
-//RS         );
-//RS         names.extend(row.signature.variadic_source_type);
-//RS     }
-//RS     names
-//RS         .into_iter()
-//RS         .filter_map(|name| {
-//RS             canonical_rule_arg_variants(name).map(|variants| RuleArgDeclaration {
-//RS                 name,
-//RS                 variants,
-//RS                 variant_segment: canonical_variant_segment(name),
-//RS             })
-//RS         })
-//RS         .collect()
-//RS });
-//RS 
-//RS /// D-RULEARG-TYPES1=A: `Effect` and `Target` variants own nested names
-//RS /// (`FS.read`, `Web.dom`), so the written path names its variant in the first
-//RS /// segment after the enum. Every other menu names it in the last.
-//RS const fn canonical_variant_segment(name: &str) -> VariantSegment {
-//RS     match name.as_bytes() {
-//RS         b"Effect" | b"Target" => VariantSegment::First,
-//RS         _ => VariantSegment::Last,
-//RS     }
-//RS }
-//RS 
-//RS pub fn rule_arg_declaration(name: &str) -> Option<&'static RuleArgDeclaration> {
-//RS     RULE_ARG_DECLARATIONS
-//RS         .iter()
-//RS         .find(|declaration| declaration.name == name)
-//RS }
-//RS 
-//RS impl RuleArgType {
-//RS     pub const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Any => "Value",
-//RS             Self::String => "String",
-//RS             Self::Path => "Path",
-//RS             Self::Ident => "Ident",
-//RS             Self::Bool => "Bool",
-//RS             Self::Int => "Int",
-//RS             Self::DurationOrString => "Duration | String",
-//RS             Self::EffectRoots => "[Effect]",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct RuleParam {
-//RS     pub name: &'static str,
-//RS     pub ty: RuleArgType,
-//RS     pub source_type: &'static str,
-//RS     pub default: Option<&'static str>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct RuleSignature {
-//RS     pub params: &'static [RuleParam],
-//RS     pub variadic: Option<RuleArgType>,
-//RS     pub variadic_source_type: Option<&'static str>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct RuleArgumentBinding {
-//RS     pub source_index: usize,
-//RS     pub parameter_index: Option<usize>,
-//RS     pub ty: RuleArgType,
-//RS }
-//RS 
-//RS impl RuleSignature {
-//RS     pub fn render(self) -> String {
-//RS         let mut parts = self
-//RS             .params
-//RS             .iter()
-//RS             .map(|param| {
-//RS                 let mut part = format!("{}: {}", param.name, param.source_type);
-//RS                 if let Some(default) = param.default {
-//RS                     part.push('{');
-//RS                     part.push_str(default);
-//RS                     part.push('}');
-//RS                 }
-//RS                 part
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         if let Some(ty) = self.variadic_source_type {
-//RS             parts.push(format!("{ty}..."));
-//RS         }
-//RS         format!("({})", parts.join(", "))
-//RS     }
-//RS 
-//RS     /// D-MARK-FORM1=A: may this rule be written with parentheses at all? A row
-//RS     /// that declares no parameter and no variadic list never takes arguments.
-//RS     pub const fn accepts_arguments(self) -> bool {
-//RS         !self.params.is_empty() || self.variadic.is_some()
-//RS     }
-//RS 
-//RS     /// D-MARK-FORM1=A: must arguments be written? A row with a required
-//RS     /// parameter needs them, and so does a row whose only parameter is a
-//RS     /// variadic list — an empty list carries no rule.
-//RS     pub const fn arguments_required(self) -> bool {
-//RS         self.required() > 0 || (self.params.is_empty() && self.variadic.is_some())
-//RS     }
-//RS 
-//RS     pub const fn required(self) -> usize {
-//RS         let mut count = 0;
-//RS         let mut index = 0;
-//RS         while index < self.params.len() {
-//RS             if self.params[index].default.is_none() {
-//RS                 count += 1;
-//RS             }
-//RS             index += 1;
-//RS         }
-//RS         count
-//RS     }
-//RS 
-//RS     /// Bind source arguments to normalized parameter slots. The parser and
-//RS     /// every marker applicator use this one arity/label/variadic algorithm.
-//RS     pub fn argument_bindings(self, labels: &[Option<&str>]) -> Option<Vec<RuleArgumentBinding>> {
-//RS         let mut supplied = vec![false; self.params.len()];
-//RS         let mut positional = 0usize;
-//RS         let mut saw_named = false;
-//RS         let mut bindings = Vec::with_capacity(labels.len());
-//RS         for (source_index, label) in labels.iter().enumerate() {
-//RS             let parameter = if let Some(label) = label {
-//RS                 saw_named = true;
-//RS                 let index = self.params.iter().position(|param| param.name == *label)?;
-//RS                 if supplied[index] {
-//RS                     return None;
-//RS                 }
-//RS                 supplied[index] = true;
-//RS                 Some(index)
-//RS             } else {
-//RS                 if saw_named {
-//RS                     return None;
-//RS                 }
-//RS                 while positional < supplied.len() && supplied[positional] {
-//RS                     positional += 1;
-//RS                 }
-//RS                 if positional < supplied.len() {
-//RS                     let index = positional;
-//RS                     supplied[index] = true;
-//RS                     positional += 1;
-//RS                     Some(index)
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS             };
-//RS             bindings.push(RuleArgumentBinding {
-//RS                 source_index,
-//RS                 parameter_index: parameter,
-//RS                 ty: match parameter {
-//RS                     Some(index) => self.params[index].ty,
-//RS                     None => self.variadic?,
-//RS                 },
-//RS             });
-//RS         }
-//RS         if self
-//RS             .params
-//RS             .iter()
-//RS             .zip(supplied)
-//RS             .any(|(param, supplied)| param.default.is_none() && !supplied)
-//RS         {
-//RS             return None;
-//RS         }
-//RS         Some(bindings)
-//RS     }
-//RS 
-//RS     pub fn argument_types(self, labels: &[Option<&str>]) -> Option<Vec<RuleArgType>> {
-//RS         self.argument_bindings(labels)
-//RS             .map(|bindings| bindings.into_iter().map(|binding| binding.ty).collect())
-//RS     }
-//RS 
-//RS     pub fn marker_argument_bindings(
-//RS         self,
-//RS         marker: &crate::AST::Marker,
-//RS     ) -> Option<Vec<RuleArgumentBinding>> {
-//RS         // `#Meta` has dedicated duplicate-field diagnostics (E0346). Preserve
-//RS         // repeated known labels here so the semantic checker can teach the
-//RS         // actual mistake instead of collapsing it into the generic E0930.
-//RS         if marker.name == crate::Syntax::MARKER_META
-//RS             && marker.arg_labels.iter().all(Option::is_some)
-//RS         {
-//RS             return marker
-//RS                 .arg_labels
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .map(|(source_index, label)| {
-//RS                     let name = &label.as_ref()?.0;
-//RS                     let parameter_index = self
-//RS                         .params
-//RS                         .iter()
-//RS                         .position(|parameter| parameter.name == name)?;
-//RS                     Some(RuleArgumentBinding {
-//RS                         source_index,
-//RS                         parameter_index: Some(parameter_index),
-//RS                         ty: self.params[parameter_index].ty,
-//RS                     })
-//RS                 })
-//RS                 .collect();
-//RS         }
-//RS         if marker.name == crate::Syntax::MARKER_POLICY {
-//RS             return marker
-//RS                 .arg_labels
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .map(|(source_index, label)| {
-//RS                     if let Some((name, _)) = label {
-//RS                         matches!(name.as_str(), "copies" | "sentries").then_some(
-//RS                             RuleArgumentBinding {
-//RS                                 source_index,
-//RS                                 parameter_index: None,
-//RS                                 ty: self.variadic?,
-//RS                             },
-//RS                         )
-//RS                     } else {
-//RS                         Some(RuleArgumentBinding {
-//RS                             source_index,
-//RS                             parameter_index: None,
-//RS                             ty: self.variadic?,
-//RS                         })
-//RS                     }
-//RS                 })
-//RS                 .collect();
-//RS         }
-//RS         let labels = marker
-//RS             .args
-//RS             .iter()
-//RS             .zip(&marker.arg_labels)
-//RS             .map(|(argument, label)| {
-//RS                 if let Some((name, _)) = label {
-//RS                     return Some(name.as_str());
-//RS                 }
-//RS                 if marker.name == crate::Syntax::MARKER_META
-//RS                     && matches!(
-//RS                         argument.as_expr(),
-//RS                         Some(crate::AST::Expr::Ident(name, _)) if name == crate::Syntax::META_FIELD_TUNABLE
-//RS                     )
-//RS                 {
-//RS                     return Some(crate::Syntax::META_FIELD_TUNABLE);
-//RS                 }
-//RS                 None
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         self.argument_bindings(&labels)
-//RS     }
-//RS }
-//RS 
-//RS pub fn marker_argument_shape_error(
-//RS     name: &str,
-//RS     span: crate::Diagnostics::Span,
-//RS ) -> crate::Diagnostics::Diagnostic {
-//RS     let expected = applied_rule(name)
-//RS         .map(|row| row.signature.render())
-//RS         .unwrap_or_else(|| "()".to_string());
-//RS     crate::Diagnostics::Diagnostic::error(
-//RS         "E0930",
-//RS         format!("`#{name}` arguments do not match `{name}{expected}`"),
-//RS         "marker arguments use the same call grammar and typed signature as function arguments"
-//RS             .to_string(),
-//RS         format!("match the registered signature `{name}{expected}`"),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// The active registry vocabulary, plus any visible `derive T.Name { … }`
-//RS /// providers, is the only list a "did you mean" suggestion may draw from.
-//RS pub fn active_rule_names() -> Vec<String> {
-//RS     APPLIED_RULES
-//RS         .iter()
-//RS         .filter(|row| matches!(row.status, RuleStatus::Active))
-//RS         .map(|row| row.name.to_string())
-//RS         .collect()
-//RS }
-//RS 
-//RS /// D-MARK-VOCAB1 + D-META-ONE1=A: the whole marker vocabulary, in one value.
-//RS ///
-//RS /// The registry rows read from `Prelude/Markers.jet` are the closed half. A
-//RS /// `derive T.Name { … }` provider the build can see is the open half. Every
-//RS /// legality test and every "did you mean" list reads this one value, so the
-//RS /// compiler keeps no second registry of marker names.
-//RS #[derive(Debug, Clone, Default)]
-//RS pub struct MarkerVocabulary {
-//RS     declared: BTreeSet<String>,
-//RS     /// Source declarations are retained in the same bundle-local vocabulary
-//RS     /// as derive providers. Consumers that need the declaration body (sema
-//RS     /// expansion and reflection) read this map; name-only consumers read the
-//RS     /// set above.
-//RS     declarations: BTreeMap<String, crate::AST::MarkerDecl>,
-//RS }
-//RS 
-//RS impl MarkerVocabulary {
-//RS     /// The registry, plus the derive providers visible to this build.
-//RS     pub fn with_derives(names: impl IntoIterator<Item = String>) -> Self {
-//RS         Self {
-//RS             declared: names.into_iter().collect(),
-//RS             declarations: BTreeMap::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Add source-declared rules to the same registry as derive providers.
-//RS     pub fn with_derives_and_declarations(
-//RS         names: impl IntoIterator<Item = String>,
-//RS         declarations: impl IntoIterator<Item = crate::AST::MarkerDecl>,
-//RS     ) -> Self {
-//RS         let mut vocabulary = Self::with_derives(names);
-//RS         for declaration in declarations {
-//RS             vocabulary.declared.insert(declaration.name.clone());
-//RS             vocabulary
-//RS                 .declarations
-//RS                 .insert(declaration.name.clone(), declaration);
-//RS         }
-//RS         vocabulary
-//RS     }
-//RS 
-//RS     /// True when a writer may spell this name as a marker.
-//RS     pub fn knows(&self, name: &str) -> bool {
-//RS         applied_rule(name).is_some_and(|row| matches!(row.status, RuleStatus::Active))
-//RS             || self.declared.contains(name)
-//RS     }
-//RS 
-//RS     /// Every spellable name, for a nearest-spelling suggestion.
-//RS     pub fn names(&self) -> Vec<String> {
-//RS         active_rule_names()
-//RS             .into_iter()
-//RS             .chain(self.declared.iter().cloned())
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// Return the source declaration for a user rule, if this build supplied
-//RS     /// one. Built-in rows remain in `APPLIED_RULES` and intentionally return
-//RS     /// `None` here.
-//RS     pub fn declaration(&self, name: &str) -> Option<&crate::AST::MarkerDecl> {
-//RS         self.declarations.get(name)
-//RS     }
-//RS 
-//RS     /// Source-declared rule rows in deterministic name order.
-//RS     pub fn declarations(&self) -> impl Iterator<Item = &crate::AST::MarkerDecl> {
-//RS         self.declarations.values()
-//RS     }
-//RS 
-//RS     /// The one unknown-marker diagnostic. No caller writes its own.
-//RS     pub fn unknown(
-//RS         &self,
-//RS         name: &str,
-//RS         span: crate::Diagnostics::Span,
-//RS     ) -> crate::Diagnostics::Diagnostic {
-//RS         marker_unknown_error(name, &self.names(), span)
-//RS     }
-//RS }
-//RS 
-//RS /// D-VERDICT-1455-1: every registered wrong-site report names the legal sites
-//RS /// from the row that caused it. Parser and sema use this constructor instead
-//RS /// of keeping site prose beside a marker-name branch.
-//RS pub fn marker_wrong_site_error(
-//RS     name: &str,
-//RS     site: RuleSite,
-//RS     span: crate::Diagnostics::Span,
-//RS ) -> crate::Diagnostics::Diagnostic {
-//RS     let row = applied_rule(name);
-//RS     let legal = row
-//RS         .map(|row| {
-//RS             let mut sites = row
-//RS                 .sites
-//RS                 .iter()
-//RS                 .map(|site| site.name().to_string())
-//RS                 .collect::<Vec<_>>();
-//RS             if let Some(companion) = row.companion_site {
-//RS                 sites.push(format!(
-//RS                     "{} with companion `#{}`",
-//RS                     companion.site.name(),
-//RS                     companion.rule
-//RS                 ));
-//RS             }
-//RS             sites
-//RS         })
-//RS         .unwrap_or_default();
-//RS     let legal = if legal.is_empty() {
-//RS         "no active attachment sites".to_string()
-//RS     } else {
-//RS         legal
-//RS             .into_iter()
-//RS             .map(|site| format!("`{site}`"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ")
-//RS     };
-//RS     // D-CONSTMARK1=A + D-PREP-SURFACE2=A: a row whose only site is
-//RS     // `.Constant` attaches to a module constant, `NAME :: value`, evaluated
-//RS     // while building when written `NAME :: prep { value }`. "Move it to a
-//RS     // registered site" cannot lead there, so the fix names the form directly.
-//RS     let fix = if row.is_some_and(|row| {
-//RS         row.companion_site.is_none() && matches!(row.sites, [RuleSite::Constant])
-//RS     }) {
-//RS         format!("write `#{name} NAME :: prep {{ value }}` — a storage marker precedes a module constant")
-//RS     } else {
-//RS         format!("move `#{name}` to one of its registered sites")
-//RS     };
-//RS     crate::Diagnostics::Diagnostic::error(
-//RS         "E0355",
-//RS         format!("`#{name}` cannot attach at the {} site", site.name()),
-//RS         format!("the registry allows `#{name}` only at: {legal}"),
-//RS         fix,
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// D-VERDICT-1455-1: one E0927 family for an unregistered or retired marker
-//RS /// name, at every site. Parser and sema both call this; neither writes its own
-//RS /// unknown-marker text, so a typo reads the same wherever it sits.
-//RS pub fn marker_unknown_error(
-//RS     name: &str,
-//RS     vocabulary: &[String],
-//RS     span: crate::Diagnostics::Span,
-//RS ) -> crate::Diagnostics::Diagnostic {
-//RS     if let Some(AppliedRule {
-//RS         status: RuleStatus::Retired { replacement },
-//RS         ..
-//RS     }) = applied_rule(name)
-//RS     {
-//RS         let fix = if replacement.starts_with('#') || replacement.starts_with('.') {
-//RS             format!("write `{replacement}` instead")
-//RS         } else {
-//RS             replacement.to_string()
-//RS         };
-//RS         return crate::Diagnostics::Diagnostic::error(
-//RS             "E0927",
-//RS             format!("`#{name}` is retired"),
-//RS             "the registry keeps this old spelling only to teach its replacement; \
-//RS              it no longer applies a rule"
-//RS                 .to_string(),
-//RS             fix,
-//RS             Some(span),
-//RS         );
-//RS     }
-//RS     let mut nearest: Option<(String, usize)> = None;
-//RS     let mut ambiguous = false;
-//RS     for candidate in vocabulary {
-//RS         let distance = crate::Syntax::edit_distance(name, candidate);
-//RS         if distance == 0 || distance > 2 {
-//RS             continue;
-//RS         }
-//RS         match nearest.as_ref() {
-//RS             None => nearest = Some((candidate.clone(), distance)),
-//RS             Some((_, nearest_distance)) if distance < *nearest_distance => {
-//RS                 nearest = Some((candidate.clone(), distance));
-//RS                 ambiguous = false;
-//RS             }
-//RS             Some((nearest_candidate, nearest_distance)) if distance == *nearest_distance => {
-//RS                 ambiguous |= nearest_candidate != candidate;
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     let nearest = nearest
-//RS         .filter(|_| !ambiguous)
-//RS         .map(|(candidate, _)| candidate);
-//RS     let fix = nearest.as_ref().map_or_else(
-//RS         || {
-//RS             "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
-//RS                 .to_string()
-//RS         },
-//RS         |nearest| format!("did you mean `#{nearest}`?"),
-//RS     );
-//RS     let mut diagnostic = crate::Diagnostics::Diagnostic::error(
-//RS         "E0927",
-//RS         format!("`#{name}` isn't a known applied rule"),
-//RS         format!(
-//RS             "`{name}` isn't registered as an applied rule — Jet rules are a closed, \
-//RS              registered vocabulary (I7), not any PascalCase word."
-//RS         ),
-//RS         fix,
-//RS         Some(span),
-//RS     );
-//RS     if let Some(nearest) = nearest {
-//RS         diagnostic = diagnostic.with_edit(TextEdit {
-//RS             span,
-//RS             new_text: nearest,
-//RS         });
-//RS     }
-//RS     diagnostic
-//RS }
-//RS 
-//RS /// D-MARK-REPEAT1=A: the one repeated-rule diagnostic. Every site calls this,
-//RS /// so a duplicate reads the same on a file, a type, or a function; the
-//RS /// per-marker duplicate codes E0416 and E0428 retired into it.
-// END-PORT-PENDING 0086 crates/jet-foundation/src/Policy.rs:1-1823
+// Compiler-owned scoped policy registry and resolution ladder (D-MARK-SCOPE1).
+// This fragment extends the retained canonical policy and marker catalog owners.
+use jet_foundation.AST.[PolicyKey, PolicyValue, PolicyScope, PolicyDeclaration, RuleSite, Marker, MarkerDecl]
+use jet_foundation.Diagnostics.[Span, Diagnostic, TextEdit, diagnostic_from_registry, diagnostic_with_edit]
+use jet_foundation.Policy
+use jet_foundation.Policy.AppliedRules.[TAppliedRule, TAppliedRuleStatus, TAppliedRuleSignature, TAppliedRuleParameter, TAppliedRuleArgKind, TAppliedRuleCompanionSite, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, rule_site_name]
+use jet_foundation.Policy.CoreMenus.rule_arg_declaration
+use jet_foundation.Syntax.edit_distance
 
+// Rust: crates/jet-foundation/src/Policy.rs:7
+// PolicyScope -> AST/Statements.jet::PolicyScope, canonical Authority scope.
+// Rust: crates/jet-foundation/src/Policy.rs:10
+// PolicyKey -> AST/Statements.jet::PolicyKey (ScopedGc is ScopedGC).
+// Rust: crates/jet-foundation/src/Policy.rs:21
+// PolicyKey::name -> Policy.jet::policy_key_name.
+// Rust: crates/jet-foundation/src/Policy.rs:32
+// PolicyKey::parse -> Policy.jet::policy_key_parse.
+// Rust: crates/jet-foundation/src/Policy.rs:44
+// PolicyKey::is_audited_gate -> Policy.jet::policy_key_is_audited_gate.
+// Rust: crates/jet-foundation/src/Policy.rs:50
+// PolicyValue -> AST/Statements.jet::PolicyValue; u64 Limit boundary retained there.
+// Rust: crates/jet-foundation/src/Policy.rs:68
+// PolicyValue::display -> Policy.jet::policy_value_display.
+// Rust: crates/jet-foundation/src/Policy.rs:91
+// SourceScope -> Policy.jet::SourceScope.
+// Rust: crates/jet-foundation/src/Policy.rs:101
+// SourceScope::name -> Policy.jet::source_scope_name.
+// Rust: crates/jet-foundation/src/Policy.rs:112
+// SourceScope::rank -> Policy.jet::source_scope_rank.
+// Rust: crates/jet-foundation/src/Policy.rs:128
+// ContributionLayer -> Policy.jet::ContributionLayer.
+// Rust: crates/jet-foundation/src/Policy.rs:139
+// ContributionLayer::name -> Policy.jet::contribution_layer_name.
+// Rust: crates/jet-foundation/src/Policy.rs:151
+// ContributionLayer::rank -> Policy.jet::contribution_layer_rank.
+// Rust: crates/jet-foundation/src/Policy.rs:163
+// ContributionLayer::can_force -> Policy.jet::contribution_layer_can_force.
+// Rust: crates/jet-foundation/src/Policy.rs:170
+// FactMerge -> Policy.jet::FactMerge.
+// Rust: crates/jet-foundation/src/Policy.rs:178
+// FactKey -> Policy.jet::FactKey; optional default is FactDefault (value/source).
+// Rust: crates/jet-foundation/src/Policy.rs:185
+// FactKey::new -> Policy.jet::fact_key_new.
+// Rust: crates/jet-foundation/src/Policy.rs:194
+// FactKey::tighten_only -> Policy.jet::fact_key_tighten_only.
+// Rust: crates/jet-foundation/src/Policy.rs:201
+// FactKey::with_default -> Policy.jet::fact_key_with_default.
+// Rust: crates/jet-foundation/src/Policy.rs:207
+// FactKey::with_default_source -> Policy.jet::fact_key_with_default_source.
+// Rust: crates/jet-foundation/src/Policy.rs:221
+// FactValue -> Policy.jet::FactValue.
+// Rust: crates/jet-foundation/src/Policy.rs:232
+// FactValue::display -> Policy.jet::fact_value_display (deliberately unescaped).
+// Rust: crates/jet-foundation/src/Policy.rs:245
+// FactValue::safety_relation -> Policy.jet::fact_value_safety_relation.
+// Rust: crates/jet-foundation/src/Policy.rs:277
+// SafetyRelation -> Policy.jet::FactSafetyRelation.
+// Rust: crates/jet-foundation/src/Policy.rs:287
+// FactContribution -> Policy.jet::FactContribution.
+// Rust: crates/jet-foundation/src/Policy.rs:305
+// FactContribution::new -> Policy.jet::fact_contribution_new.
+// Rust: crates/jet-foundation/src/Policy.rs:327
+// FactContribution::at -> Policy.jet::fact_contribution_at.
+// Rust: crates/jet-foundation/src/Policy.rs:332
+// FactContribution::for_target -> Policy.jet::fact_contribution_for_target.
+// Rust: crates/jet-foundation/src/Policy.rs:337
+// FactContribution::force_with_reason -> Policy.jet::fact_contribution_force_with_reason.
+// Rust: crates/jet-foundation/src/Policy.rs:343
+// FactContribution::force -> Policy.jet::fact_contribution_force.
+// Rust: crates/jet-foundation/src/Policy.rs:347
+// FactContribution::with_reason -> Policy.jet::fact_contribution_with_reason.
+// Rust: crates/jet-foundation/src/Policy.rs:352
+// FactContribution::default_for -> Policy.jet::fact_contribution_default_for.
+// Rust: crates/jet-foundation/src/Policy.rs:368
+// EffectiveFact -> Policy.jet::EffectiveFact.
+// Rust: crates/jet-foundation/src/Policy.rs:377
+// FactError -> Policy.jet::FactError (#Error).
+// Rust: crates/jet-foundation/src/Policy.rs:402
+// FactError::message -> Policy.jet::fact_error_message (all four branches).
+// Rust: crates/jet-foundation/src/Policy.rs:445
+// FactError::diagnostic -> Policy.jet::fact_error_diagnostic (E3521 conflict only).
+// Rust: crates/jet-foundation/src/Policy.rs:466
+// PolicyCombine -> Policy.jet::PolicyCombine.
+// Rust: crates/jet-foundation/src/Policy.rs:473
+// PolicyRule -> Policy.jet::PolicyRule.
+// Rust: crates/jet-foundation/src/Policy.rs:479
+// PACKAGE_SCOPES -> Policy.jet::POLICY_PACKAGE_SCOPES.
+// Rust: crates/jet-foundation/src/Policy.rs:485
+// ALL_SCOPES -> Policy.jet::POLICY_ALL_SCOPES.
+// Rust: crates/jet-foundation/src/Policy.rs:492
+// POLICY_RULES -> Policy.jet::POLICY_RULES (same seven rows/order).
+// Rust: crates/jet-foundation/src/Policy.rs:530
+// AUDITED_GATE_KEYS -> Policy.jet::AUDITED_GATE_KEYS.
+// Rust: crates/jet-foundation/src/Policy.rs:536
+// rule -> Policy.jet::policy_rule.
+// Rust: crates/jet-foundation/src/Policy.rs:544
+// PolicyDeclaration -> AST/Statements.jet::PolicyDeclaration.
+// Rust: crates/jet-foundation/src/Policy.rs:556
+// EffectivePolicy -> Policy.jet::EffectivePolicy.
+// Rust: crates/jet-foundation/src/Policy.rs:564
+// PolicyError -> Policy.jet::PolicyError (#Error).
+// Rust: crates/jet-foundation/src/Policy.rs:586
+// resolve_policy -> Policy.jet::policy_resolve (scope sorting, conflict, tightening, merge).
+// Rust: crates/jet-foundation/src/Policy.rs:670
+// ResolutionKey and its associated types are specialized at the canonical typed
+// seams: PolicyKey/PolicyDeclaration/EffectivePolicy/PolicyError -> policy_resolve;
+// FactKey/FactContribution/EffectiveFact/FactError -> fact_resolve. No second ladder.
+// Rust: crates/jet-foundation/src/Policy.rs:681
+// ResolutionKey for PolicyKey::resolve_key -> Policy.jet::policy_resolve.
+// Rust: crates/jet-foundation/src/Policy.rs:694
+// ResolutionKey for FactKey::resolve_key -> Policy.jet::fact_resolve.
+// Rust: crates/jet-foundation/src/Policy.rs:707
+// resolve -> Policy.jet::{policy_resolve,fact_resolve} by key type.
+// Rust: crates/jet-foundation/src/Policy.rs:715
+// resolve_fact -> Policy.jet::fact_resolve: default, stable order, invalid force,
+// same-layer conflict, force ceiling, nearest scope, tighten-only, exact writer index.
+// Rust: crates/jet-foundation/src/Policy.rs:856
+// gate_widens -> Policy.jet::policy_gate_widens (including non-reflexive cases).
+// Rust: crates/jet-foundation/src/Policy.rs:876
+// default_gate_value -> Policy.jet::default_gate_value.
+// Rust: crates/jet-foundation/src/Policy.rs:885
+// parse_value -> Policy.jet::policy_parse_value; PolicyValueParseError.message is Rust String.
+// Rust: crates/jet-foundation/src/Policy.rs:913
+// GateSet -> Policy.jet::GateSet (bits carrier).
+// Rust: crates/jet-foundation/src/Policy.rs:919
+// GateSet::allow -> Policy.jet::gate_set_allow.
+// Rust: crates/jet-foundation/src/Policy.rs:925
+// GateSet::bit -> Policy.jet::gate_set_bit.
+// Rust: crates/jet-foundation/src/Policy.rs:934
+// GateSet::insert -> Policy.jet::gate_set_insert.
+// Rust: crates/jet-foundation/src/Policy.rs:941
+// GateSet::allows -> Policy.jet::gate_set_allows.
+// Rust: crates/jet-foundation/src/Policy.rs:945
+// GateSet::contains -> Policy.jet::gate_set_contains.
+// Rust: crates/jet-foundation/src/Policy.rs:948
+// GateSet::is_empty -> Policy.jet::gate_set_is_empty.
+// Rust: crates/jet-foundation/src/Policy.rs:954
+// GateSet::parse -> Policy.jet::gate_set_parse (exact messages via error.message).
+// Rust: crates/jet-foundation/src/Policy.rs:973
+// resolve_invocation -> Policy.jet::policy_resolve_invocation.
+// Rust: crates/jet-foundation/src/Policy.rs:988
+// resolve_with_gates -> Policy.jet::policy_resolve_with_gates.
+// Rust: crates/jet-foundation/src/Policy.rs:1012
+// ExplainableResolution specializes to policy_explain/fact_explain.
+// Rust: crates/jet-foundation/src/Policy.rs:1016
+// EffectivePolicy::explain_resolution -> Policy.jet::policy_explain.
+// Rust: crates/jet-foundation/src/Policy.rs:1038
+// EffectiveFact::explain_resolution -> Policy.jet::fact_explain.
+// Rust: crates/jet-foundation/src/Policy.rs:1073
+// explain -> Policy.jet::{policy_explain,fact_explain} by effective type.
+
+// Rust: crates/jet-foundation/src/Policy.rs:1078
+// RuleSite -> AST/Items.jet::RuleSite (same 18 variants).
+impl RuleSite {
+    // Rust: crates/jet-foundation/src/Policy.rs:1100
+    pub ALL :: prep { [RuleSite]{.Package, .File, .Module, .Function, .Method, .Block, .Statement, .Expression, .Type, .Impl, .Declaration, .Constant, .Field, .Variant, .Parameter, .Test, .Operation, .Text} }
+    // Rust: crates/jet-foundation/src/Policy.rs:1121
+    pub fn name(self) -> String Never! { rule_site_name(self) }
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1149
+pub SITE_VARIANTS :: prep { loop site in RuleSite.ALL -> site.name() }
+// Rust: crates/jet-foundation/src/Policy.rs:1176
+// AppliedRule -> AppliedRules.jet::TAppliedRule; source policy_scopes/sites/resolution
+// are retained canonical String spellings rather than duplicate enums.
+// Rust: crates/jet-foundation/src/Policy.rs:1200
+// RuleStatus -> AppliedRules.jet::TAppliedRuleStatus.
+// Rust: crates/jet-foundation/src/Policy.rs:1206
+// RuleResolution -> TAppliedRule.resolution (SiteBound/Override/Merge/Tighten).
+// Rust: crates/jet-foundation/src/Policy.rs:1214
+// RuleArgType -> AppliedRules.jet::TAppliedRuleArgKind.
+// Rust: crates/jet-foundation/src/Policy.rs:1231
+// RuleArgDeclaration -> AppliedRules.jet::TAppliedRuleArgumentMenu.
+// Rust: crates/jet-foundation/src/Policy.rs:1241
+// VariantSegment -> TAppliedRuleArgumentMenu.first_variant_segment (First=true).
+// Rust: crates/jet-foundation/src/Policy.rs:1250
+// CompanionSite -> AppliedRules.jet::TAppliedRuleCompanionSite.
+// Rust: crates/jet-foundation/src/Policy.rs:1254
+pub fn canonical_rule_arg_variants(name: String, catalog: TAppliedRuleCatalog) -> [String]? {
+    menu :: rule_arg_declaration(name, catalog.argument_menus) ?? return None
+    Val(menu.variants)
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1311
+// RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION and rule_arg_needs_core_declaration:
+// paired Tests/Policy/Policy02.jet retains these test-only declarations.
+// Rust: crates/jet-foundation/src/Policy.rs:1330
+// RULE_ARG_DECLARATIONS is bundle-local: callers retain the canonical catalog,
+// rather than initializing an independent LazyLock/global APPLIED_RULES registry.
+pub fn rule_arg_declarations(catalog: TAppliedRuleCatalog) -> [TAppliedRuleArgumentMenu] {
+    names := [String:Bool]{"Site": true, "Track": true}
+    loop row in catalog.rows {
+        loop parameter in row.signature.params { names[parameter.source_type] = true }
+        if ty :: row.signature.variadic_source_type -> names[ty] = true
+    }
+    ordered := names.keys().collect()
+    &ordered.sort()
+    result := [TAppliedRuleArgumentMenu]{}
+    loop name in ordered {
+        if variants :: canonical_rule_arg_variants(name, catalog) {
+            &result.push(TAppliedRuleArgumentMenu{name: name, variants: variants, first_variant_segment: canonical_variant_segment(name)})
+        }
+    }
+    result
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1359
+fn canonical_variant_segment(name: String) -> Bool Never! { name == "Effect" || name == "Target" }
+// Rust: crates/jet-foundation/src/Policy.rs:1366
+// rule_arg_declaration -> CoreMenus.jet::rule_arg_declaration(name, retained menus).
+impl TAppliedRuleArgKind {
+    // Rust: crates/jet-foundation/src/Policy.rs:1373
+    pub fn name(self) -> String Never! {
+        if self == {
+            .Any -> "Value"
+            .String -> "String"
+            .Path -> "Path"
+            .Ident -> "Ident"
+            .Bool -> "Bool"
+            .Int -> "Int"
+            .DurationOrString -> "Duration | String"
+            .EffectRoots -> "[Effect]"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1388
+// RuleParam -> AppliedRules.jet::TAppliedRuleParameter (ty=kind, default=default_source).
+// Rust: crates/jet-foundation/src/Policy.rs:1396
+// RuleSignature -> AppliedRules.jet::TAppliedRuleSignature.
+// Rust: crates/jet-foundation/src/Policy.rs:1403
+pub struct RuleArgumentBinding {
+    pub source_index: Int
+    pub parameter_index: Int?
+    pub ty: TAppliedRuleArgKind
+}
+impl TAppliedRuleSignature {
+    // Rust: crates/jet-foundation/src/Policy.rs:1410
+    pub fn render(self) -> String Never! {
+        parts := [String]{}
+        loop param in self.params {
+            part := param.name + ": " + param.source_type
+            if default :: param.default_source -> part += "{" + default + "}"
+            &parts.push(part)
+        }
+        if ty :: self.variadic_source_type -> &parts.push(ty + "...")
+        "(" + parts.join(", ") + ")"
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1432
+    pub fn accepts_arguments(self) -> Bool Never! { !self.params.is_empty() || self.variadic != None }
+    // Rust: crates/jet-foundation/src/Policy.rs:1439
+    pub fn arguments_required(self) -> Bool Never! { self.required() > 0 || self.params.is_empty() && self.variadic != None }
+    // Rust: crates/jet-foundation/src/Policy.rs:1443
+    pub fn required(self) -> Int Never! {
+        count := 0
+        loop parameter in self.params { if parameter.default_source == None -> count += 1 }
+        count
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1457
+    pub fn argument_bindings(self, labels: [String?]) -> [RuleArgumentBinding]? Never! {
+        supplied := [Bool]{}
+        loop _ in self.params { &supplied.push(false) }
+        positional := 0
+        saw_named := false
+        bindings := [RuleArgumentBinding]{}
+        loop (source_index, label) in labels.enumerate() {
+            parameter := None as Int?
+            if name :: label {
+                saw_named = true
+                found := None as Int?
+                loop (index, param) in self.params.enumerate() { if param.name == name { found = Val(index); break } }
+                index :: found ?? return None
+                if supplied[index] -> return None
+                supplied[index] = true
+                parameter = Val(index)
+            } else {
+                if saw_named -> return None
+                loop positional < supplied.len() && supplied[positional] { positional += 1 }
+                if positional < supplied.len() {
+                    parameter = Val(positional)
+                    supplied[positional] = true
+                    positional += 1
+                }
+            }
+            ty :: if parameter == { .Val(index) -> self.params[index].kind; .None -> self.variadic ?? return None }
+            &bindings.push(RuleArgumentBinding{source_index: source_index, parameter_index: parameter, ty: ty})
+        }
+        loop (index, parameter) in self.params.enumerate() {
+            if parameter.default_source == None && !supplied[index] -> return None
+        }
+        Val(bindings)
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1507
+    pub fn argument_types(self, labels: [String?]) -> [TAppliedRuleArgKind]? Never! {
+        bindings :: self.argument_bindings(labels) ?? return None
+        types := [TAppliedRuleArgKind]{}
+        loop binding in bindings { &types.push(binding.ty) }
+        Val(types)
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1512
+    pub fn marker_argument_bindings(self, marker: Marker) -> [RuleArgumentBinding]? Never! {
+        if marker.name == "Meta" {
+            all_named := true
+            loop label in marker.arg_labels { if label == None -> all_named = false }
+            if all_named {
+                bindings := [RuleArgumentBinding]{}
+                loop (source_index, label) in marker.arg_labels.enumerate() {
+                    name :: (label ?? return None).name
+                    index := None as Int?
+                    loop (at, parameter) in self.params.enumerate() { if parameter.name == name { index = Val(at); break } }
+                    at :: index ?? return None
+                    &bindings.push(RuleArgumentBinding{source_index: source_index, parameter_index: Val(at), ty: self.params[at].kind})
+                }
+                return Val(bindings)
+            }
+        }
+        if marker.name == "Policy" {
+            bindings := [RuleArgumentBinding]{}
+            loop (source_index, label) in marker.arg_labels.enumerate() {
+                if value :: label { if value.name != "copies" && value.name != "sentries" -> return None }
+                &bindings.push(RuleArgumentBinding{source_index: source_index, parameter_index: None, ty: self.variadic ?? return None})
+            }
+            return Val(bindings)
+        }
+        labels := [String?]{}
+        limit :: marker.args.len().min(marker.arg_labels.len())
+        loop index in 0..<limit {
+            label := None as String?
+            if value :: marker.arg_labels[index] { label = Val(value.name) }
+            else if marker.name == "Meta" {
+                if marker.args[index] == .Expr(.Ident(name, _)) { if name == "tunable" -> label = Val("tunable") }
+            }
+            &labels.push(label)
+        }
+        self.argument_bindings(labels)
+    }
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1587
+pub fn marker_argument_shape_error(catalog: TAppliedRuleCatalog, name: String, span: Span) -> Diagnostic Never! {
+    expected := "()"
+    loop row in catalog.rows { if row.name == name { expected = row.signature.render(); break } }
+    diagnostic_from_registry("E0930", Val(span), "`#{name}` arguments do not match `{name}{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{name}{expected}`")
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1606
+pub fn active_rule_names(catalog: TAppliedRuleCatalog) -> [String] Never! {
+    result := [String]{}
+    loop row in catalog.rows { if row.status == .Active -> &result.push(row.name) }
+    result
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1621
+pub struct MarkerVocabulary {
+    declared: [String:Bool]
+    declarations_by_name: [String:MarkerDecl]
+}
+impl MarkerVocabulary {
+    // Rust: crates/jet-foundation/src/Policy.rs:1632
+    pub fn with_derives(names: [String]) -> MarkerVocabulary Never! {
+        declared := [String:Bool]{}
+        loop name in names { declared[name] = true }
+        MarkerVocabulary{declared: ^declared, declarations_by_name: [:]}
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1640
+    pub fn with_derives_and_declarations(names: [String], declarations: [MarkerDecl]) -> MarkerVocabulary Never! {
+        result := MarkerVocabulary.with_derives(names)
+        loop declaration in declarations {
+            result.declared[declaration.name] = true
+            result.declarations_by_name[declaration.name] = declaration
+        }
+        result
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1655
+    pub fn knows(self, catalog: TAppliedRuleCatalog, name: String) -> Bool Never! {
+        loop row in catalog.rows { if row.name == name && row.status == .Active -> return true }
+        self.declared.contains_key(name)
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1661
+    pub fn names(self, catalog: TAppliedRuleCatalog) -> [String] Never! {
+        result := active_rule_names(catalog)
+        declared := self.declared.keys().collect()
+        &declared.sort()
+        loop name in declared { &result.push(name) }
+        result
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1671
+    pub fn declaration(self, name: String) -> MarkerDecl? Never! { self.declarations_by_name.get(name) }
+    // Rust: crates/jet-foundation/src/Policy.rs:1676
+    pub fn declarations(self) -> [MarkerDecl] Never! {
+        keys := self.declarations_by_name.keys().collect()
+        &keys.sort()
+        loop name in keys -> self.declarations_by_name[name]
+    }
+    // Rust: crates/jet-foundation/src/Policy.rs:1681
+    pub fn unknown(self, catalog: TAppliedRuleCatalog, name: String, span: Span) -> Diagnostic Never! {
+        marker_unknown_error(catalog, name, self.names(catalog), span)
+    }
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1693
+pub fn marker_wrong_site_error(catalog: TAppliedRuleCatalog, name: String, site: RuleSite, span: Span) -> Diagnostic Never! {
+    legal := [String]{}
+    fix := "move `#{name}` to one of its registered sites"
+    loop row in catalog.rows {
+        if row.name != name -> next
+        loop allowed in row.sites { &legal.push("`" + allowed + "`") }
+        if companion :: row.companion_site { &legal.push("`{companion.site} with companion `#{companion.rule}``") }
+        if row.companion_site == None && row.sites == ["Constant"] {
+            fix = "write `#{name} NAME :: prep {{ value }}` — a storage marker precedes a module constant"
+        }
+        break
+    }
+    legal_text :: if legal.is_empty() { "no active attachment sites" } else { legal.join(", ") }
+    diagnostic_from_registry("E0355", Val(span), "`#{name}` cannot attach at the {site.name()} site", "the registry allows `#{name}` only at: {legal_text}", fix)
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1748
+pub fn marker_unknown_error(catalog: TAppliedRuleCatalog, name: String, vocabulary: [String], span: Span) -> Diagnostic Never! {
+    loop row in catalog.rows {
+        if row.name == name && row.status == .Retired(replacement) {
+            fix :: if replacement.starts_with("#") || replacement.starts_with(".") { "write `{replacement}` instead" } else { replacement }
+            return diagnostic_from_registry("E0927", Val(span), "`#{name}` is retired", "the registry keeps this old spelling only to teach its replacement; it no longer applies a rule", fix)
+        }
+    }
+    nearest := None as String?
+    nearest_distance := 3
+    ambiguous := false
+    loop candidate in vocabulary {
+        distance :: edit_distance(name, candidate)
+        if distance == 0 || distance > 2 -> next
+        if distance < nearest_distance { nearest = Val(candidate); nearest_distance = distance; ambiguous = false }
+        else if distance == nearest_distance { if previous :: nearest { ambiguous = ambiguous || previous != candidate } }
+    }
+    if ambiguous -> nearest = None
+    fix :: if nearest == {
+        .Val(candidate) -> "did you mean `#{candidate}`?"
+        .None -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
+    }
+    diagnostic := diagnostic_from_registry("E0927", Val(span), "`#{name}` isn't a known applied rule", "`{name}` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.", fix)
+    if candidate :: nearest { diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate}) }
+    diagnostic
+}
+// Rust: crates/jet-foundation/src/Policy.rs:1821
+// The repeated-rule diagnostic starts in the next packet; this range carries only its doc comment.

@@ -1,0 +1,1595 @@
+// PORT-PENDING 2107 crates-jet-foundation-src-ast-ffi: crates/jet-foundation/src/AST/ffi.rs:1-1591
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ── C-FFI data types ──────────────────────────────────────────────────────────
+//RS 
+//RS use super::{AccessConvention, ExternFn, ForeignLanguage, Type};
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS /// D-FFI-UNIFY1: one descriptor is the contract between a foreign schema,
+//RS /// generated Jet source, and the checked boundary. Adapters may vary their
+//RS /// transport, but they do not get a second ABI vocabulary.
+//RS pub const FOREIGN_DESCRIPTOR_SCHEMA: &str = "jet-ffi-descriptor-v1";
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum BinderSurface {
+//RS     Namespace,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum BinderStatus {
+//RS     Active,
+//RS     Planned,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum BinderRuntime {
+//RS     DirectCAbi,
+//RS     ClangCppShim,
+//RS     LegacyRustExtern,
+//RS     SupervisedPythonSidecar,
+//RS     TargetDispatchedJs,
+//RS     SwiftCAbiBridge,
+//RS     GoCArchive,
+//RS     EmbeddedJvm,
+//RS     EmbeddedDotNet,
+//RS     EmbeddedTcl,
+//RS     EmbeddedLua,
+//RS     FortranIsoCBinding,
+//RS     GnuCobolCAbi,
+//RS     AdaGnatCAbi,
+//RS     FreePascalCdecl,
+//RS     DartApiDl,
+//RS     SupervisedPowerShell,
+//RS     SupervisedPerl,
+//RS     SupervisedRuby,
+//RS     SupervisedPhpPool,
+//RS     SupervisedR,
+//RS     SupervisedOctave,
+//RS     WindowsComAutomation,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum BindingStubKind {
+//RS     CHeader,
+//RS     CppHeader,
+//RS     RustExternBlock,
+//RS     PythonIntrospection,
+//RS     TypeScriptDeclarations,
+//RS     SwiftModule,
+//RS     GoExports,
+//RS     JvmClass,
+//RS     DotNetAssembly,
+//RS     TclScript,
+//RS     LuaScript,
+//RS     FortranIsoCBinding,
+//RS     GnuCobolCopybook,
+//RS     AdaSpec,
+//RS     PascalSource,
+//RS     DartContract,
+//RS     PowerShellScript,
+//RS     PerlScript,
+//RS     RubyScript,
+//RS     PhpScript,
+//RS     RScript,
+//RS     OctaveScript,
+//RS     ComTypeLibrary,
+//RS }
+//RS 
+//RS pub const FOREIGN_ABI_CONTRACT_VERSION: u16 = 1;
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignCallingConvention {
+//RS     C,
+//RS     Cpp,
+//RS     Rust,
+//RS     HostMessage,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignLayoutModel {
+//RS     CAbi,
+//RS     AdapterTyped,
+//RS     OpaqueHandle,
+//RS     Message,
+//RS     Native,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignOwnershipModel {
+//RS     SignatureDeclared,
+//RS     AdapterOwned,
+//RS     ByValue,
+//RS     BorrowedInputCopiedOutput,
+//RS     OwnedHandle,
+//RS     SharedHandle,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignErrorModel {
+//RS     JetBoundary,
+//RS     AdapterResult,
+//RS     ErrorCode,
+//RS     TypedResult,
+//RS     PanicBoundary,
+//RS     ForeignException,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignCallbackModel {
+//RS     ReentrantThreadSafe,
+//RS     AdapterMarshalled,
+//RS     None,
+//RS     CAbi,
+//RS     HostRegistration,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignAsyncModel {
+//RS     JetTask,
+//RS     AdapterMarshalled,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignTaskBoundary {
+//RS     RejectCapturedState,
+//RS     AdapterMarshalled,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct ForeignAbiContract {
+//RS     pub version: u16,
+//RS     pub calling_convention: ForeignCallingConvention,
+//RS     pub layout: ForeignLayoutModel,
+//RS     pub ownership: ForeignOwnershipModel,
+//RS     pub errors: ForeignErrorModel,
+//RS     pub callbacks: ForeignCallbackModel,
+//RS     pub async_completion: ForeignAsyncModel,
+//RS     pub task_boundary: ForeignTaskBoundary,
+//RS     pub safety: ForeignSafety,
+//RS     pub integer: ForeignScalar,
+//RS     pub floating: ForeignScalar,
+//RS     pub boolean: ForeignScalar,
+//RS     pub character: ForeignScalar,
+//RS     pub string: ForeignScalar,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignSafety {
+//RS     GeneratedWrapper,
+//RS     UnsafeRaw,
+//RS }
+//RS 
+//RS /// Scalar projection selected by a binder descriptor. `Unsupported` is a
+//RS /// deliberate fail-closed value, not a request to invent a fallback type.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignScalar {
+//RS     Int,
+//RS     Float,
+//RS     Bool,
+//RS     Char,
+//RS     String,
+//RS     Unsupported,
+//RS }
+//RS 
+//RS impl ForeignScalar {
+//RS     pub const fn jet_name(self) -> Option<&'static str> {
+//RS         match self {
+//RS             Self::Int => Some("Int"),
+//RS             Self::Float => Some("Float"),
+//RS             Self::Bool => Some("Bool"),
+//RS             Self::Char => Some("Char"),
+//RS             Self::String => Some("String"),
+//RS             Self::Unsupported => None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Rust type emitted at the checked C boundary for the matching Jet
+//RS     /// scalar. This is intentionally closed with no placeholder arm.
+//RS     pub const fn c_rust_name(self) -> Option<&'static str> {
+//RS         match self {
+//RS             Self::Int => Some("std::os::raw::c_longlong"),
+//RS             Self::Float => Some("f64"),
+//RS             Self::Bool => Some("bool"),
+//RS             Self::Char => Some("u32"),
+//RS             Self::String => Some("*const std::os::raw::c_char"),
+//RS             Self::Unsupported => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl ForeignAbiContract {
+//RS     pub const fn c_abi() -> Self {
+//RS         Self {
+//RS             version: FOREIGN_ABI_CONTRACT_VERSION,
+//RS             calling_convention: ForeignCallingConvention::C,
+//RS             layout: ForeignLayoutModel::CAbi,
+//RS             ownership: ForeignOwnershipModel::SignatureDeclared,
+//RS             errors: ForeignErrorModel::JetBoundary,
+//RS             callbacks: ForeignCallbackModel::ReentrantThreadSafe,
+//RS             async_completion: ForeignAsyncModel::JetTask,
+//RS             task_boundary: ForeignTaskBoundary::RejectCapturedState,
+//RS             safety: ForeignSafety::GeneratedWrapper,
+//RS             integer: ForeignScalar::Int,
+//RS             floating: ForeignScalar::Float,
+//RS             boolean: ForeignScalar::Bool,
+//RS             character: ForeignScalar::Char,
+//RS             string: ForeignScalar::String,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn adapter() -> Self {
+//RS         Self {
+//RS             version: FOREIGN_ABI_CONTRACT_VERSION,
+//RS             calling_convention: ForeignCallingConvention::HostMessage,
+//RS             layout: ForeignLayoutModel::AdapterTyped,
+//RS             ownership: ForeignOwnershipModel::AdapterOwned,
+//RS             errors: ForeignErrorModel::AdapterResult,
+//RS             callbacks: ForeignCallbackModel::AdapterMarshalled,
+//RS             async_completion: ForeignAsyncModel::AdapterMarshalled,
+//RS             task_boundary: ForeignTaskBoundary::AdapterMarshalled,
+//RS             safety: ForeignSafety::GeneratedWrapper,
+//RS             ..Self::c_abi()
+//RS         }
+//RS     }
+//RS 
+//RS     pub const C: Self = Self::c_abi();
+//RS     pub const CXX: Self = Self {
+//RS         calling_convention: ForeignCallingConvention::Cpp,
+//RS         layout: ForeignLayoutModel::OpaqueHandle,
+//RS         ownership: ForeignOwnershipModel::OwnedHandle,
+//RS         ..Self::c_abi()
+//RS     };
+//RS     pub const MESSAGE: Self = Self::adapter();
+//RS     pub const NATIVE: Self = Self {
+//RS         calling_convention: ForeignCallingConvention::Rust,
+//RS         layout: ForeignLayoutModel::Native,
+//RS         ..Self::adapter()
+//RS     };
+//RS 
+//RS     /// Map a normalized C declaration to the one descriptor-owned Jet scalar.
+//RS     /// Unsupported pointers and declarations return `None` and are skipped by
+//RS     /// the binder; no generated fake signature can reach the compiler.
+//RS     pub fn c_scalar(self, normalized: &str) -> Option<ForeignScalar> {
+//RS         if self.layout != ForeignLayoutModel::CAbi {
+//RS             return None;
+//RS         }
+//RS         if normalized.ends_with('*') {
+//RS             let base = normalized[..normalized.len() - 1].trim();
+//RS             return matches!(base, "char" | "signed char" | "unsigned char")
+//RS                 .then_some(ForeignScalar::String)
+//RS                 .filter(|kind| *kind != ForeignScalar::Unsupported);
+//RS         }
+//RS         let scalar = match normalized {
+//RS             "bool" | "_Bool" => ForeignScalar::Bool,
+//RS             "float" | "double" | "long double" => ForeignScalar::Float,
+//RS             "char" | "signed char" | "unsigned char" | "short" | "unsigned short" | "short int"
+//RS             | "unsigned short int" | "int" | "unsigned" | "unsigned int" | "signed"
+//RS             | "signed int" | "long" | "unsigned long" | "long int" | "unsigned long int"
+//RS             | "long long" | "unsigned long long" | "long long int" | "size_t" | "ssize_t"
+//RS             | "ptrdiff_t" | "intptr_t" | "uintptr_t" | "int8_t" | "int16_t" | "int32_t"
+//RS             | "int64_t" | "uint8_t" | "uint16_t" | "uint32_t" | "uint64_t" => ForeignScalar::Int,
+//RS             _ => ForeignScalar::Unsupported,
+//RS         };
+//RS         (scalar != ForeignScalar::Unsupported).then_some(scalar)
+//RS     }
+//RS 
+//RS     /// Stable text included in generated stubs, binder output, and cache
+//RS     /// provenance. A descriptor mutation therefore invalidates every product
+//RS     /// made from it instead of silently reusing an old ABI.
+//RS     pub fn stamp(self) -> String {
+//RS         format!(
+//RS             "{FOREIGN_DESCRIPTOR_SCHEMA};version={};calling={:?};layout={:?};ownership={:?};errors={:?};callbacks={:?};async={:?};tasks={:?};safety={:?};integer={:?};float={:?};bool={:?};char={:?};string={:?}",
+//RS             self.version,
+//RS             self.calling_convention,
+//RS             self.layout,
+//RS             self.ownership,
+//RS             self.errors,
+//RS             self.callbacks,
+//RS             self.async_completion,
+//RS             self.task_boundary,
+//RS             self.safety,
+//RS             self.integer,
+//RS             self.floating,
+//RS             self.boolean,
+//RS             self.character,
+//RS             self.string,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl ForeignLanguage {
+//RS     /// Prefix used by generated bridge symbols.  Keep this beside the
+//RS     /// descriptor table so the loader cannot grow a second language map.
+//RS     pub const fn bridge_prefix(self) -> &'static str {
+//RS         match self {
+//RS             Self::C => "",
+//RS             Self::Cpp => "jet_cpp_",
+//RS             Self::Rust => "jet_rust_",
+//RS             Self::Py => "jet_py_",
+//RS             Self::JS => "jet_js_",
+//RS             Self::Swift => "jet_swift_",
+//RS             Self::Go => "jet_go_",
+//RS             Self::Java => "jet_java_",
+//RS             Self::DotNet => "jet_cs_",
+//RS             Self::Tcl => "jet_tcl_",
+//RS             Self::Lua => "jet_lua_",
+//RS             Self::Fortran => "jet_fortran_",
+//RS             Self::Cobol => "jet_cobol_",
+//RS             Self::Ada => "jet_ada_",
+//RS             Self::Pascal => "jet_pascal_",
+//RS             Self::Dart => "jet_dart_",
+//RS             Self::PowerShell => "jet_pwsh_",
+//RS             Self::Perl => "jet_perl_",
+//RS             Self::Ruby => "jet_ruby_",
+//RS             Self::Php => "jet_php_",
+//RS             Self::R => "jet_r_",
+//RS             Self::Octave => "jet_octave_",
+//RS             Self::Com => "jet_com_",
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn abi_contract(self) -> ForeignAbiContract {
+//RS         match self {
+//RS             Self::C
+//RS             | Self::Cpp
+//RS             | Self::Swift
+//RS             | Self::Go
+//RS             | Self::Fortran
+//RS             | Self::Cobol
+//RS             | Self::Ada
+//RS             | Self::Pascal => ForeignAbiContract::C,
+//RS             Self::Rust => ForeignAbiContract::NATIVE,
+//RS             Self::Py
+//RS             | Self::JS
+//RS             | Self::Java
+//RS             | Self::DotNet
+//RS             | Self::Tcl
+//RS             | Self::Lua
+//RS             | Self::Dart
+//RS             | Self::PowerShell
+//RS             | Self::Perl
+//RS             | Self::Ruby
+//RS             | Self::Php
+//RS             | Self::R
+//RS             | Self::Octave
+//RS             | Self::Com => ForeignAbiContract::MESSAGE,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum BinderCapability {
+//RS     TypedStub,
+//RS     SafeWrapper,
+//RS     OwnershipConversion,
+//RS     LayoutValidation,
+//RS     ErrorConversion,
+//RS     CallbackValidation,
+//RS     CacheProvenance,
+//RS     PackageProvider,
+//RS     TargetDispatch,
+//RS     UnsafeRawEscape,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignProvider {
+//RS     System,
+//RS     Cargo,
+//RS     Npm,
+//RS     PyPi,
+//RS     SwiftPm,
+//RS     Jetpack,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ForeignStubFile {
+//RS     None,
+//RS     Suffix(&'static str),
+//RS     StemSuffix(&'static str),
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct BinderDescriptor {
+//RS     pub language: ForeignLanguage,
+//RS     pub surface: BinderSurface,
+//RS     pub status: BinderStatus,
+//RS     pub runtime: BinderRuntime,
+//RS     pub stub_kind: BindingStubKind,
+//RS     pub contract: ForeignAbiContract,
+//RS     pub capabilities: &'static [BinderCapability],
+//RS     pub effect_root: &'static str,
+//RS     pub provider: ForeignProvider,
+//RS     pub cache_extension: &'static str,
+//RS     pub type_stub_file: ForeignStubFile,
+//RS }
+//RS 
+//RS const C_CAPABILITIES: &[BinderCapability] = &[
+//RS     BinderCapability::TypedStub,
+//RS     BinderCapability::SafeWrapper,
+//RS     BinderCapability::OwnershipConversion,
+//RS     BinderCapability::LayoutValidation,
+//RS     BinderCapability::ErrorConversion,
+//RS     BinderCapability::CallbackValidation,
+//RS     BinderCapability::CacheProvenance,
+//RS     BinderCapability::PackageProvider,
+//RS     BinderCapability::UnsafeRawEscape,
+//RS ];
+//RS const TARGET_CAPABILITIES: &[BinderCapability] = &[
+//RS     BinderCapability::TypedStub,
+//RS     BinderCapability::SafeWrapper,
+//RS     BinderCapability::OwnershipConversion,
+//RS     BinderCapability::LayoutValidation,
+//RS     BinderCapability::ErrorConversion,
+//RS     BinderCapability::CallbackValidation,
+//RS     BinderCapability::CacheProvenance,
+//RS     BinderCapability::PackageProvider,
+//RS     BinderCapability::TargetDispatch,
+//RS     BinderCapability::UnsafeRawEscape,
+//RS ];
+//RS const ADAPTER_CAPABILITIES: &[BinderCapability] = &[
+//RS     BinderCapability::TypedStub,
+//RS     BinderCapability::SafeWrapper,
+//RS     BinderCapability::OwnershipConversion,
+//RS     BinderCapability::LayoutValidation,
+//RS     BinderCapability::ErrorConversion,
+//RS     BinderCapability::CacheProvenance,
+//RS     BinderCapability::PackageProvider,
+//RS     BinderCapability::UnsafeRawEscape,
+//RS ];
+//RS const PLANNED_CAPABILITIES: &[BinderCapability] = &[
+//RS     BinderCapability::TypedStub,
+//RS     BinderCapability::SafeWrapper,
+//RS     BinderCapability::OwnershipConversion,
+//RS     BinderCapability::LayoutValidation,
+//RS     BinderCapability::ErrorConversion,
+//RS     BinderCapability::CallbackValidation,
+//RS     BinderCapability::CacheProvenance,
+//RS     BinderCapability::PackageProvider,
+//RS     BinderCapability::UnsafeRawEscape,
+//RS ];
+//RS 
+//RS const fn binder(
+//RS     language: ForeignLanguage,
+//RS     runtime: BinderRuntime,
+//RS     stub_kind: BindingStubKind,
+//RS     status: BinderStatus,
+//RS     contract: ForeignAbiContract,
+//RS     capabilities: &'static [BinderCapability],
+//RS     effect_root: &'static str,
+//RS     provider: ForeignProvider,
+//RS     type_stub_file: ForeignStubFile,
+//RS ) -> BinderDescriptor {
+//RS     BinderDescriptor {
+//RS         language,
+//RS         surface: BinderSurface::Namespace,
+//RS         status,
+//RS         runtime,
+//RS         stub_kind,
+//RS         contract,
+//RS         capabilities,
+//RS         effect_root,
+//RS         provider,
+//RS         cache_extension: "jet",
+//RS         type_stub_file,
+//RS     }
+//RS }
+//RS 
+//RS /// Canonical descriptor table. Driver routing and package binders both read
+//RS /// this table; no language adapter owns a parallel ABI contract.
+//RS pub const FOREIGN_BINDERS: &[BinderDescriptor] = &[
+//RS     binder(
+//RS         ForeignLanguage::C,
+//RS         BinderRuntime::DirectCAbi,
+//RS         BindingStubKind::CHeader,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::C,
+//RS         C_CAPABILITIES,
+//RS         "FFI",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Cpp,
+//RS         BinderRuntime::ClangCppShim,
+//RS         BindingStubKind::CppHeader,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::CXX,
+//RS         C_CAPABILITIES,
+//RS         "FFI.Cpp",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Rust,
+//RS         BinderRuntime::LegacyRustExtern,
+//RS         BindingStubKind::RustExternBlock,
+//RS         BinderStatus::Planned,
+//RS         ForeignAbiContract::NATIVE,
+//RS         PLANNED_CAPABILITIES,
+//RS         "FFI",
+//RS         ForeignProvider::Cargo,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Py,
+//RS         BinderRuntime::SupervisedPythonSidecar,
+//RS         BindingStubKind::PythonIntrospection,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Py",
+//RS         ForeignProvider::PyPi,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::JS,
+//RS         BinderRuntime::TargetDispatchedJs,
+//RS         BindingStubKind::TypeScriptDeclarations,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         TARGET_CAPABILITIES,
+//RS         "FFI",
+//RS         ForeignProvider::Npm,
+//RS         ForeignStubFile::Suffix("d.ts"),
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Swift,
+//RS         BinderRuntime::SwiftCAbiBridge,
+//RS         BindingStubKind::SwiftModule,
+//RS         BinderStatus::Planned,
+//RS         ForeignAbiContract::C,
+//RS         PLANNED_CAPABILITIES,
+//RS         "FFI",
+//RS         ForeignProvider::SwiftPm,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Go,
+//RS         BinderRuntime::GoCArchive,
+//RS         BindingStubKind::GoExports,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::C,
+//RS         C_CAPABILITIES,
+//RS         "FFI.Go",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Java,
+//RS         BinderRuntime::EmbeddedJvm,
+//RS         BindingStubKind::JvmClass,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Java",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::DotNet,
+//RS         BinderRuntime::EmbeddedDotNet,
+//RS         BindingStubKind::DotNetAssembly,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.DotNet",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Tcl,
+//RS         BinderRuntime::EmbeddedTcl,
+//RS         BindingStubKind::TclScript,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Tcl",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Lua,
+//RS         BinderRuntime::EmbeddedLua,
+//RS         BindingStubKind::LuaScript,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Lua",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Fortran,
+//RS         BinderRuntime::FortranIsoCBinding,
+//RS         BindingStubKind::FortranIsoCBinding,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::C,
+//RS         C_CAPABILITIES,
+//RS         "FFI.Fortran",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Cobol,
+//RS         BinderRuntime::GnuCobolCAbi,
+//RS         BindingStubKind::GnuCobolCopybook,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::C,
+//RS         C_CAPABILITIES,
+//RS         "FFI.Cobol",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Ada,
+//RS         BinderRuntime::AdaGnatCAbi,
+//RS         BindingStubKind::AdaSpec,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::C,
+//RS         C_CAPABILITIES,
+//RS         "FFI.Ada",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Pascal,
+//RS         BinderRuntime::FreePascalCdecl,
+//RS         BindingStubKind::PascalSource,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::C,
+//RS         C_CAPABILITIES,
+//RS         "FFI.Pascal",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Dart,
+//RS         BinderRuntime::DartApiDl,
+//RS         BindingStubKind::DartContract,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Dart",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::StemSuffix("_host.dart"),
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::PowerShell,
+//RS         BinderRuntime::SupervisedPowerShell,
+//RS         BindingStubKind::PowerShellScript,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.PowerShell",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Perl,
+//RS         BinderRuntime::SupervisedPerl,
+//RS         BindingStubKind::PerlScript,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Perl",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Ruby,
+//RS         BinderRuntime::SupervisedRuby,
+//RS         BindingStubKind::RubyScript,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Ruby",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Php,
+//RS         BinderRuntime::SupervisedPhpPool,
+//RS         BindingStubKind::PhpScript,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Php",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::R,
+//RS         BinderRuntime::SupervisedR,
+//RS         BindingStubKind::RScript,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.R",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Octave,
+//RS         BinderRuntime::SupervisedOctave,
+//RS         BindingStubKind::OctaveScript,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Octave",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS     binder(
+//RS         ForeignLanguage::Com,
+//RS         BinderRuntime::WindowsComAutomation,
+//RS         BindingStubKind::ComTypeLibrary,
+//RS         BinderStatus::Active,
+//RS         ForeignAbiContract::MESSAGE,
+//RS         ADAPTER_CAPABILITIES,
+//RS         "FFI.Com",
+//RS         ForeignProvider::System,
+//RS         ForeignStubFile::None,
+//RS     ),
+//RS ];
+//RS 
+//RS pub fn binder_descriptor(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
+//RS     FOREIGN_BINDERS
+//RS         .iter()
+//RS         .find(|descriptor| descriptor.language == language)
+//RS }
+//RS 
+//RS pub fn foreign_abi_contract(language: ForeignLanguage) -> ForeignAbiContract {
+//RS     binder_descriptor(language)
+//RS         .map(|descriptor| descriptor.contract)
+//RS         .unwrap_or(ForeignAbiContract::MESSAGE)
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct BinderCapabilityReport {
+//RS     pub schema: &'static str,
+//RS     pub language: ForeignLanguage,
+//RS     pub status: BinderStatus,
+//RS     pub contract: ForeignAbiContract,
+//RS     pub effect_root: &'static str,
+//RS     pub provider: ForeignProvider,
+//RS     pub capabilities: &'static [BinderCapability],
+//RS }
+//RS 
+//RS impl BinderDescriptor {
+//RS     pub const fn abi_contract(self) -> ForeignAbiContract {
+//RS         self.contract
+//RS     }
+//RS 
+//RS     pub fn stamp(self) -> String {
+//RS         format!(
+//RS             "{FOREIGN_DESCRIPTOR_SCHEMA};language={:?};surface={:?};status={:?};runtime={:?};stub={:?};contract={};effect={};provider={:?};cache={};type-stub={:?};capabilities={:?};bridge={}",
+//RS             self.language,
+//RS             self.surface,
+//RS             self.status,
+//RS             self.runtime,
+//RS             self.stub_kind,
+//RS             self.contract.stamp(),
+//RS             self.effect_root,
+//RS             self.provider,
+//RS             self.cache_extension,
+//RS             self.type_stub_file,
+//RS             self.capabilities,
+//RS             self.language.bridge_prefix(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn capability_report(self) -> BinderCapabilityReport {
+//RS         BinderCapabilityReport {
+//RS             schema: FOREIGN_DESCRIPTOR_SCHEMA,
+//RS             language: self.language,
+//RS             status: self.status,
+//RS             contract: self.contract,
+//RS             effect_root: self.effect_root,
+//RS             provider: self.provider,
+//RS             capabilities: self.capabilities,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl ExternFn {
+//RS     /// Whether the resident JIT and tier-0 evaluator can execute this signature
+//RS     /// through the hidden bridge.
+//RS     ///
+//RS     /// Every other valid C signature stays on CModule's direct wrapper path.
+//RS     pub fn hidden_c_bridge_compatible(&self) -> bool {
+//RS         self.hidden_c_bridge_compatible_with_handles(&[])
+//RS     }
+//RS 
+//RS     /// Whether this signature can use the resident bridge with the checked
+//RS     /// opaque C handles supplied by the binder.
+//RS     pub fn hidden_c_bridge_compatible_with_handles(
+//RS         &self,
+//RS         handles: &[FfiHandleFact],
+//RS     ) -> bool {
+//RS         // Generated managed callback facades and their native start/adapter
+//RS         // rows are still checked bridge facts. They are not value-shaped C
+//RS         // calls, so the ordinary scalar predicate below would incorrectly
+//RS         // discard the producer row before TIR can lower its lifecycle.
+//RS         if self.generated
+//RS             && (self.callback_transport.as_deref().is_some_and(|transport| {
+//RS                 matches!(transport, "managed" | "managed-close" | "emit-task")
+//RS             }) || self.name.starts_with("__jet_native_"))
+//RS         {
+//RS             return true;
+//RS         }
+//RS         let is_handle = |ty: &Type| {
+//RS             matches!(ty, Type::Named(name) if handles.iter().any(|handle| handle.jet_name == *name))
+//RS         };
+//RS         let is_array_element = |ty: &Type| {
+//RS             matches!(
+//RS                 ty,
+//RS                 Type::Int
+//RS                     | Type::IntN { .. }
+//RS                     | Type::Float
+//RS                     | Type::Float32
+//RS                     | Type::Bool
+//RS                     | Type::Char
+//RS                     | Type::InlineRange { .. }
+//RS                     | Type::Tagged { .. }
+//RS                     | Type::Quantity { .. }
+//RS                     | Type::Named(_)
+//RS             ) && !is_handle(ty)
+//RS         };
+//RS         let is_length_name = |name: &str| {
+//RS             let lower = name.to_ascii_lowercase();
+//RS             matches!(
+//RS                 lower.as_str(),
+//RS                 "n" | "len" | "length" | "count" | "size" | "num" | "number"
+//RS             ) || [
+//RS                 "_len", "_length", "_count", "_size", "_num", "_number",
+//RS             ]
+//RS             .iter()
+//RS             .any(|suffix| lower.ends_with(suffix))
+//RS                 || [
+//RS                     "len_", "length_", "count_", "size_", "num_", "number_",
+//RS                 ]
+//RS                 .iter()
+//RS                 .any(|prefix| lower.starts_with(prefix))
+//RS         };
+//RS         let is_integer = |ty: &Type| ty.is_integer();
+//RS         let companion_count = |index: usize| {
+//RS             self.params.iter().enumerate().any(|(other, param)| {
+//RS                 other != index
+//RS                     && is_length_name(&param.name)
+//RS                     && is_integer(&param.ty)
+//RS             })
+//RS         };
+//RS         let return_count = || {
+//RS             self.params.iter().any(|param| {
+//RS                 param.convention == AccessConvention::Write
+//RS                     && is_length_name(&param.name)
+//RS                     && is_integer(&param.ty)
+//RS             })
+//RS         };
+//RS         let generated_array_shape = self.generated
+//RS             && self.params.iter().enumerate().all(|(index, param)| {
+//RS                 match &param.ty {
+//RS                     Type::List(inner) => {
+//RS                         param.convention != AccessConvention::Move
+//RS                             && is_array_element(inner)
+//RS                             && companion_count(index)
+//RS                     }
+//RS                     _ => {
+//RS                         param.convention == AccessConvention::Read
+//RS                             || (param.convention == AccessConvention::Write
+//RS                                 && self.return_type.as_ref().is_some_and(|ty| {
+//RS                                     matches!(ty, Type::List(_))
+//RS                                 })
+//RS                                 && is_length_name(&param.name)
+//RS                                 && is_integer(&param.ty))
+//RS                             || (param.convention == AccessConvention::Move
+//RS                                 && is_handle(&param.ty))
+//RS                     }
+//RS                 }
+//RS             })
+//RS             && self
+//RS                 .return_type
+//RS                 .as_ref()
+//RS                 .map_or(true, |ty| !matches!(ty, Type::List(_)) || return_count());
+//RS         if generated_array_shape {
+//RS             return true;
+//RS         }
+//RS         // D-FFI-WRITEBACK1: direct scalar, String, and checked opaque-handle
+//RS         // rows use the resident uniform ABI. Keep records and lists out of
+//RS         // this value-shaped route: records retain their typed CModule ABI,
+//RS         // while generated list/count rows use the branch above.
+//RS         fn is_scalar(ty: &Type) -> bool {
+//RS             match ty {
+//RS                 Type::Int | Type::IntN { .. } | Type::Float | Type::Float32 | Type::Bool => true,
+//RS                 Type::InlineRange { base, .. }
+//RS                 | Type::Tagged { inner: base, .. }
+//RS                 | Type::Quantity { base, .. } => is_scalar(base),
+//RS                 _ => false,
+//RS             }
+//RS         }
+//RS         let is_resident_value = |ty: &Type| {
+//RS             is_scalar(ty) || matches!(ty, Type::String) || is_handle(ty)
+//RS         };
+//RS         let resident_value_shape = self.params.iter().all(|param| match param.convention {
+//RS                 AccessConvention::Read | AccessConvention::Write => is_resident_value(&param.ty),
+//RS                 AccessConvention::Move => is_handle(&param.ty),
+//RS             })
+//RS             && self
+//RS                 .return_type
+//RS                 .as_ref()
+//RS                 .is_none_or(|ty| is_resident_value(ty));
+//RS         if resident_value_shape {
+//RS             return true;
+//RS         }
+//RS         // D-FFI-CAP1: non-scalar nominal/sequence rows remain on their typed
+//RS         // CModule paths. Generated CBind arrays are the checked exception:
+//RS         // their pointer/count descriptor carries native access convention and
+//RS         // the bridge owns the temporary storage.
+//RS         if self
+//RS             .params
+//RS             .iter()
+//RS             .any(|param| param.convention != AccessConvention::Read)
+//RS         {
+//RS             return false;
+//RS         }
+//RS         match self.return_type.as_ref() {
+//RS             None => {
+//RS                 self.params.is_empty()
+//RS                     || matches!(self.params.as_slice(), [param] if param.ty == Type::Int)
+//RS                     || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
+//RS             }
+//RS             Some(Type::Int) => {
+//RS                 self.params.is_empty()
+//RS                     || matches!(self.params.as_slice(), [param] if param.ty == Type::Int)
+//RS                     || matches!(self.params.as_slice(), [param] if param.ty == Type::String)
+//RS                     || matches!(
+//RS                         self.params.as_slice(),
+//RS                         [left, right] if left.ty == Type::Int && right.ty == Type::Int
+//RS                     )
+//RS                     || matches!(
+//RS                         self.params.as_slice(),
+//RS                         [handle, code] if handle.ty == Type::Int && code.ty == Type::String
+//RS                     )
+//RS                     || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
+//RS             }
+//RS             Some(Type::Float) => {
+//RS                 matches!(self.params.as_slice(), [param] if param.ty == Type::Float)
+//RS                     || (self.params.len() == 6
+//RS                         && self.params.iter().all(|param| param.ty == Type::Float))
+//RS                     || matches!(
+//RS                         self.params.as_slice(),
+//RS                         [handle, code] if handle.ty == Type::Int && code.ty == Type::String
+//RS                     )
+//RS                     || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
+//RS             }
+//RS             Some(Type::Bool) => {
+//RS                 self.params.is_empty()
+//RS                     || matches!(self.params.as_slice(), [param] if param.ty == Type::Bool)
+//RS                     || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
+//RS             }
+//RS             Some(Type::String) => {
+//RS                 matches!(self.params.as_slice(), [param] if param.ty == Type::String)
+//RS                     || matches!(
+//RS                         self.params.as_slice(),
+//RS                         [handle, code] if handle.ty == Type::Int && code.ty == Type::String
+//RS                     )
+//RS                     || matches!(
+//RS                         self.params.as_slice(),
+//RS                         [handle, code, deadline]
+//RS                             if handle.ty == Type::Int
+//RS                                 && code.ty == Type::String
+//RS                                 && deadline.ty == Type::Int
+//RS                     )
+//RS                     || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
+//RS             }
+//RS             Some(Type::Named(name)) => is_handle(&Type::Named(name.clone()))
+//RS                 && self.params.is_empty(),
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS }
+//RS /// The close-symbol provenance attached to a generated C handle.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum FfiCloseSource {
+//RS     Conventional,
+//RS     Overlay,
+//RS }
+//RS 
+//RS impl FfiCloseSource {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Conventional => "conventional",
+//RS             Self::Overlay => "overlay",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(value: &str) -> Option<Self> {
+//RS         match value {
+//RS             "conventional" => Some(Self::Conventional),
+//RS             "overlay" => Some(Self::Overlay),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The explicit concurrency fact attached to a generated C handle.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum FfiThreadSafety {
+//RS     Unspecified,
+//RS     Safe,
+//RS     Unsafe,
+//RS }
+//RS 
+//RS impl Default for FfiThreadSafety {
+//RS     fn default() -> Self {
+//RS         Self::Unspecified
+//RS     }
+//RS }
+//RS 
+//RS impl FfiThreadSafety {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Unspecified => "unspecified",
+//RS             Self::Safe => "safe",
+//RS             Self::Unsafe => "unsafe",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(value: &str) -> Option<Self> {
+//RS         match value {
+//RS             "unspecified" => Some(Self::Unspecified),
+//RS             "safe" => Some(Self::Safe),
+//RS             "unsafe" => Some(Self::Unsafe),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Explicit native libraries attached to one foreign binding.
+//RS ///
+//RS /// `direct` is the set of libraries named by the program. `transitive` is the
+//RS /// set supplied by an overlay. Neither list is inferred from headers or native
+//RS /// symbols; both are canonicalized so cache identities remain stable.
+//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
+//RS pub struct FfiLinkClosure {
+//RS     pub direct: Vec<String>,
+//RS     pub transitive: Vec<String>,
+//RS }
+//RS 
+//RS impl FfiLinkClosure {
+//RS     pub fn new(mut direct: Vec<String>, mut transitive: Vec<String>) -> Self {
+//RS         direct.retain(|lib| !lib.is_empty());
+//RS         transitive.retain(|lib| !lib.is_empty());
+//RS         direct.sort();
+//RS         direct.dedup();
+//RS         transitive.sort();
+//RS         transitive.dedup();
+//RS         transitive.retain(|lib| !direct.binary_search(lib).is_ok());
+//RS         Self {
+//RS             direct,
+//RS             transitive,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn libraries(&self) -> impl Iterator<Item = &str> {
+//RS         self.direct
+//RS             .iter()
+//RS             .chain(self.transitive.iter())
+//RS             .map(String::as_str)
+//RS     }
+//RS 
+//RS     /// Stable human-readable encoding used by binding metadata and bridge
+//RS     /// provenance. Empty lists stay explicit rather than becoming a missing
+//RS     /// field.
+//RS     pub fn stable_key(&self) -> String {
+//RS         format!(
+//RS             "direct={};transitive={}",
+//RS             self.direct.join(","),
+//RS             self.transitive.join(",")
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// One opaque C typedef promoted to a nominal Jet handle.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct FfiHandleFact {
+//RS     pub lib: String,
+//RS     pub typedef_name: String,
+//RS     pub jet_name: String,
+//RS     pub close: String,
+//RS     pub close_source: FfiCloseSource,
+//RS     pub thread_safety: FfiThreadSafety,
+//RS }
+//RS 
+//RS impl FfiHandleFact {
+//RS     /// Stable field encoding for content-addressed bridge identities.
+//RS     pub fn stable_key(&self) -> String {
+//RS         format!(
+//RS             "lib={};typedef={};jet={};close={};close-source={};thread-safety={}",
+//RS             self.lib,
+//RS             self.typedef_name,
+//RS             self.jet_name,
+//RS             self.close,
+//RS             self.close_source.as_str(),
+//RS             self.thread_safety.as_str()
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// Compiler-owned adapter used when a native close function returns a status.
+//RS /// The raw C declaration remains available under its original name; this
+//RS /// private Unit-returning function is the one attached to `#Close`.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct FfiCloseAdapter {
+//RS     pub lib: String,
+//RS     pub handle_type: String,
+//RS     pub raw_function: String,
+//RS     pub adapter_function: String,
+//RS }
+//RS 
+//RS /// The result of resolving one C `use` in one file.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct CImportLink {
+//RS     pub importing_idx: usize,
+//RS     /// `None` is a file-wide import; `Some` names the inline module whose
+//RS     /// body owns the import. Inline modules may intentionally reuse an alias,
+//RS     /// so the scope is part of the resolution key.
+//RS     pub scope: Option<String>,
+//RS     pub alias: String,
+//RS     pub target_idx: usize,
+//RS }
+//RS 
+//RS /// One C library that the program links against.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct CLib {
+//RS     pub lib: String,
+//RS     pub module_idx: usize,
+//RS }
+//RS 
+//RS /// One bindgen export replaced by a user `#Import` overlay.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct COverlayOverride {
+//RS     pub lib: String,
+//RS     pub generated_symbol: String,
+//RS     pub overlay_symbol: String,
+//RS }
+//RS 
+//RS 
+//RS /// Basis assigned to one foreign boundary obligation.
+//RS #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum FfiEvidenceBasis {
+//RS     Proved,
+//RS     Enforced,
+//RS     Contained,
+//RS     Trusted,
+//RS     #[default]
+//RS     Unknown,
+//RS }
+//RS 
+//RS impl FfiEvidenceBasis {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Proved => "proved",
+//RS             Self::Enforced => "enforced",
+//RS             Self::Contained => "contained",
+//RS             Self::Trusted => "trusted",
+//RS             Self::Unknown => "unknown",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(value: &str) -> Option<Self> {
+//RS         match value {
+//RS             "proved" => Some(Self::Proved),
+//RS             "enforced" => Some(Self::Enforced),
+//RS             "contained" => Some(Self::Contained),
+//RS             "trusted" => Some(Self::Trusted),
+//RS             "unknown" => Some(Self::Unknown),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn permits_guarantee(self) -> bool {
+//RS         matches!(self, Self::Proved | Self::Enforced | Self::Contained)
+//RS     }
+//RS 
+//RS     pub const fn is_unknown(self) -> bool {
+//RS         matches!(self, Self::Unknown)
+//RS     }
+//RS }
+//RS 
+//RS pub const FFI_BOUNDARY_OBLIGATIONS: &[&str] = &[
+//RS     "abi",
+//RS     "layout",
+//RS     "width",
+//RS     "alignment",
+//RS     "ownership",
+//RS     "lifetime",
+//RS     "cleanup",
+//RS     "encoding",
+//RS     "nullability",
+//RS     "errors",
+//RS     "exceptions",
+//RS     "callbacks",
+//RS     "task-thread",
+//RS     "target",
+//RS     "copy-cost",
+//RS     "effects",
+//RS ];
+//RS 
+//RS /// Lower-layer carrier projected from `jet_pkg_model::ForeignBoundaryContract`.
+//RS ///
+//RS /// This carrier lets sema, TIR, and every execution tier consume the same
+//RS /// checked rows without making the lower layers depend upward on pkg-model.
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub struct FfiBoundaryObligation {
+//RS     pub name: String,
+//RS     pub basis: FfiEvidenceBasis,
+//RS     pub checker: String,
+//RS     pub assumptions: Vec<String>,
+//RS     pub coverage_digest: String,
+//RS }
+//RS 
+//RS /// Lower-layer boundary facts carried by `ProgramBundle::cffi`.
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
+//RS pub struct FfiBoundaryFacts {
+//RS     pub schema: String,
+//RS     pub digest: String,
+//RS     pub language: String,
+//RS     pub library: String,
+//RS     pub effect_root: String,
+//RS     pub effects: String,
+//RS     pub source_authority: String,
+//RS     pub artifact_coverage_digest: String,
+//RS     pub loaded_artifact: String,
+//RS     pub transitive_dependencies: Option<Vec<String>>,
+//RS     pub reachable_callbacks: Option<Vec<String>>,
+//RS     pub compiler_flags: Option<Vec<String>>,
+//RS     pub target: String,
+//RS     pub generator: String,
+//RS     pub obligations: Vec<FfiBoundaryObligation>,
+//RS }
+//RS 
+//RS impl FfiBoundaryFacts {
+//RS     pub fn obligation(&self, name: &str) -> Option<&FfiBoundaryObligation> {
+//RS         self.obligations
+//RS             .iter()
+//RS             .find(|obligation| obligation.name == name)
+//RS     }
+//RS 
+//RS     pub fn permits_guarantee(&self, name: &str) -> bool {
+//RS         self.obligation(name)
+//RS             .is_some_and(|obligation| obligation.basis.permits_guarantee())
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         if self.schema.trim().is_empty()
+//RS             || self.digest.trim().is_empty()
+//RS             || self.language.trim().is_empty()
+//RS             || self.library.trim().is_empty()
+//RS             || self.effect_root.trim().is_empty()
+//RS             || self.effects.trim().is_empty()
+//RS             || self.source_authority.trim().is_empty()
+//RS             || self.artifact_coverage_digest.trim().is_empty()
+//RS             || self.loaded_artifact.trim().is_empty()
+//RS             || self.target.trim().is_empty()
+//RS             || self.generator.trim().is_empty()
+//RS         {
+//RS             return Err("foreign boundary carrier is incomplete".into());
+//RS         }
+//RS         if !self
+//RS             .effects
+//RS             .split(';')
+//RS             .any(|effect| effect == self.effect_root)
+//RS         {
+//RS             return Err("foreign boundary carrier narrowed its effect root".into());
+//RS         }
+//RS         let coverage_complete = self.transitive_dependencies.is_some()
+//RS             && self.reachable_callbacks.is_some()
+//RS             && self.compiler_flags.is_some();
+//RS         if !coverage_complete
+//RS             && self
+//RS                 .obligations
+//RS                 .iter()
+//RS                 .any(|obligation| !obligation.basis.is_unknown())
+//RS         {
+//RS             return Err("foreign boundary carrier has incomplete artifact coverage".into());
+//RS         }
+//RS         let mut names = std::collections::BTreeSet::new();
+//RS         for obligation in &self.obligations {
+//RS             if obligation.name.trim().is_empty()
+//RS                 || obligation.checker.trim().is_empty()
+//RS                 || obligation.assumptions.is_empty()
+//RS                 || obligation.coverage_digest != self.artifact_coverage_digest
+//RS             {
+//RS                 return Err(format!(
+//RS                     "foreign boundary carrier has invalid `{}` obligation",
+//RS                     obligation.name
+//RS                 ));
+//RS             }
+//RS             if !names.insert(obligation.name.as_str()) {
+//RS                 return Err(format!(
+//RS                     "foreign boundary carrier repeats `{}` obligation",
+//RS                     obligation.name
+//RS                 ));
+//RS             }
+//RS         }
+//RS         for obligation in FFI_BOUNDARY_OBLIGATIONS {
+//RS             if !names.contains(obligation) {
+//RS                 return Err(format!(
+//RS                     "foreign boundary carrier omits `{obligation}` obligation"
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn has_unknown_obligations(&self) -> bool {
+//RS         self.obligations
+//RS             .iter()
+//RS             .any(|obligation| obligation.basis.is_unknown())
+//RS     }
+//RS }
+//RS 
+//RS /// Gathered C-FFI artifacts threaded into sema and codegen.
+//RS #[derive(Debug, Default, Clone)]
+//RS pub struct CFfi {
+//RS     pub import_links: Vec<CImportLink>,
+//RS     pub libs: Vec<CLib>,
+//RS     /// Bindgen symbols replaced by matching user overlay declarations.
+//RS     pub overlay_overrides: Vec<COverlayOverride>,
+//RS     /// Canonical boundary evidence projected from the binder provenance row.
+//RS     /// Sema and execution tiers consume this carrier; it owns no new rules.
+//RS     pub boundaries: Vec<FfiBoundaryFacts>,
+//RS     /// Opaque typedef ownership and close provenance from generated bindings.
+//RS     pub handle_facts: Vec<FfiHandleFact>,
+//RS     /// Explicit direct and transitive native libraries for the whole bundle.
+//RS     pub link_closure: FfiLinkClosure,
+//RS     /// Compiler-owned Unit adapters for status-returning native closers.
+//RS     pub close_adapters: Vec<FfiCloseAdapter>,
+//RS }
+//RS 
+//RS 
+//RS 
+//RS impl CFfi {
+//RS     pub fn target_for(&self, importing_idx: usize, alias: &str) -> Option<usize> {
+//RS         self.target_for_scope(importing_idx, None, alias)
+//RS     }
+//RS 
+//RS     pub fn target_for_scope(
+//RS         &self,
+//RS         importing_idx: usize,
+//RS         scope: Option<&str>,
+//RS         alias: &str,
+//RS     ) -> Option<usize> {
+//RS         self.import_links
+//RS             .iter()
+//RS             .find(|l| {
+//RS                 l.importing_idx == importing_idx && l.scope.as_deref() == scope && l.alias == alias
+//RS             })
+//RS             .map(|l| l.target_idx)
+//RS     }
+//RS 
+//RS     pub fn links_c(&self) -> bool {
+//RS         !self.libs.is_empty()
+//RS     }
+//RS 
+//RS     pub fn handle_fact(&self, lib: &str, jet_name: &str) -> Option<&FfiHandleFact> {
+//RS         self.handle_facts
+//RS             .iter()
+//RS             .find(|fact| fact.lib == lib && fact.jet_name == jet_name)
+//RS     }
+//RS     pub fn boundary_for(&self, lib: &str) -> Option<&FfiBoundaryFacts> {
+//RS         self.boundaries
+//RS             .iter()
+//RS             .find(|boundary| boundary.library == lib)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS // ── Comptime embed input ──────────────────────────────────────────────────────
+//RS 
+//RS /// D-CTEFFECT1 (Tier-1): one comptime embed input recorded for reproducibility.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct ComptimeInput {
+//RS     pub path: String,
+//RS     pub hash: String,
+//RS }
+//RS 
+//RS // ── Rust FFI link artifact ────────────────────────────────────────────────────
+//RS 
+//RS /// Built FFI bridge artifact paths for rustc linking (M7).
+//RS #[derive(Debug, Clone)]
+//RS pub struct FfiLink {
+//RS     pub crate_name: String,
+//RS     /// Content-addressed identity of the bridge inputs.
+//RS     pub cache_identity: String,
+//RS     /// Queryable provenance sidecar for the published bridge artifacts.
+//RS     pub provenance_path: PathBuf,
+//RS     pub rlib_path: PathBuf,
+//RS     /// Shared library with `*_cabi` trampolines for the resident Cranelift JIT.
+//RS     pub cdylib_path: PathBuf,
+//RS     /// Selected-target runtime dependencies emitted by Cargo.
+//RS     pub target_deps_dir: PathBuf,
+//RS     /// Host artifacts needed while rustc loads target metadata (notably proc macros).
+//RS     pub host_deps_dir: PathBuf,
+//RS     /// Path to the built `jet-crypto-helper` binary, present only when the
+//RS     /// bridge was built with `needs_crypto` (card c146 — package signing shells
+//RS     /// out to this helper for Ed25519 keygen/sign/verify). `None` otherwise.
+//RS     pub helper_bin_path: Option<PathBuf>,
+//RS     /// U13 (D-JPK-SECRETCRYPTO1): path to the built `jet-secrets-helper`
+//RS     /// binary, present only when the bridge was built with `needs_secrets` —
+//RS     /// `jetpack secrets set/get/recipients/keygen` shells out to this for the
+//RS     /// age-style encrypt/decrypt/keygen operations. `None` otherwise.
+//RS     pub secrets_helper_bin_path: Option<PathBuf>,
+//RS     /// Opaque C handle facts captured by the bridge input.
+//RS     pub handle_facts: Vec<FfiHandleFact>,
+//RS     /// Explicit native link closure captured by the bridge input.
+//RS     pub link_closure: FfiLinkClosure,
+//RS }
+//RS 
+//RS impl FfiLink {
+//RS     /// Cargo's dependency search paths, target artifacts first and without duplicates.
+//RS     pub fn dependency_dirs(&self) -> impl Iterator<Item = &Path> {
+//RS         std::iter::once(self.target_deps_dir.as_path()).chain(
+//RS             (self.host_deps_dir != self.target_deps_dir).then_some(self.host_deps_dir.as_path()),
+//RS         )
+//RS     }
+//RS }
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::{
+//RS         AccessConvention, ExternFn, FfiCloseSource, FfiHandleFact, FfiThreadSafety,
+//RS         Type,
+//RS     };
+//RS     use crate::AST::{Param, ParamZone};
+//RS     use crate::Diagnostics::Span;
+//RS 
+//RS     fn param(name: &str, convention: AccessConvention, ty: Type) -> Param {
+//RS         Param {
+//RS             convention,
+//RS             root: false,
+//RS             name: name.to_string(),
+//RS             name_span: Span::new(0, 0),
+//RS             public_label: None,
+//RS             zone: ParamZone::Either,
+//RS             ty,
+//RS             ty_span: Span::new(0, 0),
+//RS             default: None,
+//RS             variadic: false,
+//RS             variadic_bound_list: None,
+//RS             declared_view_from_names: None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn foreign(params: Vec<Param>, return_type: Option<Type>, generated: bool) -> ExternFn {
+//RS         ExternFn {
+//RS             abi: None,
+//RS             name: "ffi_fixture".to_string(),
+//RS             name_span: Span::new(0, 0),
+//RS             params,
+//RS             return_type,
+//RS             return_type_span: None,
+//RS             rust_path: "ffi_fixture".to_string(),
+//RS             rust_path_span: Span::new(0, 0),
+//RS             generated,
+//RS             callback_transport: None,
+//RS             callback_plan_digest: None,
+//RS             callback_identity: None,
+//RS             effect_root: None,
+//RS             undo: None,
+//RS             close: None,
+//RS             span: Span::new(0, 0),
+//RS         }
+//RS     }
+//RS 
+//RS     fn handle(name: &str) -> FfiHandleFact {
+//RS         FfiHandleFact {
+//RS             lib: "fixture".to_string(),
+//RS             typedef_name: name.to_string(),
+//RS             jet_name: name.to_string(),
+//RS             close: format!("{name}_close"),
+//RS             close_source: FfiCloseSource::Conventional,
+//RS             thread_safety: FfiThreadSafety::Safe,
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn resident_writeback_gate_admits_checked_scalar_string_and_handle_rows() {
+//RS         let no_handles = Vec::new();
+//RS         assert!(foreign(
+//RS             vec![param("value", AccessConvention::Write, Type::Int)],
+//RS             None,
+//RS             false,
+//RS         )
+//RS         .hidden_c_bridge_compatible_with_handles(&no_handles));
+//RS         assert!(foreign(
+//RS             vec![param("value", AccessConvention::Write, Type::String)],
+//RS             Some(Type::String),
+//RS             false,
+//RS         )
+//RS         .hidden_c_bridge_compatible_with_handles(&no_handles));
+//RS 
+//RS         let handles = vec![handle("HbFont")];
+//RS         assert!(foreign(
+//RS             vec![
+//RS                 param("font", AccessConvention::Write, Type::Named("HbFont".into())),
+//RS                 param("scale", AccessConvention::Read, Type::Int),
+//RS             ],
+//RS             None,
+//RS             true,
+//RS         )
+//RS         .hidden_c_bridge_compatible_with_handles(&handles));
+//RS         assert!(foreign(
+//RS             vec![param("font", AccessConvention::Move, Type::Named("HbFont".into()))],
+//RS             None,
+//RS             true,
+//RS         )
+//RS         .hidden_c_bridge_compatible_with_handles(&handles));
+//RS         let mixed_handles = vec![handle("HbFont"), handle("HbBuffer")];
+//RS         assert!(
+//RS             foreign(
+//RS                 vec![
+//RS                     param("font", AccessConvention::Write, Type::Named("HbFont".into())),
+//RS                     param("buffer", AccessConvention::Read, Type::Named("HbBuffer".into())),
+//RS                 ],
+//RS                 None,
+//RS                 true,
+//RS             )
+//RS             .hidden_c_bridge_compatible_with_handles(&mixed_handles)
+//RS         );
+//RS         assert!(
+//RS             !foreign(
+//RS                 vec![param("font", AccessConvention::Write, Type::Named("HbFont".into()))],
+//RS                 None,
+//RS                 true,
+//RS             )
+//RS             .hidden_c_bridge_compatible_with_handles(&no_handles)
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn resident_writeback_gate_preserves_record_and_list_direct_routes() {
+//RS         let handles = vec![handle("HbFont")];
+//RS         assert!(
+//RS             !foreign(
+//RS                 vec![param(
+//RS                     "record",
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("Coord".into()),
+//RS                 )],
+//RS                 None,
+//RS                 false,
+//RS             )
+//RS             .hidden_c_bridge_compatible_with_handles(&handles)
+//RS         );
+//RS         assert!(
+//RS             !foreign(
+//RS                 vec![param(
+//RS                     "records",
+//RS                     AccessConvention::Write,
+//RS                     Type::List(Box::new(Type::Named("Coord".into()))),
+//RS                 )],
+//RS                 None,
+//RS                 false,
+//RS             )
+//RS             .hidden_c_bridge_compatible_with_handles(&handles)
+//RS         );
+//RS 
+//RS         let generated_array = foreign(
+//RS             vec![
+//RS                 param(
+//RS                     "values",
+//RS                     AccessConvention::Read,
+//RS                     Type::List(Box::new(Type::Int)),
+//RS                 ),
+//RS                 param("length", AccessConvention::Write, Type::Int),
+//RS             ],
+//RS             Some(Type::List(Box::new(Type::Int))),
+//RS             true,
+//RS         );
+//RS         assert!(generated_array.hidden_c_bridge_compatible_with_handles(&handles));
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2107 crates/jet-foundation/src/AST/ffi.rs:1-1591
+

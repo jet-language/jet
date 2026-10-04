@@ -1,0 +1,177 @@
+use JetSema.[sema_marker_rules_embedded_catalog]
+
+// Rust: crates/jet-foundation/src/Policy.rs:1957
+#Test("every_registered_rule_has_one_exact_applicability_row") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    rows :: applied_rule_registry(catalog)
+    counts := [String:Int]{}
+    loop row in rows -> &counts.set(row.name, (counts.get(row.name) ?? 0) + 1)
+    loop row in rows {
+        assert_eq(counts.get(row.name), Val(1))
+        if row.status == TAppliedRuleStatus.Active -> assert(!row.sites.is_empty())
+        assert_eq(row.signature.variadic != None, row.signature.variadic_source_type != None)
+        assert(row.signature.required() <= row.signature.params.len())
+        loop param in row.signature.params {
+            assert(!param.name.is_empty())
+            assert(!param.source_type.is_empty())
+        }
+    }
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:1993
+#Test("site_variants_match_the_enum") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    assert_eq(SITE_VARIANTS.len(), 18)
+    published := [String]{}
+    loop site in RuleSite.ALL -> &published.push(rule_site_name(site))
+    assert_eq(published, SITE_VARIANTS)
+    declaration :: rule_arg_declaration("Site", catalog.argument_menus) ?? panic("`Site` is published in `core.compiler.lang`")
+    assert_eq(declaration.variants, SITE_VARIANTS)
+    assert(!declaration.first_variant_segment)
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:2007
+#Test("authoritative_attachment_matrix_covers_declaration_sites") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    legal :: [(String, RuleSite)]{
+        ("allow", RuleSite.Field), ("Rename", RuleSite.Variant),
+        ("Inline", RuleSite.Method), ("Policy", RuleSite.Module),
+        ("HTML", RuleSite.File), ("Test", RuleSite.Test),
+        ("Job", RuleSite.Function), ("Doc", RuleSite.Type),
+        ("Doc", RuleSite.Variant), ("Doc", RuleSite.Method),
+    }
+    loop (name, site) in legal -> assert(rule_allows(catalog, name, site))
+    illegal :: [(String, RuleSite)]{
+        ("Job", RuleSite.Field), ("Skip", RuleSite.Variant),
+        ("Job", RuleSite.Method), ("HTML", RuleSite.Module),
+        ("Inline", RuleSite.File), ("Codable", RuleSite.Function),
+        ("Doc", RuleSite.Function),
+    }
+    loop (name, site) in illegal -> assert(!rule_allows(catalog, name, site))
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:2041
+#Test("authority_rows_are_site_bound_and_policy_is_lexical") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    loop name in [String]{"Unsafe", "FX", "Scrub", "wire"} {
+        row :: applied_rule(catalog, name) ?? panic("missing {name}")
+        assert_eq(row.resolution, "SiteBound")
+        assert(row.policy_scopes.is_empty())
+    }
+    policy :: applied_rule(catalog, "Policy") ?? panic("missing Policy")
+    assert_eq(policy.policy_scopes, [String]{"Package", "Module", "Function", "Block"})
+    assert(!rule_allows(catalog, "Pure", RuleSite.Type))
+    assert(!rule_allows(catalog, "Codable", RuleSite.Function))
+    assert(!rule_allows(catalog, "Doc", RuleSite.Block))
+    assert(!rule_allows(catalog, "Region", RuleSite.File))
+    assert(!rule_allows(catalog, "PubFile", RuleSite.Field))
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:2067
+#Test("every_typed_marker_argument_has_one_core_lang_declaration") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    assert_eq(catalog.argument_menus.len(), 19)
+    expected := [String:Bool]{"Site": true, "Track": true}
+    loop row in catalog.rows {
+        loop parameter in row.signature.params -> &expected.set(parameter.source_type, true)
+        if row.signature.variadic_source_type == .Val(name) -> &expected.set(name, true)
+    }
+    retained := [String:Bool]{}
+    loop name in expected.keys() {
+        if canonical_rule_arg_variants(name) != None -> &retained.set(name, true)
+    }
+    actual := [String:Bool]{}
+    loop declaration in catalog.argument_menus -> &actual.set(declaration.name, true)
+    assert_eq(actual, retained)
+    loop declaration in catalog.argument_menus {
+        assert_eq(declaration.variants, canonical_rule_arg_variants(declaration.name) ?? panic("missing canonical menu"))
+    }
+    loop row in catalog.rows {
+        loop param in row.signature.params {
+            if !rule_arg_needs_core_declaration(param.source_type) -> next
+            assert(rule_arg_declaration(param.source_type, catalog.argument_menus) != None)
+        }
+        if row.signature.variadic_source_type == .Val(source_type) {
+            if rule_arg_needs_core_declaration(source_type) -> assert(rule_arg_declaration(source_type, catalog.argument_menus) != None)
+        }
+    }
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:2121
+#Test("generated_rule_argument_variants_match_canonical_surface") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    variants :: (name: String) -> (rule_arg_declaration(name, catalog.argument_menus) ?? panic("missing {name}")).variants
+    assert_eq(variants("ABI"), [String]{"system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"})
+    assert_eq(variants("FFILanguage"), [String]{"c", "cpp", "asm"})
+    assert_eq(variants("Layout"), [String]{"c", "columnar"})
+    assert_eq(variants("NamingCase"), [String]{"camel", "snake", "pascal", "kebab", "screaming"})
+    assert_eq(variants("Effect"), EFFECT_ROOTS)
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:2142
+#Test("marker_behaviour_lives_in_columns_not_name_lists") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    row :: (name: String) -> applied_rule(catalog, name) ?? panic("missing {name}")
+    loop name in [String]{"Pre", "Post", "allow"} -> assert(row(name).repeatable)
+    loop name in [String]{"Inline", "Codable", "Job", "PubFile", "NoPrelude"} -> assert(!row(name).repeatable)
+    loop name in [String]{"FFI", "RenameAll"} -> assert(row(name).owns_menu)
+    assert(!row("Layout").owns_menu)
+    companion :: row("Doc").companion_site ?? panic("Doc declares a companion")
+    assert_eq(companion.rule, "Job")
+    assert_eq(companion.site, "Function")
+    assert(!rule_allows(catalog, "Doc", RuleSite.Function))
+    assert(rule_allows_with_companions(catalog, "Doc", RuleSite.Function, [String]{"Job", "Doc"}))
+    assert(!rule_allows_with_companions(catalog, "Doc", RuleSite.Function, [String]{"Doc"}))
+    assert(!rule_allows_with_companions(catalog, "Doc", RuleSite.Block, [String]{"Job", "Doc"}))
+    assert((rule_arg_declaration("Effect", catalog.argument_menus) ?? panic("Effect")).first_variant_segment)
+    assert((rule_arg_declaration("Target", catalog.argument_menus) ?? panic("Target")).first_variant_segment)
+    assert(!(rule_arg_declaration("NamingCase", catalog.argument_menus) ?? panic("NamingCase")).first_variant_segment)
+    assert(applied_rule(catalog, "Authority") == None)
+    assert(applied_rule(catalog, "Summarize") == None)
+    assert(!DERIVE_RULES.contains("Summarize"))
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:2208
+#Test("nonderive_type_markers_cannot_rhyme_with_traits") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    assert(nonderive_marker_trait_collision(catalog, "Layout"))
+    assert(nonderive_marker_trait_collision(catalog, "Discriminant"))
+    assert(!nonderive_marker_trait_collision(catalog, "Comparable"))
+    assert(!nonderive_marker_trait_collision(catalog, "Debug"))
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:2216
+#Test("rule_argument_bindings_cover_variadics_and_named_arguments") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    policy :: (applied_rule(catalog, "Policy") ?? panic("Policy")).signature
+    assert_eq(policy.argument_bindings([String?]{}), Val([RuleArgumentBinding]{}))
+    assert_eq(policy.argument_types([String?]{None, None, None}), Val([TAppliedRuleArgKind]{.Any, .Any, .Any}))
+    assert(policy.argument_bindings([String?]{Val("setting")}) == None)
+    meta :: (applied_rule(catalog, "Meta") ?? panic("Meta")).signature
+    reordered :: meta.argument_bindings([String?]{Val("maturity"), Val("category")}) ?? panic("reordered")
+    indexes := [Int?]{}
+    loop binding in reordered -> &indexes.push(binding.parameter_index)
+    assert_eq(indexes, [Int?]{Val(2), Val(0)})
+    assert_eq(meta.argument_types([String?]{Val("maturity"), Val("category")}), Val([TAppliedRuleArgKind]{.Ident, .String}))
+    assert(meta.argument_bindings([String?]{None, Val("maturity")}) != None)
+    assert(meta.argument_bindings([String?]{Val("maturity")}) != None)
+    assert(meta.argument_bindings([String?]{Val("category"), None}) == None)
+    assert(meta.argument_bindings([String?]{Val("category"), Val("category")}) == None)
+    assert(meta.argument_types([String?]{Val("unknown")}) == None)
+    transition :: (applied_rule(catalog, "Transition") ?? panic("Transition")).signature
+    assert(transition.argument_bindings([String?]{Val("to")}) == None)
+}
+
+// Rust: crates/jet-foundation/src/Policy.rs:2254
+#Test("marker_argument_bindings_accept_positional_strings") {
+    catalog :: sema_marker_rules_embedded_catalog()
+    span :: Span{start: 0, end: 1}
+    marker :: Marker{name: "Doc", negated: false, name_span: span,
+        args: [MarkerCallArg]{MarkerCallArg.Expr(Expr.Str([StrPart]{StrPart.Lit("text")}, span))},
+        arg_labels: [String?]{None}, span: span, ct: None}
+    signature :: (applied_rule(catalog, "Doc") ?? panic("Doc")).signature
+    bindings :: signature.marker_argument_bindings(marker) ?? panic("Doc's ordinary positional argument must bind to text")
+    assert_eq(bindings.len(), 1)
+    assert_eq(bindings[0].parameter_index, Val(0))
+    assert_eq(bindings[0].ty, TAppliedRuleArgKind.String)
+}

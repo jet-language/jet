@@ -1,0 +1,367 @@
+// PORT-PENDING 2154 crates-jet-codegen-src-codegen-embedding: crates/jet-codegen/src/Codegen/Embedding.rs:1-363
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! The typed export shapes shared by native Library and sandbox outputs.
+//RS //!
+//RS //! Artifact emission consumes the selected checked MIR plan and its export
+//RS //! rows. Each row references a `MirFunction`; the function row supplies the
+//RS //! scalar/component signature and access modes while the plan supplies the
+//RS //! external symbol. This module has no source-AST ingress or backend policy
+//RS //! selection.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS 
+//RS use jet_foundation::MIR::{
+//RS     require_canonical_mir_optimization, MirAccess, MirArtifactId, MirArtifactKind, MirArtifactPlan,
+//RS     MirFailureCarrier, MirFunctionForm, MirOwnership, MirProgram, MirType, MirTypeDefKind,
+//RS     MirTypeKind, MirTypeId, MirViewProvenance,
+//RS };
+//RS use jet_foundation::Names::mangle_path;
+//RS use jet_foundation::Shape::ShapeProjectionKind;
+//RS 
+//RS /// Scalar types admitted at the native Library boundary and as the
+//RS /// compatibility projection of a sandbox export.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ExportScalar {
+//RS     Int,
+//RS     Float,
+//RS     Bool,
+//RS     Text,
+//RS }
+//RS 
+//RS impl ExportScalar {
+//RS     pub(crate) fn rust_ty(self) -> &'static str {
+//RS         match self {
+//RS             Self::Int => "i64",
+//RS             Self::Float => "f64",
+//RS             Self::Bool => "bool",
+//RS             Self::Text => "String",
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn wit_ty(self) -> &'static str {
+//RS         match self {
+//RS             Self::Int => "s64",
+//RS             Self::Float => "f64",
+//RS             Self::Bool => "bool",
+//RS             Self::Text => "string",
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn c_ty(self) -> &'static str {
+//RS         match self {
+//RS             Self::Int => "int64_t",
+//RS             Self::Float => "double",
+//RS             Self::Bool => "bool",
+//RS             Self::Text => "JetText",
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn python_ctypes_ty(self) -> &'static str {
+//RS         match self {
+//RS             Self::Int => "ctypes.c_int64",
+//RS             Self::Float => "ctypes.c_double",
+//RS             Self::Bool => "ctypes.c_bool",
+//RS             Self::Text => "JetText",
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn swift_ty(self) -> &'static str {
+//RS         match self {
+//RS             Self::Int => "Int64",
+//RS             Self::Float => "Double",
+//RS             Self::Bool => "Bool",
+//RS             Self::Text => "JetText",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The canonical Component Model descriptors live in foundation MIR so every
+//RS /// lowering and execution tier consumes one semantic row.
+//RS pub use jet_foundation::MIR::{ComponentSignatureDescriptor, ComponentTypeDescriptor};
+//RS /// MIR type shape used while an artifact export is being assembled.  The
+//RS /// semantic descriptor below is the canonical cross-tier representation.
+//RS #[derive(Debug, Clone)]
+//RS pub struct ComponentSignature {
+//RS     pub params: Vec<MirType>,
+//RS     pub result: MirType,
+//RS }
+//RS 
+//RS /// Checked ownership and returned-view facts carried with every export row.
+//RS /// Library projections consume this fact instead of re-deriving lifetime
+//RS /// semantics from names or generated source.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct ExportOwnership {
+//RS     pub parameters: Vec<MirOwnership>,
+//RS     pub return_views: Option<BTreeMap<Vec<String>, MirViewProvenance>>,
+//RS }
+//RS 
+//RS /// One checked export projected for native and component artifact adapters.
+//RS #[derive(Debug, Clone)]
+//RS pub struct ExportFunction {
+//RS     pub name: String,
+//RS     pub symbol: String,
+//RS     pub callee: String,
+//RS     pub scalar: Option<ExportScalar>,
+//RS     pub component: Option<ComponentSignature>,
+//RS     pub params: Vec<MirAccess>,
+//RS     pub ownership: ExportOwnership,
+//RS     pub failure: MirFailureCarrier,
+//RS }
+//RS fn mir_scalar(ty: &MirType) -> Option<ExportScalar> {
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int => Some(ExportScalar::Int),
+//RS         MirTypeKind::Float => Some(ExportScalar::Float),
+//RS         MirTypeKind::Bool => Some(ExportScalar::Bool),
+//RS         MirTypeKind::String => Some(ExportScalar::Text),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn component_type_descriptor(
+//RS     program: &MirProgram,
+//RS     ty: &MirType,
+//RS     seen: &mut BTreeSet<MirTypeId>,
+//RS ) -> Option<ComponentTypeDescriptor> {
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int => Some(ComponentTypeDescriptor::Int),
+//RS         MirTypeKind::Float => Some(ComponentTypeDescriptor::Float),
+//RS         MirTypeKind::Bool => Some(ComponentTypeDescriptor::Bool),
+//RS         MirTypeKind::String => Some(ComponentTypeDescriptor::String),
+//RS         MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+//RS             Some(ComponentTypeDescriptor::List(Box::new(
+//RS                 component_type_descriptor(program, inner, seen)?,
+//RS             )))
+//RS         }
+//RS         MirTypeKind::InlineRange { base: inner, .. }
+//RS         | MirTypeKind::Tagged { inner, .. } => component_type_descriptor(program, inner, seen),
+//RS         MirTypeKind::Option(inner) => Some(ComponentTypeDescriptor::Option(Box::new(
+//RS             component_type_descriptor(program, inner, seen)?,
+//RS         ))),
+//RS         MirTypeKind::Result { ok, err } => Some(ComponentTypeDescriptor::Result {
+//RS             ok: Box::new(component_type_descriptor(program, ok, seen)?),
+//RS             err: Box::new(component_type_descriptor(program, err, seen)?),
+//RS         }),
+//RS         MirTypeKind::Apply { name: nominal, .. } => {
+//RS             if !seen.insert(nominal.id) {
+//RS                 return None;
+//RS             }
+//RS             let result = program
+//RS                 .types
+//RS                 .iter()
+//RS                 .find(|definition| definition.id == nominal.id)
+//RS                 .and_then(|definition| match &definition.kind {
+//RS                     MirTypeDefKind::Struct { fields, .. } => Some(ComponentTypeDescriptor::Record {
+//RS                         name: definition.name.clone(),
+//RS                         fields: fields
+//RS                             .iter()
+//RS                             .enumerate()
+//RS                             .filter(|(_, field)| !field.skip && !field.computed)
+//RS                             .map(|(index, field)| {
+//RS                                 component_type_descriptor(program, &field.ty, seen).map(|ty| {
+//RS                                     (
+//RS                                         index,
+//RS                                         field
+//RS                                             .shape_names
+//RS                                             .name_for(ShapeProjectionKind::Json)
+//RS                                             .expect("checked MIR field is missing its JSON shape name")
+//RS                                             .to_string(),
+//RS                                         ty,
+//RS                                     )
+//RS                                 })
+//RS                             })
+//RS                             .collect::<Option<Vec<_>>>()?,
+//RS                     }),
+//RS                     MirTypeDefKind::Alias { target } => {
+//RS                         component_type_descriptor(program, target, seen)
+//RS                     }
+//RS                     _ => None,
+//RS                 });
+//RS             seen.remove(&nominal.id);
+//RS             result
+//RS         }
+//RS         MirTypeKind::Map { .. }
+//RS         | MirTypeKind::Shared(_)
+//RS         | MirTypeKind::Fn(_)
+//RS         | MirTypeKind::SendFn { .. }
+//RS         | MirTypeKind::TraitObject(_)
+//RS         | MirTypeKind::Tuple(_)
+//RS         | MirTypeKind::IntN { .. }
+//RS         | MirTypeKind::Float32
+//RS         | MirTypeKind::Union(_)
+//RS         | MirTypeKind::Quantity { .. }
+//RS         | MirTypeKind::Measure(_)
+//RS         | MirTypeKind::Char => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Build the canonical checked Component Model shape. Every consumer uses
+//RS /// this result rather than independently walking MIR definitions.
+//RS pub fn component_descriptor(
+//RS     program: &MirProgram,
+//RS     signature: &ComponentSignature,
+//RS ) -> Option<ComponentSignatureDescriptor> {
+//RS     let mut seen = BTreeSet::new();
+//RS     Some(ComponentSignatureDescriptor {
+//RS         params: signature
+//RS             .params
+//RS             .iter()
+//RS             .map(|ty| component_type_descriptor(program, ty, &mut seen))
+//RS             .collect::<Option<Vec<_>>>()?,
+//RS         result: component_type_descriptor(program, &signature.result, &mut seen)?,
+//RS     })
+//RS }
+//RS 
+//RS fn mir_type_contains_view(ty: &MirType) -> bool {
+//RS     match ty.kind() {
+//RS         MirTypeKind::Apply { name, .. } if matches!(name.name.as_str(), "View" | "ViewMut") => true,
+//RS         MirTypeKind::List(inner)
+//RS         | MirTypeKind::Option(inner)
+//RS         | MirTypeKind::FixedList { elem: inner, .. }
+//RS         | MirTypeKind::InlineRange { base: inner, .. }
+//RS         | MirTypeKind::Tagged { inner, .. } => mir_type_contains_view(inner),
+//RS         MirTypeKind::Result { ok, err } => {
+//RS             mir_type_contains_view(ok) || mir_type_contains_view(err)
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn component_signature(
+//RS     program: &MirProgram,
+//RS     function: &jet_foundation::MIR::MirFunction,
+//RS     allow_library_views: bool,
+//RS ) -> Option<ComponentSignature> {
+//RS     let signature = ComponentSignature {
+//RS         params: function
+//RS             .params
+//RS             .iter()
+//RS             .map(|param| param.ty.clone())
+//RS             .collect(),
+//RS         result: function.return_type.clone(),
+//RS     };
+//RS     if component_descriptor(program, &signature).is_some()
+//RS         || (allow_library_views
+//RS             && (matches!(
+//RS                 &function.failure,
+//RS                 MirFailureCarrier::Result { .. }
+//RS             )
+//RS                 || signature.params.iter().any(mir_type_contains_view)
+//RS                 || mir_type_contains_view(&signature.result)))
+//RS     {
+//RS         Some(signature)
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS fn scalar_signature(function: &jet_foundation::MIR::MirFunction) -> Option<ExportScalar> {
+//RS     let return_type = match &function.failure {
+//RS         // The generated callable always carries the checked failure rail, but
+//RS         // a native scalar boundary publishes its success value.
+//RS         MirFailureCarrier::Result { success, .. } => success,
+//RS         MirFailureCarrier::Infallible => &function.return_type,
+//RS         MirFailureCarrier::Optional { .. } | MirFailureCarrier::Diverges { .. } => return None,
+//RS     };
+//RS     let scalar = mir_scalar(return_type)?;
+//RS     function
+//RS         .params
+//RS         .iter()
+//RS         .all(|param| mir_scalar(&param.ty) == Some(scalar))
+//RS         .then_some(scalar)
+//RS }
+//RS 
+//RS fn export_function(
+//RS     program: &MirProgram,
+//RS     export: &jet_foundation::MIR::MirExport,
+//RS     allow_component: bool,
+//RS     allow_library_views: bool,
+//RS ) -> Option<ExportFunction> {
+//RS     let function = program
+//RS         .functions
+//RS         .iter()
+//RS         .find(|function| function.id == export.function)?;
+//RS     if !matches!(function.form, MirFunctionForm::TopLevel) || !function.capture_params.is_empty() {
+//RS         return None;
+//RS     }
+//RS     let scalar = scalar_signature(function);
+//RS     let component = allow_component
+//RS         .then(|| component_signature(program, function, allow_library_views))
+//RS         .flatten();
+//RS     if scalar.is_none() && component.is_none() {
+//RS         return None;
+//RS     }
+//RS     Some(ExportFunction {
+//RS         name: function.name.clone(),
+//RS         symbol: export.symbol.clone(),
+//RS         callee: mangle_path(&function.key),
+//RS         scalar,
+//RS         component,
+//RS         params: function.params.iter().map(|param| param.access).collect(),
+//RS         ownership: ExportOwnership {
+//RS             parameters: function.params.iter().map(|param| param.ownership).collect(),
+//RS             return_views: function.return_view_provenance.clone(),
+//RS         },
+//RS         failure: function.failure.clone(),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn selected_artifact(
+//RS     program: &MirProgram,
+//RS     artifact_id: MirArtifactId,
+//RS ) -> &MirArtifactPlan {
+//RS     require_canonical_mir_optimization(program)
+//RS         .unwrap_or_else(|error| panic!("MIR artifact emission requires canonical optimization: {error}"));
+//RS     program
+//RS         .artifacts
+//RS         .iter()
+//RS         .find(|artifact| artifact.id == artifact_id)
+//RS         .unwrap_or_else(|| panic!("MIR artifact ID {:?} has no plan row", artifact_id))
+//RS }
+//RS 
+//RS /// Collect the exact export list from the selected MIR artifact plan.
+//RS ///
+//RS /// Export selection is a checked MIR fact. This function never reads source
+//RS /// AST or reconstructs visibility/target policy from the program.
+//RS pub fn export_surface(program: &MirProgram, artifact_id: MirArtifactId) -> Vec<ExportFunction> {
+//RS     let artifact = selected_artifact(program, artifact_id);
+//RS     let allow_component = matches!(
+//RS         artifact.kind,
+//RS         MirArtifactKind::NativeLibrary | MirArtifactKind::SandboxPlugin
+//RS     );
+//RS     let allow_library_views = artifact.kind == MirArtifactKind::NativeLibrary;
+//RS     artifact
+//RS         .exports
+//RS         .iter()
+//RS         .filter_map(|export| {
+//RS             export_function(
+//RS                 program,
+//RS                 export,
+//RS                 allow_component,
+//RS                 allow_library_views,
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::ExportScalar;
+//RS 
+//RS     #[test]
+//RS     fn scalar_lowering_table_covers_both_boundaries() {
+//RS         let rows = [
+//RS             (ExportScalar::Int, "i64", "s64", "int64_t"),
+//RS             (ExportScalar::Float, "f64", "f64", "double"),
+//RS             (ExportScalar::Bool, "bool", "bool", "bool"),
+//RS             (ExportScalar::Text, "String", "string", "JetText"),
+//RS         ];
+//RS         for (scalar, rust, wit, c) in rows {
+//RS             assert_eq!(scalar.rust_ty(), rust);
+//RS             assert_eq!(scalar.wit_ty(), wit);
+//RS             assert_eq!(scalar.c_ty(), c);
+//RS         }
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2154 crates/jet-codegen/src/Codegen/Embedding.rs:1-363
+

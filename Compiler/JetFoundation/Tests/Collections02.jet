@@ -1,0 +1,43 @@
+use JetFoundation.Collections.[builtin_method_mutates, builtin_receiver_borrow, BuiltinReceiverBorrow]
+use JetFoundation.Types.[Type, Measure]
+
+// Rust: crates/jet-foundation/src/Collections.rs:3941
+#Test("list_mutation_borrows_match_for_growable_and_fixed_lists") {
+    methods := [
+        ("push", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("append", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("try_push", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("try_reserve", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("pop", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("insert", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("remove", BuiltinReceiverBorrow.EagerWrite),
+        ("extend", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("reverse", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("sort", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("sort_by", BuiltinReceiverBorrow.EagerWrite),
+        ("sort_desc", BuiltinReceiverBorrow.EagerWrite),
+        ("sort_by_desc", BuiltinReceiverBorrow.EagerWrite),
+        ("clear", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("update_first", BuiltinReceiverBorrow.EagerWrite),
+        ("split_write", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("get_disjoint_write", BuiltinReceiverBorrow.TwoPhaseWrite),
+        ("edit_disjoint", BuiltinReceiverBorrow.EagerWrite)
+    ]
+    list := Type.List{element: Type.Int}
+    fixed := Type.FixedList{elem: Type.Int, len: Measure.Literal{kind: "length", value: 3}}
+    result := Type.Result{ok: ~list, err: Type.Named{name: "Error"}}
+    receivers := [("List", ~list), ("FixedList", ~fixed), ("Result<List>", ~result)]
+    loop (label, receiver) in receivers {
+        loop (method, expected) in methods {
+            assert(builtin_method_mutates(receiver, method), "{label}.{method} is not a mutation")
+            assert(builtin_receiver_borrow(receiver, method) == expected, "{label}.{method} borrow drifted")
+        }
+    }
+    queue_only_methods := ["push_front", "push_back", "pop_front", "pop_back", "peek_front", "peek_back"]
+    loop (label, receiver) in receivers {
+        loop method in queue_only_methods {
+            assert(!builtin_method_mutates(receiver, method), "{label}.{method} unexpectedly mutates")
+            assert(builtin_receiver_borrow(receiver, method) == BuiltinReceiverBorrow.Read, "{label}.{method} borrow drifted")
+        }
+    }
+}

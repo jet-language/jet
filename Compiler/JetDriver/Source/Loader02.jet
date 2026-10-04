@@ -1,0 +1,1804 @@
+// PORT-PENDING 2040 crates-jet-driver-src-loader-slice-1801: crates/jet-driver/src/Loader.rs:1801-3600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         let entry_overlay = overlays
+//RS             .iter()
+//RS             .rev()
+//RS             .find(|(candidate, _)| normalize_path(candidate) == entry_abs)
+//RS             .map(|(_, text)| *text);
+//RS         let entry_authority = match entry_overlay {
+//RS             Some(_) => None,
+//RS             None => match checked_source_file(&entry_abs, &entry_abs.display().to_string()) {
+//RS                 Ok(checked) => Some(checked),
+//RS                 Err(error) => return Err(record_loader_error(&mut sink, error)),
+//RS             },
+//RS         };
+//RS         let raw = entry_overlay.map(str::to_string).unwrap_or_else(|| {
+//RS             entry_authority
+//RS                 .as_ref()
+//RS                 .map(|(_, _, source)| source.clone())
+//RS                 .expect("one source reader must provide the entry text")
+//RS         });
+//RS         let mut package_source = raw.clone();
+//RS         let mut package_origin = entry_abs.clone();
+//RS         let mut inline_block = match crate::Package::extract_inline_package(&raw) {
+//RS             Ok(block) => block,
+//RS             Err(error) => {
+//RS                 return Err(record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(
+//RS                         &entry_abs.display().to_string(),
+//RS                         &raw,
+//RS                         vec![error.diagnostic()],
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS         };
+//RS         if inline_block.is_some() && inline_root.is_none() {
+//RS             package_source_root = Some(entry_dir.clone());
+//RS         }
+//RS         if inline_block.is_none() {
+//RS             if let Some(inline_root) = inline_root.as_ref() {
+//RS                 let resolver = match AuthorityResolver::open(inline_root) {
+//RS                     Ok(resolver) => resolver,
+//RS                     Err(error) => {
+//RS                         return Err(record_loader_error(
+//RS                             &mut sink,
+//RS                             LoaderError::at(
+//RS                                 &inline_root.display().to_string(),
+//RS                                 "",
+//RS                                 vec![error.diagnostic()],
+//RS                             ),
+//RS                         ));
+//RS                     }
+//RS                 };
+//RS                 let carrier = match checked_inline_package_entry(&resolver) {
+//RS                     Ok(Some(file)) => file,
+//RS                     Ok(None) => {
+//RS                         return Err(record_loader_error(
+//RS                             &mut sink,
+//RS                             LoaderError::at(
+//RS                                 &inline_root.display().to_string(),
+//RS                                 "",
+//RS                                 vec![Diagnostic::error(
+//RS                                     "E1362",
+//RS                                     "the inline Package entry disappeared".to_string(),
+//RS                                     "the package source changed during entry resolution"
+//RS                                         .to_string(),
+//RS                                     "restore the inline Package declaration and retry".to_string(),
+//RS                                     None,
+//RS                                 )],
+//RS                             ),
+//RS                         ));
+//RS                     }
+//RS                     Err(diagnostic) => {
+//RS                         return Err(record_loader_error(
+//RS                             &mut sink,
+//RS                             LoaderError::at(
+//RS                                 &inline_root.display().to_string(),
+//RS                                 "",
+//RS                                 vec![diagnostic],
+//RS                             ),
+//RS                         ));
+//RS                     }
+//RS                 };
+//RS                 package_source = match carrier.text() {
+//RS                     Ok(source) => source,
+//RS                     Err(error) => {
+//RS                         return Err(record_loader_error(
+//RS                             &mut sink,
+//RS                             LoaderError::at(
+//RS                                 &carrier.path.display().to_string(),
+//RS                                 "",
+//RS                                 vec![error.diagnostic()],
+//RS                             ),
+//RS                         ));
+//RS                     }
+//RS                 };
+//RS                 package_origin = carrier.path.clone();
+//RS                 inline_block = match crate::Package::extract_inline_package(&package_source) {
+//RS                     Ok(block) => block,
+//RS                     Err(error) => {
+//RS                         return Err(record_loader_error(
+//RS                             &mut sink,
+//RS                             LoaderError::at(
+//RS                                 &package_origin.display().to_string(),
+//RS                                 &package_source,
+//RS                                 vec![error.diagnostic()],
+//RS                             ),
+//RS                         ));
+//RS                     }
+//RS                 };
+//RS             }
+//RS         }
+//RS         let mut package_policy = organization_policy.clone();
+//RS         let mut package_lints_deny = Vec::new();
+//RS         let mut package_guarantees = PackageGuarantees::default();
+//RS         let mut package_output_roots = HashSet::new();
+//RS         let mut package_output_declarations = Vec::new();
+//RS         let mut package_defaults = Vec::new();
+//RS         let mut program_allocator = crate::TargetMachine::AllocatorPolicy::HostedDefault;
+//RS         let mut pkg_dep_dirs = HashMap::new();
+//RS         let mut boundary_policies = Vec::new();
+//RS         if let Some(block) = inline_block {
+//RS             let mut package_manifest = match crate::Package::PackageFacts::parse_uncomposed(
+//RS                 block.body(&package_source),
+//RS                 package_origin.display().to_string(),
+//RS             ) {
+//RS                 Ok(facts) => facts,
+//RS                 Err(error) => {
+//RS                     return Err(record_loader_error(
+//RS                         &mut sink,
+//RS                         LoaderError::at(
+//RS                             &package_origin.display().to_string(),
+//RS                             &package_source,
+//RS                             vec![Diagnostic::error(
+//RS                                 "E1362",
+//RS                                 "the inline Package body is malformed".to_string(),
+//RS                                 error.to_string(),
+//RS                                 "fix the inline Package fields, then retry".to_string(),
+//RS                                 Some(block.body_span),
+//RS                             )],
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             if let Err(error) =
+//RS                 complete_inline_package_facts(
+//RS                     &mut package_manifest,
+//RS                     package_source_root.as_deref().unwrap_or(&entry_dir),
+//RS                 )
+//RS             {
+//RS                 return Err(record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(
+//RS                         &package_origin.display().to_string(),
+//RS                         &package_source,
+//RS                         vec![Diagnostic::error(
+//RS                             "E1362",
+//RS                             "the inline Package body is malformed".to_string(),
+//RS                             error.to_string(),
+//RS                             "fix the inline Package fields, then retry".to_string(),
+//RS                             Some(block.body_span),
+//RS                         )],
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS             let mf =
+//RS                 match crate::Package::to_manifest(&package_manifest, block.body(&package_source)) {
+//RS                 Ok(manifest) => manifest,
+//RS                 Err(diagnostic) => {
+//RS                     return Err(record_loader_error(
+//RS                         &mut sink,
+//RS                         LoaderError::at(
+//RS                             &package_origin.display().to_string(),
+//RS                             &package_source,
+//RS                             vec![diagnostic],
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             layer_ceiling = mf.package.layer;
+//RS             package_edition = Manifest::effective_edition(&mf);
+//RS             if let Err(diagnostic) =
+//RS                 Manifest::check_toolchain(&mf, &package_origin.display().to_string())
+//RS             {
+//RS                 return Err(record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(
+//RS                         &package_origin.display().to_string(),
+//RS                         &package_source,
+//RS                         vec![diagnostic],
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS             if let Err(diagnostic) =
+//RS                 Manifest::check_edition_support(&mf, &package_origin.display().to_string())
+//RS             {
+//RS                 return Err(record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(
+//RS                         &package_origin.display().to_string(),
+//RS                         &package_source,
+//RS                         vec![diagnostic],
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS             if let Err(failure) = verify_inline_manifest_lock(
+//RS                 package_source_root.as_deref().unwrap_or(&entry_dir),
+//RS                 &mf,
+//RS             ) {
+//RS                 return Err(record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(
+//RS                         &failure.path.display().to_string(),
+//RS                         &failure.raw,
+//RS                         vec![failure.diagnostic],
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS             if let Err(diagnostic) = dry_resolve_path_deps(
+//RS                 &mf,
+//RS                 package_source_root.as_deref().unwrap_or(&entry_dir),
+//RS             ) {
+//RS                 return Err(record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(
+//RS                         &package_origin.display().to_string(),
+//RS                         &package_source,
+//RS                         vec![diagnostic],
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS             for pkg in &package_manifest.packages {
+//RS                 match crate::Package::discover_module_in(
+//RS                     package_source_root.as_deref().unwrap_or(&entry_dir),
+//RS                     &pkg.name,
+//RS                 ) {
+//RS                     Ok(_) => {}
+//RS                     Err(crate::Package::DiscoveryError::NotFound { name }) => {
+//RS                         return Err(record_loader_error(
+//RS                             &mut sink,
+//RS                             LoaderError::at(
+//RS                                 &package_origin.display().to_string(),
+//RS                                 &package_source,
+//RS                                 vec![Manifest::e1212(
+//RS                                     &entry_abs.display().to_string(),
+//RS                                     &name,
+//RS                                 )],
+//RS                             ),
+//RS                         ));
+//RS                     }
+//RS                     Err(crate::Package::DiscoveryError::Ambiguous { name, paths }) => {
+//RS                         return Err(record_loader_error(
+//RS                             &mut sink,
+//RS                             LoaderError::at(
+//RS                                 &package_origin.display().to_string(),
+//RS                                 &package_source,
+//RS                                 vec![Manifest::e1213(
+//RS                                     &entry_abs.display().to_string(),
+//RS                                     &name,
+//RS                                     &paths,
+//RS                                 )],
+//RS                             ),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             pkg_dep_dirs = match collect_dep_dirs(
+//RS                 &mf,
+//RS                 package_source_root.as_deref().unwrap_or(&entry_dir),
+//RS             ) {
+//RS                 Ok(dep_dirs) => dep_dirs,
+//RS                 Err(diagnostics) => {
+//RS                     return Err(record_loader_error(
+//RS                         &mut sink,
+//RS                         LoaderError::at(
+//RS                             &package_origin.display().to_string(),
+//RS                             &package_source,
+//RS                             diagnostics,
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             resolution = collect_pkg_resolution(&package_manifest).map_err(|diagnostic| {
+//RS                 record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(&package_origin.display().to_string(), &package_source, vec![diagnostic]),
+//RS                 )
+//RS             })?;
+//RS             package_guarantees = package_guarantees_for_manifest(&package_manifest);
+//RS             package_output_declarations = package_manifest
+//RS 
+//RS                 .outputs
+//RS                 .iter()
+//RS                 .filter_map(|(address, output)| {
+//RS                     let selected = package_manifest
+//RS                         .entry_path(
+//RS                             package_source_root.as_deref().unwrap_or(&entry_dir),
+//RS                             output,
+//RS                         )
+//RS                         .ok()
+//RS                         .flatten()?;
+//RS                     if selected != entry_abs {
+//RS                         return None;
+//RS                     }
+//RS                     let entry = output.entry.clone()?;
+//RS                     let kind = match &output.kind {
+//RS                         crate::Package::PackageOutputKind::Library => OutputKind::Library,
+//RS                         crate::Package::PackageOutputKind::Executable => OutputKind::Executable,
+//RS                         crate::Package::PackageOutputKind::Service => OutputKind::Service,
+//RS                         crate::Package::PackageOutputKind::Check => OutputKind::Check,
+//RS                         crate::Package::PackageOutputKind::Environment => OutputKind::Environment,
+//RS                         crate::Package::PackageOutputKind::Image => OutputKind::Image,
+//RS                         crate::Package::PackageOutputKind::Bundle => OutputKind::Bundle,
+//RS                         crate::Package::PackageOutputKind::System => OutputKind::System,
+//RS                         crate::Package::PackageOutputKind::Fleet => OutputKind::Fleet,
+//RS                     };
+//RS                     Some((address.clone(), output.name.clone(), kind, entry))
+//RS                 })
+//RS                 .collect();
+//RS             package_defaults = package_manifest
+//RS                 .defaults
+//RS                 .iter()
+//RS                 .map(|(name, address)| (name.clone(), address.clone()))
+//RS                 .collect();
+//RS             package_output_roots = package_output_declarations
+//RS                 .iter()
+//RS                 .filter_map(|(_, _, _, entry)| entry.split('.').next())
+//RS                 .filter(|root| !root.is_empty())
+//RS                 .map(str::to_owned)
+//RS                 .collect();
+//RS             package_lints_deny = package_manifest.policy.lints_deny.clone().unwrap_or_default();
+//RS             package_policy.extend(package_manifest.policy.declarations.clone());
+//RS             let source = package_origin.display().to_string();
+//RS             for declaration in package_policy
+//RS                 .iter_mut()
+//RS                 .filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package)
+//RS             {
+//RS                 declaration.source = source.clone();
+//RS             }
+//RS             boundary_policies.push(ImportBoundaryPolicy::from_manifest(
+//RS                 &mf,
+//RS                 package_source_root.as_deref().unwrap_or(&entry_dir),
+//RS             ));
+//RS             program_allocator = package_manifest.allocator.clone();
+//RS         } else {
+//RS             let (toks, lex_diags) = crate::Lexer::lex(&raw);
+//RS         if lex_diags.is_empty() {
+//RS             if let Ok(prog) = crate::Parser::parse_with_source(&toks, &raw) {
+//RS                 for dep in crate::ScriptDeps::collect(&prog) {
+//RS                     if !crate::ScriptDeps::is_pinned(&dep.selector) {
+//RS                         inline_dep_lints.push(crate::ScriptDeps::l0203_unpinned(&dep));
+//RS                     }
+//RS                     match crate::ScriptDeps::resolve(&dep, &entry_dir) {
+//RS                         Ok(resolved) => {
+//RS                             let authority = match AuthorityResolver::open(&resolved.dir) {
+//RS                                 Ok(authority) => authority,
+//RS                                 Err(error) => {
+//RS                                     return Err(record_loader_error(
+//RS                                         &mut sink,
+//RS                                         LoaderError::at(
+//RS                                             &entry_abs.display().to_string(),
+//RS                                             &raw,
+//RS                                             vec![error.diagnostic()],
+//RS                                         ),
+//RS                                     ));
+//RS                                 }
+//RS                             };
+//RS                             let root = authority.root().to_path_buf();
+//RS                             resolution
+//RS                                 .realized_libs
+//RS                                 .entry(resolved.name.clone())
+//RS                                 .or_insert_with(|| root.clone());
+//RS                             resolution
+//RS                                 .realized_authorities
+//RS                                 .entry(resolved.name.clone())
+//RS                                 .or_insert(authority);
+//RS                         }
+//RS                         Err(reason) => {
+//RS                             return Err(vec![crate::ScriptDeps::e1253(&dep, &reason)]);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         }
+//RS         if let Some((entry_resolver, entry_checked, _)) = entry_authority.as_ref() {
+//RS             if let Err(error) = entry_resolver.revalidate_file(entry_checked) {
+//RS                 return Err(record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(
+//RS                         &entry_abs.display().to_string(),
+//RS                         &raw,
+//RS                         vec![error.diagnostic()],
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         (
+//RS             project_root,
+//RS             pkg_dep_dirs,
+//RS             resolution,
+//RS             package_policy,
+//RS             package_lints_deny,
+//RS             package_guarantees,
+//RS             package_output_roots,
+//RS             package_output_declarations,
+//RS             package_defaults,
+//RS             program_allocator,
+//RS             boundary_policies,
+//RS         )
+//RS     };
+//RS 
+//RS     let mut modules = Vec::new();
+//RS     let mut path_to_idx: HashMap<PathBuf, usize> = HashMap::new();
+//RS     let mut stack: Vec<PathBuf> = Vec::new();
+//RS     let mut parse_teaching = inline_dep_lints;
+//RS     let project_part_overlays = overlays
+//RS         .iter()
+//RS         .map(|(path, source)| (normalize_path(path), (*source).to_string()))
+//RS         .collect::<Vec<_>>();
+//RS     let (project_parts, project_part_failures) =
+//RS         crate::ProjectParts::scan_with_diagnostics(&project_root, &project_part_overlays);
+//RS     if validates_project_parts {
+//RS         if let Some(failure) = project_part_failures
+//RS             .iter()
+//RS             .find(|failure| failure.authority)
+//RS         {
+//RS             let file = authority_failure_file(&project_root, failure);
+//RS             return Err(record_loader_error(
+//RS                 &mut sink,
+//RS                 LoaderError::at(&file, "", vec![failure.problem.clone()]),
+//RS             ));
+//RS         }
+//RS     }
+//RS     let entry_display = relative_display(&project_root, &entry_abs);
+//RS     if let Err(error) = load_file(
+//RS         &entry_abs,
+//RS         &entry_display,
+//RS         &project_root,
+//RS         &pkg_dep_dirs,
+//RS         &pkg_resolution,
+//RS         &package_policy,
+//RS         &package_lints_deny,
+//RS         &mut modules,
+//RS         &mut path_to_idx,
+//RS         &mut stack,
+//RS         overlays,
+//RS         for_check,
+//RS         &mut parse_teaching,
+//RS         &project_parts,
+//RS         &project_part_failures,
+//RS         dependencies,
+//RS         prepared_frontend.as_deref_mut(),
+//RS     ) {
+//RS         return Err(record_loader_error(&mut sink, error));
+//RS     }
+//RS     // D-MOD-CYCLE1=A: a package is one namespace. Loading any file of a
+//RS     // package loads every other file of it (and, through their imports, the
+//RS     // packages they use), so each member sees the whole namespace. Members do
+//RS     // not import each other, so their loop never reaches the import stack.
+//RS     let mut namespace_roots: HashMap<PathBuf, Option<PathBuf>> = HashMap::new();
+//RS     let mut expanded_roots: HashSet<PathBuf> = HashSet::new();
+//RS     loop {
+//RS         let mut pending = Vec::new();
+//RS         for module_idx in 0..modules.len() {
+//RS             let module_path = modules[module_idx].path.clone();
+//RS             let Some(root) = namespace_root(&module_path, &mut namespace_roots) else {
+//RS                 continue;
+//RS             };
+//RS             if !expanded_roots.insert(root.clone()) {
+//RS                 continue;
+//RS             }
+//RS             let members = match package_member_files(&root) {
+//RS                 Ok(members) => members,
+//RS                 Err(diagnostic) => {
+//RS                     return Err(record_loader_error(
+//RS                         &mut sink,
+//RS                         LoaderError::at(&root.display().to_string(), "", vec![diagnostic]),
+//RS                     ));
+//RS                 }
+//RS             };
+//RS             for member in members {
+//RS                 // The package root listed this file, so it is a member of this
+//RS                 // root's namespace. Seed its folder's answer: the upward
+//RS                 // manifest walk stops at a world-writable folder, which would
+//RS                 // otherwise load the file without its package namespace.
+//RS                 if let Some(folder) = member.parent() {
+//RS                     namespace_roots.insert(folder.to_path_buf(), Some(root.clone()));
+//RS                 }
+//RS                 if !path_to_idx.contains_key(&normalize_path(&member)) {
+//RS                     pending.push(member);
+//RS                 }
+//RS             }
+//RS         }
+//RS         if pending.is_empty() {
+//RS             break;
+//RS         }
+//RS         for member in pending {
+//RS             if path_to_idx.contains_key(&normalize_path(&member)) {
+//RS                 continue;
+//RS             }
+//RS             let member_display = relative_display(&project_root, &member);
+//RS             if let Err(error) = load_file(
+//RS                 &member,
+//RS                 &member_display,
+//RS                 &project_root,
+//RS                 &pkg_dep_dirs,
+//RS                 &pkg_resolution,
+//RS                 &package_policy,
+//RS                 &package_lints_deny,
+//RS                 &mut modules,
+//RS                 &mut path_to_idx,
+//RS                 &mut stack,
+//RS                 overlays,
+//RS                 for_check,
+//RS                 &mut parse_teaching,
+//RS                 &project_parts,
+//RS                 &project_part_failures,
+//RS                 dependencies,
+//RS                 prepared_frontend.as_deref_mut(),
+//RS             ) {
+//RS                 return Err(record_loader_error(&mut sink, error));
+//RS             }
+//RS         }
+//RS     }
+//RS     // The manifest walk never crosses a world-writable folder (anyone could
+//RS     // plant sources there), and no loaded package root listed this file, so
+//RS     // it would silently lose its package namespace. Name the folder instead.
+//RS     for module in &modules {
+//RS         if module.path.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT)
+//RS             || namespace_root(&module.path, &mut namespace_roots).is_some()
+//RS         {
+//RS             continue;
+//RS         }
+//RS         if let Some((shared, root)) = shared_folder_below_package(&module.path) {
+//RS             let diagnostic = Diagnostic::error(
+//RS                 "E1334",
+//RS                 format!(
+//RS                     "folder `{}` is world-writable, so `{}` is cut off from package `{}`",
+//RS                     shared.display(),
+//RS                     module.display,
+//RS                     root.display()
+//RS                 ),
+//RS                 "package discovery never crosses a world-writable folder, because anyone could plant sources in it".to_string(),
+//RS                 format!("remove the write bit for others: `chmod o-w {}`", shared.display()),
+//RS                 None,
+//RS             );
+//RS             return Err(record_loader_error(
+//RS                 &mut sink,
+//RS                 LoaderError::at(&module.display, &module.source, vec![diagnostic]),
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     // Explicit project imports report the same conflict at their source span
+//RS     // while loading. Any conflict left here still invalidates discovery,
+//RS     // including duplicate declarations whose internal names stay skipped.
+//RS     if validates_project_parts && !project_parts.conflicts.is_empty() {
+//RS         return Err(record_loader_error(
+//RS             &mut sink,
+//RS             project_parts_loader_error(&project_root, &project_parts.conflicts),
+//RS         ));
+//RS     }
+//RS 
+//RS     if load_adjacent_unqualified {
+//RS         let mut aliases = Vec::new();
+//RS         for import in &modules[0].imports {
+//RS             if !matches!(import.kind, ImportKind::Unqualified { .. }) {
+//RS                 continue;
+//RS             }
+//RS             let is_foreign = import
+//RS                 .foreign_imports()
+//RS                 .map_err(|error| vec![error.diagnostic()])?;
+//RS             if !is_foreign.is_empty() {
+//RS                 continue;
+//RS             }
+//RS             if let Some(binding) = import.walk_bindings().into_iter().next() {
+//RS                 if crate::AST::core_list_prefix(binding.module_alias).is_some() {
+//RS                     continue;
+//RS                 }
+//RS                 aliases.push((binding.module_alias.to_string(), binding.module_alias_span));
+//RS             }
+//RS         }
+//RS         for (alias, span) in aliases {
+//RS             if modules.iter().any(|module| module.alias == alias) {
+//RS                 continue;
+//RS             }
+//RS             let target = entry_abs
+//RS                 .parent()
+//RS                 .unwrap_or(Path::new("."))
+//RS                 .join(&alias)
+//RS                 .with_extension(Syntax::FILE_EXT);
+//RS             let norm = normalize_path(&target);
+//RS             let staged = overlays
+//RS                 .iter()
+//RS                 .any(|(path, _)| normalize_path(path) == norm);
+//RS             let authority_exists = if staged {
+//RS                 false
+//RS             } else {
+//RS                 let parent = target.parent().unwrap_or_else(|| Path::new("."));
+//RS                 let resolver =
+//RS                     AuthorityResolver::open(parent).map_err(|error| vec![error.diagnostic()])?;
+//RS                 let name = target.file_name().ok_or_else(|| {
+//RS                     vec![Diagnostic::error(
+//RS                         "E0603",
+//RS                         format!("can't find the file `{}`", target.display()),
+//RS                         "an adjacent module must name one regular `.jet` file".to_string(),
+//RS                         "use a valid module name or add the adjacent source file".to_string(),
+//RS                         None,
+//RS                     )]
+//RS                 })?;
+//RS                 match resolver.checked_file(Path::new(name)) {
+//RS                     Ok(file) => {
+//RS                         resolver
+//RS                             .revalidate_file(&file)
+//RS                             .map_err(|error| vec![error.diagnostic()])?;
+//RS                         true
+//RS                     }
+//RS                     Err(error) if error.is_missing() => false,
+//RS                     Err(error) => return Err(vec![error.diagnostic()]),
+//RS                 }
+//RS             };
+//RS             if authority_exists || staged {
+//RS                 let display = relative_display(&project_root, &target);
+//RS                 if let Err(error) = load_file(
+//RS                     &target,
+//RS                     &display,
+//RS                     &project_root,
+//RS                     &pkg_dep_dirs,
+//RS                     &pkg_resolution,
+//RS                     &package_policy,
+//RS                     &package_lints_deny,
+//RS                     &mut modules,
+//RS                     &mut path_to_idx,
+//RS                     &mut stack,
+//RS                     overlays,
+//RS                     for_check,
+//RS                     &mut parse_teaching,
+//RS                     &project_parts,
+//RS                     &project_part_failures,
+//RS                     dependencies,
+//RS                     prepared_frontend.as_deref_mut(),
+//RS                 ) {
+//RS                     return Err(record_loader_error(&mut sink, error));
+//RS                 }
+//RS                 // Supply the real adjacent module edge to sema. The user's
+//RS                 // source remains untouched; this is the structural workspace
+//RS                 // context corresponding to `use alias.Item`.
+//RS                 modules[0].imports.push(ImportDecl {
+//RS                     kind: ImportKind::File(alias.clone(), span),
+//RS                     alias: alias.clone(),
+//RS                     alias_span: span,
+//RS                     span,
+//RS                     item_spans: Vec::new(),
+//RS                     local_spans: Vec::new(),
+//RS                     is_pub: false,
+//RS                     is_package_pub: false,
+//RS                     inline_version: None,
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let entry_idx = *path_to_idx.get(&entry_abs).ok_or_else(|| {
+//RS         vec![Diagnostic::error(
+//RS             "E0603",
+//RS             format!("can't find the file `{}`", entry_path),
+//RS             "the entry file must exist on disk".to_string(),
+//RS             "check the spelling and path".to_string(),
+//RS             None,
+//RS         )]
+//RS     })?;
+//RS 
+//RS     // Two files with the same stem (a/util.jet, b/util.jet) would emit two
+//RS     // `mod user_util` blocks; make every module alias unique.
+//RS     let mut seen_aliases: HashSet<String> = HashSet::new();
+//RS     for m in modules.iter_mut() {
+//RS         if !seen_aliases.insert(m.alias.clone()) {
+//RS             let mut n = 2usize;
+//RS             while !seen_aliases.insert(format!("{}_{}", m.alias, n)) {
+//RS                 n += 1;
+//RS             }
+//RS             m.alias = format!("{}_{}", m.alias, n);
+//RS         }
+//RS     }
+//RS 
+//RS     // Pre-resolve every file import to its loaded module index so Codegen doesn't
+//RS     // need to call back into Loader (breaks the Codegen→Loader dep cycle).
+//RS     let mut name_ledger = crate::AST::NameLedger::default();
+//RS     for (module_idx, module) in modules.iter().enumerate() {
+//RS         name_ledger.set_module(
+//RS             module_idx,
+//RS             module.alias.clone(),
+//RS             module.display.clone(),
+//RS             jet_foundation::Names::package_scope_for(&module.path, &project_root),
+//RS         );
+//RS     }
+//RS     let mut boundary_hits = boundary_policies
+//RS         .iter()
+//RS         .map(|policy| vec![false; policy.deny.len()])
+//RS         .collect::<Vec<_>>();
+//RS     for module_idx in 0..modules.len() {
+//RS         let (module_path, imports) = {
+//RS             let m = &modules[module_idx];
+//RS             (m.path.clone(), m.imports.clone())
+//RS         };
+//RS         for imp in &imports {
+//RS             if matches!(imp.kind, ImportKind::Unqualified { .. }) {
+//RS                 continue;
+//RS             }
+//RS             if is_foreign_namespace_import(imp).map_err(|diagnostic| vec![diagnostic])? {
+//RS                 continue;
+//RS             }
+//RS             if core_module_path(imp).is_some() || crate::AST::target_profile_path(imp).is_some() {
+//RS                 continue;
+//RS             }
+//RS 
+//RS             if let Ok(target_path) = resolve_import(
+//RS                 imp,
+//RS                 &module_path,
+//RS                 &project_root,
+//RS                 &pkg_dep_dirs,
+//RS                 &pkg_resolution,
+//RS                 &project_parts,
+//RS                 &project_part_failures,
+//RS             ) {
+//RS                 let norm = normalize_path(&target_path);
+//RS                 if let Some(&target_idx) = path_to_idx.get(&norm) {
+//RS                     if let Some((policy_idx, rule_idx, diagnostic)) = import_boundary_violation(
+//RS                         &boundary_policies,
+//RS                         &modules[module_idx],
+//RS                         &modules[target_idx],
+//RS                         imp.span,
+//RS                     ) {
+//RS                         boundary_hits[policy_idx][rule_idx] = true;
+//RS                         let module = &modules[module_idx];
+//RS                         let rule = &boundary_policies[policy_idx].deny[rule_idx];
+//RS                         let rule_display = format!("{} -> {}", rule.from, rule.to);
+//RS                         let denied_fact = import_edge_fact(
+//RS                             &boundary_policies,
+//RS                             &modules[module_idx],
+//RS                             &modules[target_idx],
+//RS                             imp.span,
+//RS                             "denied",
+//RS                             format!("manifest boundary policy denied edge under {rule_display}"),
+//RS                             Some("manifest rule edit".to_string()),
+//RS                         );
+//RS                         return Err(record_loader_error(
+//RS                             &mut sink,
+//RS                             LoaderError::at(&module.display, &module.source, vec![diagnostic])
+//RS                                 .with_structure_fact(denied_fact),
+//RS                         ));
+//RS                     }
+//RS                     name_ledger.record_import_target(module_idx, imp.span, target_idx);
+//RS                     record_import_edge_fact(
+//RS                         &boundary_policies,
+//RS                         &modules[module_idx],
+//RS                         &modules[target_idx],
+//RS                         imp.span,
+//RS                         &mut name_ledger,
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     if let Err(error) =
+//RS         bind_package_namespaces(&mut modules, entry_idx, &mut namespace_roots, &mut name_ledger)
+//RS     {
+//RS         return Err(record_loader_error(&mut sink, error));
+//RS     }
+//RS     // PackageFacts owns manifest output references. Credit the entry module's
+//RS     // file-module alias before sema populates its aliases, so a checked
+//RS     // `run.jet` does not report an output-only import as unused.
+//RS     for import in &modules[entry_idx].imports {
+//RS         if matches!(import.kind, ImportKind::File(..))
+//RS             && package_output_roots.contains(&import.alias)
+//RS         {
+//RS             name_ledger.record_loader_alias_use(entry_idx, import.alias_span);
+//RS         }
+//RS     }
+//RS 
+//RS     // D-STRUCT-EDGE1=A: an unused rule is feedback, not a hard failure.
+//RS     for (policy_idx, policy) in boundary_policies.iter().enumerate() {
+//RS         for (rule_idx, rule) in policy.deny.iter().enumerate() {
+//RS             if !boundary_hits[policy_idx][rule_idx] {
+//RS                 let rule_display = format!("{} -> {}", rule.from, rule.to);
+//RS                 parse_teaching.push(Diagnostic::from_row(
+//RS                     "L0619",
+//RS                     &[("rule", &rule_display)],
+//RS                     None,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // D-EFFBUDGET1: dependency name → resolved source root, for both `deps:`
+//RS     // entries and hangar-realized `use <pkg>` libraries (U17).
+//RS     let mut dep_roots: HashMap<String, PathBuf> = pkg_dep_dirs
+//RS         .iter()
+//RS         .map(|(name, dependency)| (name.clone(), dependency.source_root.clone()))
+//RS         .collect();
+//RS     for (name, dir) in &pkg_resolution.realized_libs {
+//RS         dep_roots.entry(name.clone()).or_insert_with(|| dir.clone());
+//RS     }
+//RS     let build_facts = jet_foundation::Facts::BuildFactSnapshot::script(
+//RS         &modules[entry_idx].path,
+//RS         Syntax::OSTarget::host(),
+//RS         "dev",
+//RS     );
+//RS     let mut bundle = ProgramBundle {
+//RS         entry: entry_idx,
+//RS         project_root,
+//RS         modules,
+//RS         devtools_registry: jet_foundation::AST::DevtoolsRegistry::default(),
+//RS         parse_teaching,
+//RS         used_core: HashSet::new(),
+//RS         ffi_callback_fns: HashSet::new(),
+//RS         cffi: crate::CFFI::CFfi::default(),
+//RS         comptime_inputs: Vec::new(),
+//RS         name_ledger,
+//RS         layer_ceiling,
+//RS         inferred_layer: Syntax::RuntimeLayer::Core,
+//RS         web_partitions: HashMap::new(),
+//RS         web_partition_enforced: false,
+//RS         web_partition_report: None,
+//RS         dep_roots,
+//RS         package_guarantees,
+//RS         program_allocator,
+//RS         // D-OSTARGET2=B: default to the host OS; the driver overrides this from
+//RS         // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
+//RS         active_os: Syntax::OSTarget::host(),
+//RS         build_facts,
+//RS         edition: package_edition,
+//RS     };
+//RS     // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
+//RS     // record, so a module that names it loads that Core source without a `use`.
+//RS     let url_carrier = jet_foundation::Syntax::TypedHeadKind::URL.carrier_record_module();
+//RS     let names_url_carrier = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .any(|module| source_names_identifier(&module.source, "URL"));
+//RS     let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
+//RS         .iter()
+//RS         .copied()
+//RS         .filter(|source_module| {
+//RS             (names_url_carrier && Some(source_module.module) == url_carrier)
+//RS                 || bundle.modules.iter().any(|module| {
+//RS                     module.imports.iter().any(|import| {
+//RS                         core_source_import_module(import).as_deref() == Some(source_module.module)
+//RS                     })
+//RS                 })
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let mut scheduled_core_source_modules = core_source_modules
+//RS         .iter()
+//RS         .map(|source_module| source_module.module)
+//RS         .collect::<HashSet<_>>();
+//RS     // `Core/text/string.jet` is a compiler-private source part of `core.text`.
+//RS     // Schedule it beside its public owner without adding a public module row or
+//RS     // teaching ordinary Core import resolution about the reserved identity.
+//RS     if scheduled_core_source_modules
+//RS         .contains(jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER)
+//RS     {
+//RS         if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
+//RS             jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
+//RS         ) {
+//RS             if scheduled_core_source_modules.insert(part.source.module) {
+//RS                 core_source_modules.push(part.source);
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut core_source_module_index = 0;
+//RS     while core_source_module_index < core_source_modules.len() {
+//RS         let source_module = core_source_modules[core_source_module_index];
+//RS         core_source_module_index += 1;
+//RS         let source = jet_sema::CoreSources::core_source_text(source_module.module)
+//RS             .unwrap_or_else(|| panic!("Core source module `{}` has no body text", source_module.module))
+//RS             .to_string();
+//RS         let display = source_module.path.to_string();
+//RS         let source_for_parse = crate::Package::mask_inline_package_source(&source)
+//RS             .map_err(|error| {
+//RS                 record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(&display, &source, vec![error.diagnostic()]),
+//RS                 )
+//RS             })?
+//RS             .0;
+//RS         // Embedded Core sources are vetted stdlib internals (I1): they may
+//RS         // spell the reserved `__name` namespace, e.g. `core.crypto.__zeroize`.
+//RS         // Only this embedded-Core path lexes that way; a user file, even one
+//RS         // named `Core/...`, goes through `Lexer::lex` and still gets E0067.
+//RS         let (tokens, lex_diags) = Lexer::lex_generated(&source_for_parse);
+//RS         if !lex_diags.is_empty() {
+//RS             return Err(record_loader_error(
+//RS                 &mut sink,
+//RS                 LoaderError::at(&display, &source, lex_diags),
+//RS             ));
+//RS         }
+//RS         let (mut program, teaching) = match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
+//RS             Ok(parsed) => parsed,
+//RS             Err(diags) => {
+//RS                 return Err(record_loader_error(
+//RS                     &mut sink,
+//RS                     LoaderError::at(&display, &source, diags),
+//RS                 ));
+//RS             }
+//RS         };
+//RS         // Source Core packages can call other source-owned Core members.
+//RS         // Include their transitive import closure so lowering has each private
+//RS         // module alias available, rather than falling back to a Core ABI call.
+//RS         for dependency in program.imports.iter().filter_map(core_source_import_module) {
+//RS             if let Some(dependency) =
+//RS                 jet_foundation::CoreModuleExports::core_source_module(&dependency)
+//RS             {
+//RS                 if scheduled_core_source_modules.insert(dependency.module) {
+//RS                     core_source_modules.push(*dependency);
+//RS                 }
+//RS             }
+//RS             // A source package importing `core.text` also schedules the
+//RS             // compiler-private String receiver part. It remains keyed by its
+//RS             // reserved internal module identity, not by `core.text.string`.
+//RS             if dependency == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER {
+//RS                 if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
+//RS                     jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
+//RS                 ) {
+//RS                     if scheduled_core_source_modules.insert(part.source.module) {
+//RS                         core_source_modules.push(part.source);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         // Source metadata selects the public members that have crossed the
+//RS         // Core cutover. Keep private helpers and declarations needed by those
+//RS         // members, but do not compile legacy public wrappers that still use
+//RS         // their compiler-owned routes.
+//RS         program.items.retain(|item| match item {
+//RS             Item::Func(function) if function.is_pub => source_module
+//RS                 .owned_members
+//RS                 .iter()
+//RS                 .any(|member| *member == function.name),
+//RS             _ => true,
+//RS         });
+//RS         // Core is library source, not the user's program: its parser
+//RS         // teaching lints never reach user output. Anything stronger keeps
+//RS         // its Core origin so it renders against the Core file, never at a
+//RS         // synthetic position in the entry document.
+//RS         let core_path = format!("{}/{display}", crate::Diagnostics::CORE_SOURCE_ROOT);
+//RS         let core_origin = std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
+//RS             display.clone(),
+//RS             core_path.clone(),
+//RS             source.clone(),
+//RS         ));
+//RS         bundle.parse_teaching.extend(
+//RS             teaching
+//RS                 .into_iter()
+//RS                 .filter(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Lint)
+//RS                 .map(|diagnostic| diagnostic.with_origin(core_origin.clone())),
+//RS         );
+//RS         let alias = source_module.alias.to_string();
+//RS         if bundle.modules.iter().any(|module| module.alias == alias) {
+//RS             return Err(record_loader_error(
+//RS                 &mut sink,
+//RS                 LoaderError::at(
+//RS                     &display,
+//RS                     &source,
+//RS                     vec![Diagnostic::error(
+//RS                         "E0608",
+//RS                         "the reserved Core source module alias is already in use".to_string(),
+//RS                         "Core source packages use a private module namespace during emission"
+//RS                             .to_string(),
+//RS                         format!("rename the imported file module that uses `{alias}`"),
+//RS                         None,
+//RS                     )],
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         bundle.modules.push(LoadedModule {
+//RS             path: PathBuf::from(core_path),
+//RS             display,
+//RS             source,
+//RS             alias,
+//RS             imports: std::mem::take(&mut program.imports),
+//RS             items: program.items,
+//RS             script_body: program.script_body,
+//RS             block_spans: program.block_spans,
+//RS             web_target_ceiling: program.web_target_ceiling,
+//RS             pub_file: program.pub_file,
+//RS             no_prelude: program.no_prelude,
+//RS             default_target: program.default_target,
+//RS             html_path: program.html_path,
+//RS             policy_declarations: program.policy_declarations,
+//RS             user_policy_declarations: program.user_policy_declarations,
+//RS             rule_facts: program.rule_facts,
+//RS         });
+//RS     }
+//RS     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
+//RS     // synthetic modules and resolve C `use` forms before sema sees the tree.
+//RS     if let Err(diagnostics) =
+//RS         crate::Foreign::assemble_active_namespaces_with_provenance(&mut bundle)
+//RS     {
+//RS         return Err(record_loader_error(
+//RS             &mut sink,
+//RS             LoaderError {
+//RS                 diagnostics: diagnostics
+//RS                     .into_iter()
+//RS                     .map(|entry| LoaderDiagnostic {
+//RS                         file: entry.file,
+//RS                         source: entry.source,
+//RS                         diagnostic: entry.diagnostic,
+//RS                         // Namespace assembly reports a name clash, not a
+//RS                         // structure observation; the fact plane stays empty.
+//RS                         structure_fact: None,
+//RS                     })
+//RS                     .collect(),
+//RS             },
+//RS         ));
+//RS     }
+//RS     match crate::CFFI::assemble_with_provenance(&mut bundle) {
+//RS         Ok(cffi) => bundle.cffi = cffi,
+//RS         Err(diagnostics) => {
+//RS             return Err(record_loader_error(
+//RS                 &mut sink,
+//RS                 LoaderError {
+//RS                     diagnostics: diagnostics
+//RS                         .into_iter()
+//RS                         .map(|entry| LoaderDiagnostic {
+//RS                             file: entry.file,
+//RS                             source: entry.source,
+//RS                             diagnostic: entry.diagnostic,
+//RS                             // Same as above: a CFFI provenance failure carries
+//RS                             // no structure fact.
+//RS                             structure_fact: None,
+//RS                         })
+//RS                         .collect(),
+//RS                 },
+//RS             ));
+//RS         }
+//RS     }
+//RS     project_package_outputs(
+//RS         &mut bundle,
+//RS         &package_output_declarations,
+//RS         &package_defaults,
+//RS     );
+//RS     Ok(bundle)
+//RS }
+//RS 
+//RS fn project_package_outputs(
+//RS     bundle: &mut ProgramBundle,
+//RS     declarations: &[(String, String, OutputKind, String)],
+//RS     defaults: &[(String, String)],
+//RS ) {
+//RS     if declarations.is_empty() {
+//RS         return;
+//RS     }
+//RS     let span = Span::new(0, 0);
+//RS     let entry = bundle.entry;
+//RS     let existing_names = bundle.modules[entry]
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Const(value) => Some(value.name.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .collect::<HashSet<_>>();
+//RS     let items = &mut bundle.modules[entry].items;
+//RS     for (address, output_name, kind, entry_name) in declarations {
+//RS         if !kind.is_runnable()
+//RS             || entry_name.trim().is_empty()
+//RS             || existing_names.contains(address.as_str())
+//RS         {
+//RS             continue;
+//RS         }
+//RS         // Package resolution already followed the dotted module alias and
+//RS         // selected that module as the bundle entry. Sema therefore receives
+//RS         // the callable's local name, not the now-out-of-scope root alias.
+//RS         let Some(entry_name) = entry_name
+//RS             .rsplit('.')
+//RS             .next()
+//RS             .filter(|name| !name.is_empty())
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         let entry = Expr::Ident(entry_name.to_owned(), span);
+//RS         let value = Expr::EnumLit {
+//RS             type_name: Syntax::TYPE_OUTPUT.to_owned(),
+//RS             variant: kind.as_str().to_owned(),
+//RS             variant_span: None,
+//RS             args: vec![
+//RS                 EnumLitArg::Named {
+//RS                     label: Syntax::OUTPUT_FIELD_NAME.to_owned(),
+//RS                     expr: Expr::Str(
+//RS                         vec![StrPart::Lit(if output_name.is_empty() {
+//RS                             address.clone()
+//RS                         } else {
+//RS                             output_name.clone()
+//RS                         })],
+//RS                         span,
+//RS                     ),
+//RS                 },
+//RS                 EnumLitArg::Named {
+//RS                     label: Syntax::OUTPUT_FIELD_ENTRY.to_owned(),
+//RS                     expr: entry,
+//RS                 },
+//RS             ],
+//RS             leading_dot: false,
+//RS             span,
+//RS         };
+//RS         items.push(Item::Const(ConstDef {
+//RS             span,
+//RS             name: address.clone(),
+//RS             name_span: span,
+//RS             value,
+//RS             is_pub: false,
+//RS             is_package_pub: false,
+//RS             meta: None,
+//RS             attrs: Vec::new(),
+//RS             rust_kind: RustConstKind::Const,
+//RS             is_comptime: false,
+//RS             ct: None,
+//RS             ty: Some(Type::Named(Syntax::TYPE_OUTPUT.to_owned())),
+//RS             is_persist: false,
+//RS             persist_span: None,
+//RS             mutable: false,
+//RS             resolved_output: None,
+//RS         }));
+//RS     }
+//RS     if !defaults.is_empty() && !existing_names.contains(Syntax::OUTPUT_DEFAULTS) {
+//RS         let fields = defaults
+//RS             .iter()
+//RS             .filter(|(name, address)| !name.trim().is_empty() && !address.trim().is_empty())
+//RS             .map(|(name, address)| (name.clone(), span, Expr::Ident(address.clone(), span)))
+//RS             .collect::<Vec<_>>();
+//RS         items.push(Item::Const(ConstDef {
+//RS             span,
+//RS             name: Syntax::OUTPUT_DEFAULTS.to_owned(),
+//RS             name_span: span,
+//RS             value: Expr::StructLit {
+//RS                 type_name: String::new(),
+//RS                 type_args: Vec::new(),
+//RS                 import_ns: None,
+//RS                 as_trait: None,
+//RS                 fields,
+//RS                 inferred: true,
+//RS                 span,
+//RS             },
+//RS             is_pub: false,
+//RS             is_package_pub: false,
+//RS             meta: None,
+//RS             attrs: Vec::new(),
+//RS             rust_kind: RustConstKind::Const,
+//RS             is_comptime: false,
+//RS             ct: None,
+//RS             ty: Some(Type::Named(Syntax::TYPE_OUTPUT_DEFAULTS.to_owned())),
+//RS             is_persist: false,
+//RS             persist_span: None,
+//RS             mutable: false,
+//RS             resolved_output: None,
+//RS         }));
+//RS     }
+//RS }
+//RS 
+//RS /// D-UNSAFE-OBLIG1=A: optional admin/CI organization floor. The configured
+//RS /// path is an explicit build input; unreadable or malformed input fails closed.
+//RS fn load_organization_policy() -> Result<Vec<crate::Policy::PolicyDeclaration>, LoaderError> {
+//RS     let Some(configured) = jet_foundation::CheckReads::env_var(Syntax::ENV_ORG_UNSAFE_POLICY) else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let path = PathBuf::from(&configured);
+//RS     let source = match jet_foundation::CheckReads::read_to_string(&path) {
+//RS         Ok(source) => source,
+//RS         Err(error) => {
+//RS             return Err(LoaderError::at(
+//RS                 &path.display().to_string(),
+//RS                 "",
+//RS                 vec![Diagnostic::error(
+//RS                     "E3109",
+//RS                     "cannot read the configured organization gate policy".to_string(),
+//RS                     format!(
+//RS                         "{} names `{}`, but it could not be read: {error}",
+//RS                         Syntax::ENV_ORG_UNSAFE_POLICY,
+//RS                         path.display()
+//RS                     ),
+//RS                     "fix the policy path or remove the environment variable".to_string(),
+//RS                     None,
+//RS                 )],
+//RS             ));
+//RS         }
+//RS     };
+//RS     let mut declarations = match crate::Package::parse_policy_document(&source) {
+//RS         Ok(declarations) => declarations,
+//RS         Err(error) => {
+//RS             return Err(LoaderError::at(
+//RS                 &path.display().to_string(),
+//RS                 &source,
+//RS                 vec![Diagnostic::error(
+//RS                     "E3109",
+//RS                     "the configured organization gate policy is malformed".to_string(),
+//RS                     format!("`{}` must contain a manifest-shaped `policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` block: {error:?}", path.display()),
+//RS                     "fix the organization policy; configured policy never fails open".to_string(),
+//RS                     None,
+//RS                 )],
+//RS             ));
+//RS         }
+//RS     };
+//RS     if declarations.is_empty()
+//RS         || declarations
+//RS             .iter()
+//RS             .any(|declaration| !declaration.key.is_audited_gate())
+//RS     {
+//RS         return Err(LoaderError::at(
+//RS             &path.display().to_string(),
+//RS             &source,
+//RS             vec![Diagnostic::error(
+//RS                 "E3109",
+//RS                 "the organization gate policy has the wrong shape".to_string(),
+//RS                 "this admin input contains only the shared audited-gate fields".to_string(),
+//RS                 "use `policy: { unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }` (with any subset of those fields)".to_string(),
+//RS                 None,
+//RS             )],
+//RS         ));
+//RS     }
+//RS     for declaration in &mut declarations {
+//RS         declaration.scope = crate::Policy::PolicyScope::Organization;
+//RS         declaration.source = path.display().to_string();
+//RS     }
+//RS     Ok(declarations)
+//RS }
+//RS 
+//RS /// Return the canonical manifest path for legacy read-only callers.
+//RS /// Authority-sensitive callers must use `manifest_path_checked` so metadata
+//RS /// failures cannot become an absent Package.
+//RS pub fn manifest_path(root: &Path) -> Option<PathBuf> {
+//RS     manifest_path_checked(root).ok().flatten()
+//RS }
+//RS 
+//RS /// Return the checked canonical manifest path without following symlinks or
+//RS /// hiding authority errors. `pkg.jet` is never a fallback.
+//RS pub fn manifest_path_checked(root: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+//RS     let resolver = match AuthorityResolver::open(root) {
+//RS         Ok(resolver) => resolver,
+//RS         Err(error) if error.is_missing() => return Ok(None),
+//RS         Err(error) => return Err(error.diagnostic()),
+//RS     };
+//RS     match resolver.checked_manifest(Path::new(".")) {
+//RS         Ok(manifest) => {
+//RS             resolver
+//RS                 .revalidate_file(&manifest.file)
+//RS                 .map_err(|error| error.diagnostic())?;
+//RS             Ok(Some(manifest.file.path))
+//RS         }
+//RS         Err(error) if error.is_missing() => Ok(None),
+//RS         Err(error) => Err(error.diagnostic()),
+//RS     }
+//RS }
+//RS 
+//RS /// Walk upward from `start` to find the nearest Package root, stopping at the
+//RS /// nearest declaration-resolved workspace boundary. Discovery errors are
+//RS /// returned so an inner malformed or ambiguous workspace cannot expose an
+//RS /// outer package authority.
+//RS pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+//RS     let mut dir =
+//RS         AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())?;
+//RS     loop {
+//RS         let authority = AuthorityResolver::open_for_authority_walk(&dir)
+//RS             .map_err(|error| error.diagnostic())?;
+//RS         if let Some(resolver) = authority {
+//RS             match resolver.resolve_workspace_source() {
+//RS                 Ok(Some(_)) => {
+//RS                     return resolver
+//RS                         .checked_manifest(Path::new("."))
+//RS                         .map(|_| Some(dir.clone()))
+//RS                         .or_else(|error| {
+//RS                             if error.is_missing() {
+//RS                                 Ok(None)
+//RS                             } else {
+//RS                                 Err(error.diagnostic())
+//RS                             }
+//RS                         });
+//RS                 }
+//RS                 Ok(None) => {}
+//RS                 Err(error) => return Err(error.workspace_diagnostic()),
+//RS             }
+//RS             match resolver.checked_manifest(Path::new(".")) {
+//RS                 Ok(_) => return Ok(Some(dir)),
+//RS                 Err(error) if error.is_missing() => {}
+//RS                 Err(error) => return Err(error.diagnostic()),
+//RS             }
+//RS         } else {
+//RS             // An explicitly supplied directory is already the caller's
+//RS             // authority boundary. Shared-directory pruning still applies to
+//RS             // upward discovery, but must not discard a package manifest at
+//RS             // that exact boundary before its declared capabilities reach the
+//RS             // loader.
+//RS             let resolver =
+//RS                 AuthorityResolver::open(&dir).map_err(|error| error.diagnostic())?;
+//RS             match resolver.checked_manifest(Path::new(".")) {
+//RS                 Ok(_) => match resolver.resolve_workspace_source() {
+//RS                     Ok(_) => return Ok(Some(dir)),
+//RS                     Err(error) => return Err(error.workspace_diagnostic()),
+//RS                 },
+//RS                 Err(error) if error.is_missing() => {}
+//RS                 Err(error) => return Err(error.diagnostic()),
+//RS             }
+//RS         }
+//RS         let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+//RS             return Ok(None);
+//RS         };
+//RS         dir = parent;
+//RS     }
+//RS }
+//RS 
+//RS fn checked_inline_root_at_explicit_boundary(
+//RS     dir: &Path,
+//RS ) -> Result<(Option<PathBuf>, bool), Diagnostic> {
+//RS     let resolver = AuthorityResolver::open(dir).map_err(|error| error.diagnostic())?;
+//RS     let has_manifest = match resolver.checked_manifest(Path::new(".")) {
+//RS         Ok(_) => true,
+//RS         Err(error) if error.is_missing() => false,
+//RS         Err(error) => return Err(error.diagnostic()),
+//RS     };
+//RS     let has_inline = checked_inline_package_entry(&resolver)?.is_some();
+//RS     if has_manifest || has_inline {
+//RS         resolver
+//RS             .resolve_workspace_source()
+//RS             .map_err(|error| error.workspace_diagnostic())?;
+//RS     }
+//RS     Ok((has_inline.then(|| dir.to_path_buf()), has_manifest))
+//RS }
+//RS 
+//RS fn checked_inline_package_entry(
+//RS     resolver: &AuthorityResolver,
+//RS ) -> Result<Option<CheckedFile>, Diagnostic> {
+//RS     let candidates = [
+//RS         PathBuf::from(Syntax::DEFAULT_ENTRY_FILE),
+//RS         PathBuf::from("src").join(Syntax::DEFAULT_ENTRY_FILE),
+//RS     ];
+//RS     for relative in candidates {
+//RS         let file = match resolver.checked_file(&relative) {
+//RS             Ok(file) => file,
+//RS             Err(error) if error.is_missing() => continue,
+//RS             Err(error) => return Err(error.diagnostic()),
+//RS         };
+//RS         let source = file.text().map_err(|error| error.diagnostic())?;
+//RS         let inline = crate::Package::extract_inline_package(&source)
+//RS             .map_err(|error| error.diagnostic())?;
+//RS         resolver
+//RS             .revalidate_file(&file)
+//RS             .map_err(|error| error.diagnostic())?;
+//RS         if inline.is_some() {
+//RS             return Ok(Some(file));
+//RS         }
+//RS     }
+//RS     Ok(None)
+//RS }
+//RS 
+//RS /// Walk upward from `start` to find the nearest root whose stock entry carries
+//RS /// the canonical inline Package block. Workspace boundaries remain authoritative
+//RS /// just as they are for extracted package manifests.
+//RS pub fn find_inline_package_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+//RS     let mut dir =
+//RS         AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())?;
+//RS     loop {
+//RS         let authority = AuthorityResolver::open_for_authority_walk(&dir)
+//RS             .map_err(|error| error.diagnostic())?;
+//RS         let Some(resolver) = authority else {
+//RS             let (inline_root, has_manifest) = checked_inline_root_at_explicit_boundary(&dir)?;
+//RS             if let Some(root) = inline_root {
+//RS                 return Ok(Some(root));
+//RS             }
+//RS             if has_manifest {
+//RS                 return Ok(None);
+//RS             }
+//RS             let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+//RS                 return Ok(None);
+//RS             };
+//RS             dir = parent;
+//RS             continue;
+//RS         };
+//RS         let workspace_boundary = match resolver.resolve_workspace_source() {
+//RS             Ok(Some(_)) => true,
+//RS             Ok(None) => false,
+//RS             Err(error) => return Err(error.workspace_diagnostic()),
+//RS         };
+//RS         let has_manifest = match resolver.checked_manifest(Path::new(".")) {
+//RS             Ok(_) => true,
+//RS             Err(error) if error.is_missing() => false,
+//RS             Err(error) => return Err(error.diagnostic()),
+//RS         };
+//RS         if checked_inline_package_entry(&resolver)?.is_some() {
+//RS             return Ok(Some(dir));
+//RS         }
+//RS         if workspace_boundary || has_manifest {
+//RS             return Ok(None);
+//RS         }
+//RS         let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+//RS             return Ok(None);
+//RS         };
+//RS         dir = parent;
+//RS     }
+//RS }
+//RS 
+//RS /// Find the one canonical project root for generated artifacts.
+//RS ///
+//RS /// A declared workspace owns its members; otherwise the enclosing repository
+//RS /// owns the source. Without a repository, the nearest checked package owns the
+//RS /// source. Standalone sources stay at their canonical parent directory.
+//RS pub fn selected_project_root(start: &Path) -> Result<PathBuf, Diagnostic> {
+//RS     if let Some(root) = find_workspace_root_checked(start)? {
+//RS         return Ok(root);
+//RS     }
+//RS     if let Some(root) = find_repository_root(start) {
+//RS         return Ok(root);
+//RS     }
+//RS     if let Some(root) = find_package_root_checked(start)? {
+//RS         return Ok(root);
+//RS     }
+//RS     AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())
+//RS }
+//RS 
+//RS /// Walk upward for a real repository marker without following a `.git`
+//RS /// symlink.  A worktree's `.git` file is a valid repository marker.
+//RS pub fn find_repository_root(start: &Path) -> Option<PathBuf> {
+//RS     let mut dir = AuthorityResolver::authority_walk_root(start).ok()?;
+//RS     loop {
+//RS         let marker = dir.join(".git");
+//RS         if let Ok(metadata) = fs::symlink_metadata(&marker) {
+//RS             if !metadata.file_type().is_symlink() && (metadata.is_dir() || metadata.is_file()) {
+//RS                 return Some(dir);
+//RS             }
+//RS         }
+//RS         let parent = AuthorityResolver::authority_walk_parent(&dir)?;
+//RS         dir = parent;
+//RS     }
+//RS }
+//RS 
+//RS /// Find either the canonical extracted package root or the root selected by an
+//RS /// inline Package carrier. The inline result wins so a later facts read emits
+//RS /// the explicit inline/manifest conflict instead of silently choosing one.
+//RS pub fn find_package_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+//RS     let manifest = find_manifest_root_checked(start)?;
+//RS     let inline = find_inline_package_root_checked(start)?;
+//RS     Ok(inline.or(manifest))
+//RS }
+//RS 
+//RS /// Find either the canonical extracted package root or the root selected by an
+//RS /// inline Package carrier, stopping at the active workspace boundary.
+//RS pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
+//RS     find_package_root_checked(start).ok().flatten()
+//RS }
+//RS 
+//RS /// D-MOD-CYCLE1=A: the member file of the package rooted at `root` that
+//RS /// declares the package's top-level `fn run`. A package is one namespace with
+//RS /// at most one `fn run`, so this file is the program entry; a library package
+//RS /// has none.
+//RS pub fn package_run_member(root: &Path) -> Option<PathBuf> {
+//RS     let resolver = AuthorityResolver::open(root).ok()?;
+//RS     let files = resolver.discover_source_files().ok()?;
+//RS     files
+//RS         .into_iter()
+//RS         .find(|file| {
+//RS             file.relative.file_name().and_then(|name| name.to_str()) != Some(Syntax::PACKAGE_FILE)
+//RS                 && file.text().is_ok_and(|source| {
+//RS                     let (tokens, lex_diagnostics) = Lexer::lex(&source);
+//RS                     lex_diagnostics.is_empty()
+//RS                         && crate::Parser::parse_with_source(&tokens, &source).is_ok_and(|program| {
+//RS                             program.items.iter().any(|item| {
+//RS                                 matches!(item, Item::Func(function) if function.name == "run")
+//RS                             })
+//RS                         })
+//RS                 })
+//RS         })
+//RS         .map(|file| file.path)
+//RS }
+//RS 
+//RS /// Verify the source trees a locked build is about to load.
+//RS ///
+//RS /// `jet fetch --locked` verifies sources through the package-manager engine,
+//RS /// but the compiler's loader cannot depend on that engine. Keep the compiler
+//RS /// boundary fail-closed as well: a locked build must not load a mutable path
+//RS /// dependency or a mutable project link for a Git dependency.
+//RS pub fn verify_locked_dependency_sources(entry_path: &str) -> Result<(), Vec<Diagnostic>> {
+//RS     let entry = Path::new(entry_path);
+//RS     let entry_dir = entry.parent().unwrap_or(Path::new("."));
+//RS     let manifest_root = find_manifest_root_checked(entry_dir).map_err(|d| vec![d])?;
+//RS     let package_root = manifest_root.clone().or_else(|| {
+//RS         AuthorityResolver::authority_walk_root(entry_dir).ok()
+//RS     });
+//RS     let Some(package_root) = package_root else {
+//RS         return Ok(());
+//RS     };
+//RS     let Some(facts) = package_facts_for_entry(entry)? else {
+//RS         return Ok(());
+//RS     };
+//RS     let manifest = crate::Package::to_manifest(&facts, "").map_err(|diagnostic| vec![diagnostic])?;
+//RS     if manifest.dependencies.is_empty() {
+//RS         return Ok(());
+//RS     }
+//RS     let lock_root = find_workspace_root_checked(entry_dir)
+//RS         .map_err(|d| vec![d])?
+//RS         .unwrap_or_else(|| package_root.clone());
+//RS     let lock_path = lock_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     let lock = crate::Lock::load_strict_with_path(&lock_root)
+//RS         .map_err(|diagnostic| vec![diagnostic])?
+//RS         .ok_or_else(|| vec![crate::Lock::e1202(&lock_path.display().to_string())])?;
+//RS     crate::Lock::verify_lock_matches_manifest(&lock, &manifest, &lock_path.display().to_string())
+//RS         .map_err(|diagnostic| vec![diagnostic])?;
+//RS     crate::Lock::verify_all_manifest_deps_locked(&manifest, &lock)
+//RS         .map_err(|error| vec![error.diagnostic()])?;
+//RS     lock.validate_completeness()
+//RS         .map_err(|error| vec![error.diagnostic()])?;
+//RS 
+//RS     let mut visited = HashSet::new();
+//RS     let mut resolved_sources = HashMap::new();
+//RS     verify_locked_manifest(
+//RS         &manifest,
+//RS         &package_root,
+//RS         &lock_root,
+//RS         &lock,
+//RS         &mut visited,
+//RS         &mut resolved_sources,
+//RS         false,
+//RS     )
+//RS }
+//RS 
+//RS fn verify_locked_manifest(
+//RS     manifest: &Manifest::Manifest,
+//RS     package_root: &Path,
+//RS     project_root: &Path,
+//RS     lock: &crate::Lock::LockFile,
+//RS     visited: &mut HashSet<PathBuf>,
+//RS     resolved_sources: &mut HashMap<String, String>,
+//RS     enforce_path_boundary: bool,
+//RS ) -> Result<(), Vec<Diagnostic>> {
+//RS     for (dep_name, spec) in &manifest.dependencies {
+//RS         let (source_root, expected_hash, recurse) = match spec {
+//RS             Manifest::DepSpec::Path { path } => {
+//RS                 let declared_source = resolve_locked_path_dependency(
+//RS                     dep_name,
+//RS                     path,
+//RS                     package_root,
+//RS                     enforce_path_boundary,
+//RS                 )?;
+//RS                 let Some(package) = lock.packages.iter().find(|package| {
+//RS                     package.name == *dep_name
+//RS                         && matches!(&package.source, crate::Lock::LockSource::Path(_))
+//RS                 }) else {
+//RS                     return Err(vec![locked_dependency_diagnostic(
+//RS                         dep_name,
+//RS                         "the lock has no matching path source identity",
+//RS                     )]);
+//RS                 };
+//RS                 let crate::Lock::LockSource::Path(locked_path) = &package.source else {
+//RS                     unreachable!("path package predicate guarantees a path source")
+//RS                 };
+//RS                 if normalize_path(&package_root.join(locked_path)) != declared_source {
+//RS                     return Err(vec![locked_dependency_diagnostic(
+//RS                         dep_name,
+//RS                         "the locked path source disagrees with the manifest",
+//RS                     )]);
+//RS                 }
+//RS                 record_locked_source_identity(
+//RS                     resolved_sources,
+//RS                     dep_name,
+//RS                     format!("path:{}", declared_source.display()),
+//RS                 )?;
+//RS                 let Some(expected_hash) = package.content_hash.as_deref() else {
+//RS                     return Err(vec![locked_dependency_diagnostic(
+//RS                         dep_name,
+//RS                         "the lock has no content hash for its path source",
+//RS                     )]);
+//RS                 };
+//RS                 let source_root = locked_store_source_path(dep_name, package)
+//RS                     .map_err(|diagnostic| vec![diagnostic])?;
+//RS                 (source_root, expected_hash.to_string(), true)
+//RS             }
+//RS             Manifest::DepSpec::Git { url, selector } => {
+//RS                 let Some(package) = lock.packages.iter().find(|package| {
+//RS                     package.name == *dep_name
+//RS                         && matches!(&package.source, crate::Lock::LockSource::Git { .. })
+//RS                 }) else {
+//RS                     return Err(vec![locked_dependency_diagnostic(
+//RS                         dep_name,
+//RS                         "the lock has no matching Git source identity",
+//RS                     )]);
+//RS                 };
+//RS                 let crate::Lock::LockSource::Git {
+//RS                     url: locked_url,
+//RS                     selector: locked_selector,
+//RS                 } = &package.source
+//RS                 else {
+//RS                     unreachable!("Git package predicate guarantees a Git source")
+//RS                 };
+//RS                 let expected_selector = crate::Lock::git_selector_str(selector);
+//RS                 let url_matches = locked_url == url;
+//RS                 let selector_matches = locked_selector == &expected_selector;
+//RS                 let Some(revision) = package.locked.as_ref() else {
+//RS                     return Err(vec![locked_dependency_diagnostic(
+//RS                         dep_name,
+//RS                         "the lock has no pinned Git revision",
+//RS                     )]);
+//RS                 };
+//RS                 let revision_matches = match selector {
+//RS                     Manifest::GitSelector::Rev(expected_revision) => revision.rev == *expected_revision,
+//RS                     Manifest::GitSelector::Tag(_) | Manifest::GitSelector::Branch(_) => {
+//RS                         !revision.rev.trim().is_empty()
+//RS                     }
+//RS                 };
+//RS                 if !url_matches || !selector_matches || !revision_matches {
+//RS                     return Err(vec![locked_dependency_diagnostic(
+//RS                         dep_name,
+//RS                         "the locked Git URL or revision disagrees with the manifest",
+//RS                     )]);
+//RS                 }
+//RS                 let expected_hash = package
+//RS                     .content_hash
+//RS                     .as_deref()
+//RS                     .or_else(|| {
+//RS                         package
+//RS                             .locked
+//RS                             .as_ref()
+//RS                             .map(|revision| revision.tree_hash.as_str())
+//RS                     })
+//RS                     .filter(|hash| !hash.trim().is_empty())
+//RS                     .ok_or_else(|| {
+//RS                         vec![locked_dependency_diagnostic(
+//RS                             dep_name,
+//RS                             "the lock has no content hash for its Git source",
+//RS                         )]
+//RS                     })?;
+//RS                 record_locked_source_identity(
+//RS                     resolved_sources,
+//RS                     dep_name,
+//RS                     format!("git:{url}\n{expected_selector}"),
+//RS                 )?;
+//RS                 let source_root = locked_store_source_path(dep_name, package)
+//RS                     .map_err(|diagnostic| vec![diagnostic])?;
+//RS                 (source_root, expected_hash.to_string(), true)
+//RS             }
+//RS             Manifest::DepSpec::Registry(_) | Manifest::DepSpec::Foreign { .. } => {
+//RS                 // Registry and foreign dependencies are consumed through the
+//RS                 // verified Hangar projection. Their source roots are not
+//RS                 // selected by this legacy path/Git loader.
+//RS                 continue;
+//RS             }
+//RS         };
+//RS 
+//RS         verify_locked_source_tree(dep_name, &source_root, &expected_hash)?;
+//RS         if recurse && visited.insert(normalize_path(&source_root)) {
+//RS             let dependency_manifest = load_locked_manifest_from_authority(
+//RS                 dep_name,
+//RS                 &source_root,
+//RS             )?;
+//RS             verify_locked_manifest(
+//RS                 &dependency_manifest,
+//RS                 &source_root,
+//RS                 project_root,
+//RS                 lock,
+//RS                 visited,
+//RS                 resolved_sources,
+//RS                 true,
+//RS             )?;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn load_locked_manifest_from_authority(
+//RS     dep_name: &str,
+//RS     source_root: &Path,
+//RS ) -> Result<Manifest::Manifest, Vec<Diagnostic>> {
+//RS     let resolver = match AuthorityResolver::open_store(source_root) {
+//RS         Ok(resolver) => resolver,
+//RS         Err(error) if error.is_missing() => {
+//RS             return Err(vec![locked_dependency_diagnostic(
+//RS                 dep_name,
+//RS                 "the locked source has no readable package source",
+//RS             )]);
+//RS         }
+//RS         Err(error) => return Err(vec![error.diagnostic()]),
+//RS     };
+//RS     let facts = package_facts_from_resolver(&resolver)?;
+//RS     let Some(facts) = facts else {
+//RS         return Err(vec![locked_dependency_diagnostic(
+//RS             dep_name,
+//RS             "the locked source has no readable package source",
+//RS         )]);
+//RS     };
+//RS     crate::Package::to_manifest(&facts, "").map_err(|diagnostic| vec![diagnostic])
+//RS }
+//RS 
+//RS fn resolve_locked_path_dependency(
+//RS     dep_name: &str,
+//RS     path: &str,
+//RS     package_root: &Path,
+//RS     enforce_boundary: bool,
+//RS ) -> Result<PathBuf, Vec<Diagnostic>> {
+//RS     let source_root = normalize_path(&package_root.join(path));
+//RS     // Root packages may intentionally use a sibling path. Transitive path
+//RS     // dependencies stay below their declaring package, including through
+//RS     // intermediate symlinks.
+//RS     if !enforce_boundary {
+//RS         return Ok(source_root);
+//RS     }
+//RS     if Path::new(path).is_absolute() || !source_root.starts_with(package_root) {
+//RS         return Err(vec![path_dependency_escape_diagnostic(
+//RS             dep_name,
+//RS             path,
+//RS             package_root,
+//RS         )]);
+//RS     }
+//RS     let parent = std::fs::canonicalize(package_root).map_err(|error| {
+//RS         vec![locked_dependency_diagnostic(
+//RS             dep_name,
+//RS             &format!("could not resolve the declaring package root: {error}"),
+//RS         )]
+//RS     })?;
+//RS     if let Ok(resolved) = std::fs::canonicalize(&source_root) {
+//RS         if !resolved.starts_with(parent) {
+//RS             return Err(vec![path_dependency_escape_diagnostic(
+//RS                 dep_name,
+//RS                 path,
+//RS                 package_root,
+//RS             )]);
+//RS         }
+//RS     }
+//RS     Ok(source_root)
+//RS }
+//RS 
+//RS fn verify_locked_source_tree(
+//RS     dep_name: &str,
+//RS     source_root: &Path,
+//RS     expected_hash: &str,
+//RS ) -> Result<(), Vec<Diagnostic>> {
+//RS     let metadata = std::fs::symlink_metadata(source_root).map_err(|error| {
+//RS         vec![locked_dependency_diagnostic(
+//RS             dep_name,
+//RS             &format!("the locked source is unavailable: {error}"),
+//RS         )]
+//RS     })?;
+//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
+//RS         return Err(vec![locked_dependency_diagnostic(
+//RS             dep_name,
+//RS             "the locked source is not a real directory",
+//RS         )]);
+//RS     }
+//RS     if expected_hash.trim().is_empty() {
+//RS         return Err(vec![locked_dependency_diagnostic(
+//RS             dep_name,
+//RS             "the lock has no content hash for its source",
+//RS         )]);
+//RS     }
+//RS     let actual = crate::SHA256::try_tree_hash(source_root).map_err(|error| {
+//RS         vec![locked_dependency_diagnostic(
+//RS             dep_name,
+//RS             &format!("the locked source could not be hashed: {error}"),
+//RS         )]
+//RS     })?;
+//RS     if actual != expected_hash {
+//RS         return Err(vec![locked_dependency_diagnostic(
+//RS             dep_name,
+//RS             &format!("the source content hash does not match the lock (expected {expected_hash}, got {actual})"),
+//RS         )]);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn locked_store_content_hash(package: &crate::Lock::LockedPackage) -> Option<&str> {
+//RS     package
+//RS         .content_hash
+//RS         .as_deref()
+//RS         .filter(|hash| !hash.trim().is_empty())
+//RS         .or_else(|| {
+//RS             package
+//RS                 .locked
+//RS                 .as_ref()
+//RS                 .map(|revision| revision.tree_hash.as_str())
+//RS                 .filter(|hash| !hash.trim().is_empty())
+//RS         })
+//RS }
+//RS fn locked_store_source_path(
+//RS     dep_name: &str,
+//RS     package: &crate::Lock::LockedPackage,
+//RS ) -> Result<PathBuf, Diagnostic> {
+//RS     let fingerprint = package
+//RS         .fingerprint
+//RS         .strip_prefix("sha256-")
+//RS         .unwrap_or(&package.fingerprint);
+//RS     if !safe_store_component(dep_name)
+//RS         || !safe_store_component(&package.version)
+//RS         || !safe_store_component(fingerprint)
+//RS     {
+//RS         return Err(locked_dependency_diagnostic(
+//RS             dep_name,
+//RS             "the lock has no safe immutable store fingerprint",
+//RS         ));
+//RS     }
+//RS     let env = jet_foundation::CheckReads::env_var;
+//RS     let root = env("JET_PACKAGE_STORE_DIR")
+//RS         .or_else(|| env("HOME").map(|home| format!("{home}/.jet/store")))
+//RS         .or_else(|| env("USERPROFILE").map(|home| format!("{home}/.jet/store")))
+//RS         .unwrap_or_else(|| ".jet/store".to_string());
+//RS     Ok(PathBuf::from(root).join(format!(
+// END-PORT-PENDING 2040 crates/jet-driver/src/Loader.rs:1801-3600
+

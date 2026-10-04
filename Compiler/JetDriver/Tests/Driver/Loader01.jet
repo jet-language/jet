@@ -1,0 +1,45 @@
+use jet_foundation.[FactKind, FactRegistry, ReachabilityRow, BuildFactSnapshot, MIRTargetDossier, MIRRuntimeLayer, fact_registry_new, fact_registry_declare, fact_registry_declare_with_rules, fact_registry_get, fact_registry_iter, project_reachability, reachability_nodes_with, reachability_path]
+
+// Rust: crates/jet-foundation/src/Facts.rs:759
+#Test("subsumption_uses_segment_boundaries") {
+    assert(fact_covers("FS", "FS"))
+    assert(fact_covers("FS", "FS.Read"))
+    assert(!fact_covers("FS", "FStore"))
+    assert(!fact_covers("FS.Read", "FS"))
+}
+
+// Rust: crates/jet-foundation/src/Facts.rs:767
+#Test("fact_families_have_distinct_namespaces") {
+    facts := fact_registry_new()
+    fact_registry_declare(&facts, FactKind.Effect, "Secret", [String]{})
+    fact_registry_declare_with_rules(&facts, FactKind.Tag, "Secret", [String]{}, [String]{"Log"}, [String]{})
+    assert_eq((fact_registry_get(facts, FactKind.Effect, "Secret") ?? panic("effect Secret")).kind, FactKind.Effect)
+    assert_eq((fact_registry_get(facts, FactKind.Tag, "Secret") ?? panic("tag Secret")).deny.len(), 1)
+    assert_eq(fact_registry_iter(facts).len(), 2)
+}
+
+// Rust: crates/jet-foundation/src/Facts.rs:787
+#Test("one_traversal_projects_new_fact_row_with_existing_rows") {
+    edges :: [String:[String]]{"root": [String]{"mid"}, "mid": [String]{"leaf"}, "leaf": [String]{"root"}}
+    result :: project_reachability(edges, [ReachabilityRow]{
+        ReachabilityRow.new("effects", [String:[String]]{"leaf": [String]{"FS"}}),
+        ReachabilityRow.new("panic", [String:[String]]{"leaf": [String]{"panic"}}),
+        ReachabilityRow.new("calls-exec", [String:[String]]{"leaf": [String]{"Exec"}}),
+    })
+    assert(reachability_nodes_with(result, "effects", "FS").contains("root"))
+    assert(reachability_nodes_with(result, "panic", "panic").contains("root"))
+    assert(reachability_nodes_with(result, "calls-exec", "Exec").contains("root"))
+    assert_eq(reachability_path(result, "effects", "root", "FS") ?? panic("missing proof"), [String]{"root", "mid", "leaf"})
+}
+
+// Rust: crates/jet-foundation/src/Facts.rs:821
+#Test("target_dossier_identity_is_framed_and_profile_sensitive") {
+    hosted :: BuildFactSnapshot.default()
+    no_os :: hosted.with_target_dossier(MIRTargetDossier.new(MIRRuntimeLayer.Core, "board.uart", "prelude-core-v1"))
+    hosted_bytes :: if hosted.artifact_identity_bytes() == { .Ok(bytes) -> bytes .Err(_) -> panic("host identity unavailable") }
+    no_os_bytes :: if no_os.artifact_identity_bytes() == { .Ok(bytes) -> bytes .Err(_) -> panic("core identity unavailable") }
+    assert(hosted_bytes != no_os_bytes)
+    left :: MIRTargetDossier.new(MIRRuntimeLayer.Core, "ab", "c")
+    right :: MIRTargetDossier.new(MIRRuntimeLayer.Core, "a", "bc")
+    assert(left.cache_bytes("test-target") != right.cache_bytes("test-target"))
+}

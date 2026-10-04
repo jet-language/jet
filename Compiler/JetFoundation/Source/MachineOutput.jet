@@ -1,297 +1,96 @@
-// PORT-PENDING 0066 crates-jet-foundation-src-hex-module-group: crates/jet-foundation/src/MachineOutput.rs:1-293
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! The single reader for Jet's JSON machine-output door.
-//RS 
-//RS use crate::DataTree::DataTree;
-//RS use crate::Report::{NoFixReasonKind, REPORT_SCHEMA, STATUS_SCHEMA};
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum MachineRecord {
-//RS     Report,
-//RS     Status,
-//RS     BrowserRelay,
-//RS }
-//RS 
-//RS pub fn read_machine_line(text: &str) -> Result<MachineRecord, String> {
-//RS     let value = crate::JSON::parse(text.trim())?;
-//RS     let object = value.as_object()?;
-//RS     let schema = field(object, "schema")
-//RS         .ok_or_else(|| "machine record is missing `schema`".to_owned())?
-//RS         .as_str()?;
-//RS     match schema {
-//RS         REPORT_SCHEMA => {
-//RS             validate_report(object)?;
-//RS             Ok(MachineRecord::Report)
-//RS         }
-//RS         STATUS_SCHEMA => {
-//RS             validate_status(object)?;
-//RS             let action = field(object, "action")
-//RS                 .and_then(|value| value.as_str().ok())
-//RS                 .unwrap_or_default();
-//RS             if action == "browser.relay" {
-//RS                 Ok(MachineRecord::BrowserRelay)
-//RS             } else {
-//RS                 Ok(MachineRecord::Status)
-//RS             }
-//RS         }
-//RS         _ => Err(format!(
-//RS             "machine record uses `{schema}`; expected `{REPORT_SCHEMA}` or `{STATUS_SCHEMA}`"
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
-//RS     object
-//RS         .iter()
-//RS         .find_map(|(name, value)| (name == key).then_some(value))
-//RS }
-//RS fn validate_report(object: &[(String, DataTree)]) -> Result<(), String> {
-//RS     for key in ["moment", "severity", "code", "what", "why", "fix"] {
-//RS         field(object, key)
-//RS             .ok_or_else(|| format!("report record is missing `{key}`"))?
-//RS             .as_str()?;
-//RS     }
-//RS     let has_edits = field(object, "fix_edits").is_some();
-//RS     let has_reason = field(object, "no_fix_reason").is_some();
-//RS     if has_edits && has_reason {
-//RS         return Err("report record cannot contain both `fix_edits` and `no_fix_reason`".to_owned());
-//RS     }
-//RS     if let Some(edits) = field(object, "fix_edits") {
-//RS         let edits = edits.as_array()?;
-//RS         for edit in edits {
-//RS             let edit = edit.as_object()?;
-//RS             field(edit, "file")
-//RS                 .ok_or_else(|| "report edit is missing `file`".to_owned())?
-//RS                 .as_str()?;
-//RS             let span = field(edit, "span")
-//RS                 .ok_or_else(|| "report edit is missing `span`".to_owned())?
-//RS                 .as_object()?;
-//RS             for key in ["start", "end"] {
-//RS                 field(span, key)
-//RS                     .ok_or_else(|| format!("report edit span is missing `{key}"))?;
-//RS             }
-//RS             field(edit, "new_text")
-//RS                 .ok_or_else(|| "report edit is missing `new_text`".to_owned())?
-//RS                 .as_str()?;
-//RS             field(edit, "safety")
-//RS                 .ok_or_else(|| "report edit is missing `safety`".to_owned())?
-//RS                 .as_str()?;
-//RS         }
-//RS     }
-//RS     if let Some(reason) = field(object, "no_fix_reason") {
-//RS         let reason = reason.as_object()?;
-//RS         let kind = field(reason, "kind")
-//RS             .ok_or_else(|| "no-fix reason is missing `kind`".to_owned())?
-//RS             .as_str()?;
-//RS         NoFixReasonKind::parse(kind)?;
-//RS         let next = field(reason, "next")
-//RS             .ok_or_else(|| "no-fix reason is missing `next`".to_owned())?
-//RS             .as_str()?;
-//RS         if next.trim().is_empty() || next.chars().any(char::is_control) {
-//RS             return Err("no-fix reason `next` must be a reviewed printable action".to_owned());
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_status(object: &[(String, DataTree)]) -> Result<(), String> {
-//RS     let action = field(object, "action")
-//RS         .ok_or_else(|| "status record is missing `action`".to_owned())?
-//RS         .as_str()?;
-//RS     if action.is_empty() || action.chars().any(char::is_control) {
-//RS         return Err("status record `action` must be a non-empty printable string".to_owned());
-//RS     }
-//RS     if field(object, "status").is_some() {
-//RS         return Err("status record must not contain the legacy `status` key".to_owned());
-//RS     }
-//RS     match field(object, "ok") {
-//RS         Some(DataTree::Bool(_)) => {}
-//RS         Some(_) => return Err("status record field `ok` is not boolean".to_owned()),
-//RS         None => return Err("status record is missing `ok`".to_owned()),
-//RS     }
-//RS     let reports = field(object, "reports")
-//RS         .ok_or_else(|| "status record is missing `reports`".to_owned())?
-//RS         .as_array()?;
-//RS     for report in reports {
-//RS         let report = report.as_object()?;
-//RS         let schema = field(report, "schema")
-//RS             .ok_or_else(|| "status report is missing `schema`".to_owned())?
-//RS             .as_str()?;
-//RS         if schema != REPORT_SCHEMA {
-//RS             return Err(format!(
-//RS                 "status report uses `{schema}`; expected `{REPORT_SCHEMA}`"
-//RS             ));
-//RS         }
-//RS         validate_report(report)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub fn read_machine_output(text: &str) -> Result<Vec<MachineRecord>, String> {
-//RS     let mut records = Vec::new();
-//RS     for (index, line) in text.lines().enumerate() {
-//RS         if line.trim().is_empty() {
-//RS             continue;
-//RS         }
-//RS         let record = read_machine_line(line)
-//RS             .map_err(|error| format!("machine record {}: {error}", index + 1))?;
-//RS         records.push(record);
-//RS     }
-//RS     if records.is_empty() {
-//RS         return Err("machine output contains no records".to_owned());
-//RS     }
-//RS     Ok(records)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{read_machine_line, read_machine_output, MachineRecord};
-//RS     use crate::Diagnostics::Severity;
-//RS     use crate::Registry::diagnostic_rows;
-//RS     use crate::Report::{ReportEnvelope, StatusEnvelope, StatusValue};
-//RS 
-//RS     #[test]
-//RS     fn reader_accepts_status_and_report_json_lines() {
-//RS         let status = StatusEnvelope::new("facts", true)
-//RS             .with_field("facts", StatusValue::array(Vec::new()))
-//RS             .json();
-//RS         let report = ReportEnvelope::new("compile", "error", "E0001", "what", "why", "fix").json();
-//RS         assert_eq!(read_machine_line(&status), Ok(MachineRecord::Status));
-//RS         assert_eq!(read_machine_line(&report), Ok(MachineRecord::Report));
-//RS         assert_eq!(
-//RS             read_machine_output(&format!("{status}\n{report}\n"))
-//RS                 .unwrap()
-//RS                 .len(),
-//RS             2
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn reader_rejects_parallel_schema_versions() {
-//RS         let error = read_machine_line(r#"{"schema_version":1,"facts":[]}"#).unwrap_err();
-//RS         assert!(error.contains("missing `schema`"), "{error}");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn reader_rejects_legacy_report_schema() {
-//RS         let error = read_machine_line(
-//RS             r#"{"schema":"jet.report/v1","moment":"tool","status":"ok","ok":true}"#,
-//RS         )
-//RS         .unwrap_err();
-//RS         let expected = format!("expected `{}`", crate::Report::REPORT_SCHEMA);
-//RS         assert!(error.contains(&expected), "{error}");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn reader_accepts_the_shared_browser_relay_envelope() {
-//RS         let relay = StatusEnvelope::new("browser.relay", true)
-//RS             .with_field("nonce", "nonce")
-//RS             .with_field("pid", 42usize)
-//RS             .with_field("started", "1")
-//RS             .with_field("sources", "00")
-//RS             .json();
-//RS         let row = StatusEnvelope::new("browser.relay.row", true)
-//RS             .with_field("start_ns", 10usize)
-//RS             .with_field("duration_ns", 5usize)
-//RS             .with_field("class", "event")
-//RS             .with_field("symbol", "load")
-//RS             .json();
-//RS         let truncated = StatusEnvelope::new("browser.relay.truncated", true).json();
-//RS         assert_eq!(
-//RS             read_machine_output(&format!("{relay}\n{row}\n{truncated}\n")),
-//RS             Ok(vec![
-//RS                 MachineRecord::BrowserRelay,
-//RS                 MachineRecord::Status,
-//RS                 MachineRecord::Status,
-//RS             ])
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn every_registered_machine_surface_uses_one_reader() {
-//RS         let surfaces = [
-//RS             ("diagnostics", ",\"diagnostics\":[]"),
-//RS             ("semindex", ",\"semindex\":{}"),
-//RS             ("compiler", ",\"compiler\":{}"),
-//RS             ("canvas", ",\"canvas\":{}"),
-//RS             ("structural_merge", ",\"structural_merge\":{}"),
-//RS             ("budget", ",\"budget\":{}"),
-//RS             ("perf", ",\"perf\":{}"),
-//RS             ("gc", ",\"gc\":{}"),
-//RS             ("browser.relay", ",\"browser\":{\"relay\":{}}"),
-//RS             ("status", ",\"status_report\":{}"),
-//RS             ("review", ",\"review\":{}"),
-//RS             ("fill", ",\"fill\":{}"),
-//RS             ("import", ",\"import\":{}"),
-//RS             ("inspect.dossier", ",\"dossier\":{}"),
-//RS             ("inspect.impact", ",\"impact\":{}"),
-//RS             ("inspect.live", ",\"live\":{}"),
-//RS             ("fmt", ",\"fmt\":{}"),
-//RS             ("eval", ",\"value\":null"),
-//RS             ("coverage", ",\"coverage\":{}"),
-//RS             ("test", ",\"test\":{}"),
-//RS             ("inspect.build", ",\"build\":{}"),
-//RS             ("inspect.parts", ",\"parts\":[]"),
-//RS             ("inspect.gates", ",\"gates\":{}"),
-//RS             ("inspect.unsafe", ",\"gates\":[]"),
-//RS             ("find", ",\"matches\":[]"),
-//RS             ("audit.copies", ",\"copies\":[]"),
-//RS             ("try", ",\"name\":\"example\""),
-//RS             ("remote.bind", ",\"builder\":\"local\""),
-//RS             ("remote.list", ",\"builders\":[]"),
-//RS         ];
-//RS         let output = surfaces
-//RS             .iter()
-//RS             .map(|(action, fields)| {
-//RS                 let fields = StatusValue::parse(&format!("{{{}}}", fields.trim_start_matches(',')))
-//RS                     .unwrap();
-//RS                 StatusEnvelope::new(*action, true)
-//RS                     .with_field("payload", fields)
-//RS                     .json()
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join("\n");
-//RS         let records = read_machine_output(&output).unwrap();
-//RS         let expected = surfaces
-//RS             .iter()
-//RS             .map(|(action, _)| {
-//RS                 if *action == "browser.relay" {
-//RS                     MachineRecord::BrowserRelay
-//RS                 } else {
-//RS                     MachineRecord::Status
-//RS                 }
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         assert_eq!(records, expected);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn reader_accepts_every_registered_report_row() {
-//RS         let output = diagnostic_rows()
-//RS             .iter()
-//RS             .map(|row| {
-//RS                 let severity = match row.severity {
-//RS                     Severity::Error => "error",
-//RS                     Severity::Lint => "warning",
-//RS                 };
-//RS                 ReportEnvelope::new(
-//RS                     row.moment.as_str(),
-//RS                     severity,
-//RS                     row.code,
-//RS                     row.what,
-//RS                     row.why,
-//RS                     row.fix,
-//RS                 )
-//RS                 .json()
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join("\n");
-//RS         let records = read_machine_output(&output).unwrap();
-//RS         assert_eq!(records.len(), diagnostic_rows().len());
-//RS         assert!(records
-//RS             .iter()
-//RS             .all(|record| *record == MachineRecord::Report));
-//RS     }
-//RS }
-// END-PORT-PENDING 0066 crates/jet-foundation/src/MachineOutput.rs:1-293
-
+// Single reader for Jet's JSON machine-output door.
+use JetFoundation.DataTree.[DataTree]
+use JetFoundation.Report.[NoFixReasonKind, REPORT_SCHEMA, STATUS_SCHEMA]
+use JetFoundation.JSON as json
+// Rust: crates/jet-foundation/src/MachineOutput.rs:7
+pub enum MachineRecord { Report Status BrowserRelay }
+// Rust: crates/jet-foundation/src/MachineOutput.rs:13
+pub fn read_machine_line(text: String) -> MachineRecord Err! {
+    trimmed := text.trim() // #4303
+    value :: json.parse(trimmed)?
+    object :: value.as_object()?
+    schema :: (field(object, "schema") ?? return Err("machine record is missing `schema`")).as_str()?
+    if schema == REPORT_SCHEMA {
+        validate_report(object)?
+        return MachineRecord.Report
+    }
+    if schema == STATUS_SCHEMA {
+        validate_status(object)?
+        action := ""
+        if field(object, "action") == .Val(value) { action = value.as_str().ok() ?? "" }
+        return if action == "browser.relay" { MachineRecord.BrowserRelay } else { MachineRecord.Status }
+    }
+    Err("machine record uses `{schema}`; expected `{REPORT_SCHEMA}` or `{STATUS_SCHEMA}`")
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:41
+fn field(object: View<(String,DataTree)>, key: String) -> (@DataTree)? Never! from object {
+    loop (name, value) in object { if name == key -> return Val(@value) }
+    None
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:46
+fn validate_report(object: View<(String,DataTree)>) Err! {
+    loop key in [String]{"moment", "severity", "code", "what", "why", "fix"} {
+        _ :: (field(object, key) ?? return Err("report record is missing `{key}`")).as_str()?
+    }
+    has_edits :: field(object, "fix_edits") != None
+    has_reason :: field(object, "no_fix_reason") != None
+    if has_edits && has_reason -> return Err("report record cannot contain both `fix_edits` and `no_fix_reason`")
+    if field(object, "fix_edits") == .Val(value) {
+        edits :: value.as_array()?
+        loop value in edits {
+            edit :: value.as_object()?
+            _ :: (field(edit, "file") ?? return Err("report edit is missing `file`")).as_str()?
+            span :: (field(edit, "span") ?? return Err("report edit is missing `span`")).as_object()?
+            loop key in [String]{"start", "end"} {
+                _ :: field(span, key) ?? return Err("report edit span is missing `{key}`")
+            }
+            _ :: (field(edit, "new_text") ?? return Err("report edit is missing `new_text`")).as_str()?
+            _ :: (field(edit, "safety") ?? return Err("report edit is missing `safety`")).as_str()?
+        }
+    }
+    if field(object, "no_fix_reason") == .Val(value) {
+        reason :: value.as_object()?
+        kind :: (field(reason, "kind") ?? return Err("no-fix reason is missing `kind`")).as_str()?
+        _ :: NoFixReasonKind.parse(kind)?
+        next :: (field(reason, "next") ?? return Err("no-fix reason is missing `next`")).as_str()?
+        trimmed := next.trim() // #4303
+        if trimmed.is_empty() || next.chars().any(fn(ch) { ch.is_control() }) {
+            return Err("no-fix reason `next` must be a reviewed printable action")
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:95
+fn validate_status(object: View<(String,DataTree)>) Err! {
+    action :: (field(object, "action") ?? return Err("status record is missing `action`")).as_str()?
+    if action.is_empty() || action.chars().any(fn(ch) { ch.is_control() }) {
+        return Err("status record `action` must be a non-empty printable string")
+    }
+    if field(object, "status") != None -> return Err("status record must not contain the legacy `status` key")
+    if field(object, "ok") == {
+        .Val(.Bool(_)) -> {}
+        .Val(_) -> return Err("status record field `ok` is not boolean")
+        .None -> return Err("status record is missing `ok`")
+    }
+    reports :: (field(object, "reports") ?? return Err("status record is missing `reports`")).as_array()?
+    loop value in reports {
+        report :: value.as_object()?
+        schema :: (field(report, "schema") ?? return Err("status report is missing `schema`")).as_str()?
+        if schema != REPORT_SCHEMA -> return Err("status report uses `{schema}`; expected `{REPORT_SCHEMA}`")
+        validate_report(report)?
+    }
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:128
+pub fn read_machine_output(text: String) -> [MachineRecord] Err! {
+    records := [MachineRecord]{}
+    loop (index, line) in text.lines() {
+        trimmed := line.trim() // #4303
+        if trimmed.is_empty() -> continue
+        record :: if read_machine_line(line) == {
+            .Ok(value) -> value
+            .Err(error) -> return Err("machine record {index + 1}: {error}")
+        }
+        records.push(record)
+    }
+    if records.is_empty() -> return Err("machine output contains no records")
+    records
+}

@@ -1,0 +1,102 @@
+// PORT-PENDING 2171 crates-jet-codegen-src-codegen-items: crates/jet-codegen/src/Codegen/Items.rs:1-98
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use crate::AST::{Expr, Marker, StrPart, StructDef, Variant};
+//RS fn serde_marker<'a>(markers: &'a [Marker], name: &str) -> Option<&'a Marker> {
+//RS     markers.iter().find(|m| m.name == name)
+//RS }
+//RS fn marker_str_arg_for(m: &Marker, label: &str) -> Option<String> {
+//RS     m.arg_labels
+//RS         .iter()
+//RS         .enumerate()
+//RS         .find_map(|(index, marker_label)| {
+//RS             marker_label
+//RS                 .as_ref()
+//RS                 .is_some_and(|(name, _)| name == label)
+//RS                 .then(|| m.expr_arg(index))
+//RS                 .flatten()
+//RS                 .and_then(|expr| match expr {
+//RS                     Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+//RS                         StrPart::Lit(s) => Some(s.clone()),
+//RS                         _ => None,
+//RS                     },
+//RS                     _ => None,
+//RS                 })
+//RS         })
+//RS }
+//RS fn marker_str_arg(m: &Marker) -> Option<String> {
+//RS     if let Some(crate::AST::CtValue::Str(value)) = &m.ct {
+//RS         return Some(value.clone());
+//RS     }
+//RS     match m.expr_arg(0) {
+//RS         Some(Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
+//RS             StrPart::Lit(s) => Some(s.clone()),
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS // D-SERDE3 (= C) + D-ACRO-CASE1=A: wire-casing transform. Snake field names are
+//RS // the common path; PascalCase inputs use the mechanical acronym split.
+//RS fn apply_rename_all(style: &str, name: &str) -> String {
+//RS     match style {
+//RS         crate::Syntax::RENAME_ALL_CAMEL => crate::Syntax::to_camel_acronym(name),
+//RS         crate::Syntax::RENAME_ALL_PASCAL => crate::Syntax::to_pascal_acronym(name),
+//RS         crate::Syntax::RENAME_ALL_KEBAB => crate::Syntax::to_snake_acronym(name).replace('_', "-"),
+//RS         crate::Syntax::RENAME_ALL_SCREAMING => crate::Syntax::to_shouty_acronym(name),
+//RS         // snake (and any unrecognized — sema rejects those with E2409)
+//RS         _ => crate::Syntax::to_snake_acronym(name),
+//RS     }
+//RS }
+//RS pub(super) fn container_rename_all(markers: &[Marker]) -> Option<String> {
+//RS     serde_marker(markers, crate::Syntax::MARKER_RENAME_ALL).and_then(|m| match m.expr_arg(0) {
+//RS         Some(Expr::Ident(n, _)) => Some(n.clone()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS /// Apply the checked container wire-casing rule to a source field name.
+//RS pub(super) fn serde_wire_name(style: Option<&str>, name: &str) -> String {
+//RS     style.map_or_else(|| name.to_string(), |style| apply_rename_all(style, name))
+//RS }
+//RS 
+//RS /// Resolve the checked wire name for an enum variant. Per-variant `#Rename`
+//RS /// wins over the enclosing enum's `#RenameAll` rule.
+//RS pub(super) fn variant_wire_key(style: Option<&str>, variant: &Variant) -> String {
+//RS     if let Some(m) = serde_marker(&variant.serde_markers, crate::Syntax::MARKER_RENAME) {
+//RS         if let Some(s) = marker_str_arg_for(m, "json").or_else(|| marker_str_arg(m)) {
+//RS             return s;
+//RS         }
+//RS     }
+//RS     serde_wire_name(style, &variant.name)
+//RS }
+//RS /// D-MIGRATE4: the migration blocks for a struct, when the runtime chain
+//RS /// applies: `#PublishedSchema`, concrete (no type params), with at least one
+//RS /// `migration { }` block in the module. Mirrors the gate in
+//RS /// `Sema::desugar_migrations` — the two must agree on which types get runtime
+//RS /// machinery, since sema pre-lowers the converter/default functions the step
+//RS /// functions call.
+//RS pub(super) fn migration_blocks<'a>(
+//RS     cx: &'a Cx,
+//RS     s: &StructDef,
+//RS ) -> Option<&'a [crate::AST::MigrationDecl]> {
+//RS     // `#PublishedSchema struct` sets the flag; the grouped
+//RS     // `#[PublishedSchema, Codable]` spelling leaves the marker in `derives`.
+//RS     let published = s.is_published_schema
+//RS         || s.derives
+//RS             .iter()
+//RS             .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
+//RS     if !published || !s.type_params.is_empty() {
+//RS         return None;
+//RS     }
+//RS     let blocks = cx.migrations.get(&s.name)?;
+//RS     if blocks.is_empty() {
+//RS         None
+//RS     } else {
+//RS         Some(blocks)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+// END-PORT-PENDING 2171 crates/jet-codegen/src/Codegen/Items.rs:1-98
+

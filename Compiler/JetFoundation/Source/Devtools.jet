@@ -1,0 +1,1804 @@
+// PORT-PENDING 2086 crates-jet-foundation-src-devtools-slice-1: crates/jet-foundation/src/Devtools.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DX-DEVTOOLS1 / #2429: one typed observation protocol for every
+//RS // devtools host. Host adapters marshal facts into these values; they do not
+//RS // define another envelope, event vocabulary, or time-cursor rule. This part
+//RS // is std-only because AOT, JIT, interpreter, and web runtimes embed it.
+//RS 
+//RS /// Stable protocol identity and its single version fact.
+//RS pub const JET_DEVTOOLS_PROTOCOL: &str = "jet.devtools.v1";
+//RS pub const JET_DEVTOOLS_VERSION: u32 = 1;
+//RS 
+//RS /// Devtools is a development observation surface, not an application data
+//RS /// channel. These defaults are policy, not host hints: a host may marshal the
+//RS /// same envelope, but must not widen the limits or privacy defaults silently.
+//RS pub const JET_DEVTOOLS_LOOPBACK_ONLY: bool = true;
+//RS pub const JET_DEVTOOLS_PAYLOAD_FREE_BY_DEFAULT: bool = true;
+//RS pub const JET_DEVTOOLS_MAX_EVENTS: usize = 256;
+//RS pub const JET_DEVTOOLS_MAX_HISTORY: usize = 256;
+//RS pub const JET_DEVTOOLS_MAX_TEXT_BYTES: usize = 16 * 1024;
+//RS pub const JET_DEVTOOLS_MAX_ENVELOPE_BYTES: usize = 1024 * 1024;
+//RS 
+//RS pub const fn jet_devtools_protocol() -> &'static str {
+//RS     JET_DEVTOOLS_PROTOCOL
+//RS }
+//RS 
+//RS pub const fn jet_devtools_version() -> u32 {
+//RS     JET_DEVTOOLS_VERSION
+//RS }
+//RS /// Lifecycle states are shared by every devtools host.  `Stopped` is distinct
+//RS /// from `Unavailable`: the former is an intentional session shutdown while
+//RS /// the latter means no observation source is available.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDevtoolsLifecycleState {
+//RS     Starting,
+//RS     Building,
+//RS     Ready,
+//RS     Error,
+//RS     Unavailable,
+//RS     Stopped,
+//RS }
+//RS 
+//RS impl JetDevtoolsLifecycleState {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Starting => "starting",
+//RS             Self::Building => "building",
+//RS             Self::Ready => "ready",
+//RS             Self::Error => "error",
+//RS             Self::Unavailable => "unavailable",
+//RS             Self::Stopped => "stopped",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Freshness is a fact on the canonical envelope, not a host-local timestamp
+//RS /// heuristic.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDevtoolsFreshnessState {
+//RS     Fresh,
+//RS     Stale,
+//RS     Unknown,
+//RS }
+//RS 
+//RS impl JetDevtoolsFreshnessState {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Fresh => "fresh",
+//RS             Self::Stale => "stale",
+//RS             Self::Unknown => "unknown",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsFreshnessFact {
+//RS     pub state: JetDevtoolsFreshnessState,
+//RS     pub observed_at_ms: u64,
+//RS }
+//RS 
+//RS impl JetDevtoolsFreshnessFact {
+//RS     pub const fn fresh(observed_at_ms: u64) -> Self {
+//RS         Self {
+//RS             state: JetDevtoolsFreshnessState::Fresh,
+//RS             observed_at_ms,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn stale(observed_at_ms: u64) -> Self {
+//RS         Self {
+//RS             state: JetDevtoolsFreshnessState::Stale,
+//RS             observed_at_ms,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn unknown(observed_at_ms: u64) -> Self {
+//RS         Self {
+//RS             state: JetDevtoolsFreshnessState::Unknown,
+//RS             observed_at_ms,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Default for JetDevtoolsFreshnessFact {
+//RS     fn default() -> Self {
+//RS         Self::unknown(0)
+//RS     }
+//RS }
+//RS 
+//RS /// Privacy policy is carried with the envelope so hosts cannot silently widen
+//RS /// the observation surface while reconnecting.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsPrivacy {
+//RS     pub loopback_only: bool,
+//RS     pub payload_free_by_default: bool,
+//RS     pub published_payloads: bool,
+//RS }
+//RS 
+//RS impl JetDevtoolsPrivacy {
+//RS     pub const fn from_policy(policy: JetDevtoolsPolicy) -> Self {
+//RS         Self {
+//RS             loopback_only: policy.loopback_only,
+//RS             payload_free_by_default: policy.payload_free_by_default,
+//RS             published_payloads: false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Default for JetDevtoolsPrivacy {
+//RS     fn default() -> Self {
+//RS         Self::from_policy(JetDevtoolsPolicy::development())
+//RS     }
+//RS }
+//RS 
+//RS /// Source/build identity is retained independently from event text.  Empty
+//RS /// optional components mean that the producer has not published that fact.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsSourceIdentityFact {
+//RS     pub source_id: Option<String>,
+//RS     pub build_id: Option<String>,
+//RS     pub revision: Option<String>,
+//RS     pub world_id: Option<String>,
+//RS }
+//RS 
+//RS impl JetDevtoolsSourceIdentityFact {
+//RS     pub fn new(
+//RS         source_id: Option<String>,
+//RS         build_id: Option<String>,
+//RS         revision: Option<String>,
+//RS         world_id: Option<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             source_id,
+//RS             build_id,
+//RS             revision,
+//RS             world_id,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         for (value, field) in [
+//RS             (self.source_id.as_deref(), "source_id"),
+//RS             (self.build_id.as_deref(), "build_id"),
+//RS             (self.revision.as_deref(), "revision"),
+//RS             (self.world_id.as_deref(), "world_id"),
+//RS         ] {
+//RS             if let Some(value) = value {
+//RS                 validate_text(value, field)?;
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS impl Default for JetDevtoolsSourceIdentityFact {
+//RS     fn default() -> Self {
+//RS         Self::new(None, None, None, None)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsPolicy {
+//RS     pub loopback_only: bool,
+//RS     pub payload_free_by_default: bool,
+//RS     pub max_events: usize,
+//RS     pub max_history: usize,
+//RS     pub max_text_bytes: usize,
+//RS     pub max_envelope_bytes: usize,
+//RS }
+//RS 
+//RS impl JetDevtoolsPolicy {
+//RS     pub const fn development() -> Self {
+//RS         Self {
+//RS             loopback_only: JET_DEVTOOLS_LOOPBACK_ONLY,
+//RS             payload_free_by_default: JET_DEVTOOLS_PAYLOAD_FREE_BY_DEFAULT,
+//RS             max_events: JET_DEVTOOLS_MAX_EVENTS,
+//RS             max_history: JET_DEVTOOLS_MAX_HISTORY,
+//RS             max_text_bytes: JET_DEVTOOLS_MAX_TEXT_BYTES,
+//RS             max_envelope_bytes: JET_DEVTOOLS_MAX_ENVELOPE_BYTES,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Default for JetDevtoolsPolicy {
+//RS     fn default() -> Self {
+//RS         Self::development()
+//RS     }
+//RS }
+//RS pub const JET_DEVTOOLS_MAX_LIVE_VALUES: usize = 4096;
+//RS 
+//RS /// One checked, bounded live value update.  The producer supplies only the
+//RS /// canonical slot key, type identity, and optional display text; this row is
+//RS /// the Foundation-owned disposition/redaction result sent to host sinks.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetLiveValueDecision {
+//RS     pub value_id: String,
+//RS     pub type_identity: String,
+//RS     pub disposition: String,
+//RS     pub reason: String,
+//RS     pub rendered_value: Option<String>,
+//RS }
+//RS 
+//RS pub type JetLiveValueUpdateSink = fn(JetLiveValueDecision);
+//RS 
+//RS struct JetLiveValueSinkRegistration {
+//RS     id: u64,
+//RS     sink: JetLiveValueUpdateSink,
+//RS }
+//RS 
+//RS struct JetLiveValueSinkRegistry {
+//RS     next_id: u64,
+//RS     sinks: Vec<JetLiveValueSinkRegistration>,
+//RS }
+//RS 
+//RS impl Default for JetLiveValueSinkRegistry {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             next_id: 1,
+//RS             sinks: Vec::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetLiveValueSinkGuard {
+//RS     id: u64,
+//RS }
+//RS 
+//RS impl Drop for JetLiveValueSinkGuard {
+//RS     fn drop(&mut self) {
+//RS         if self.id == 0 {
+//RS             return;
+//RS         }
+//RS         if let Ok(mut registry) = JET_LIVE_VALUE_SINKS.lock() {
+//RS             registry.sinks.retain(|registration| registration.id != self.id);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS static JET_LIVE_VALUE_SINKS: std::sync::LazyLock<
+//RS     std::sync::Mutex<JetLiveValueSinkRegistry>,
+//RS > = std::sync::LazyLock::new(|| {
+//RS     std::sync::Mutex::new(JetLiveValueSinkRegistry::default())
+//RS });
+//RS 
+//RS pub fn jet_devtools_install_live_value_sink(
+//RS     sink: JetLiveValueUpdateSink,
+//RS ) -> JetLiveValueSinkGuard {
+//RS     let mut registry = JET_LIVE_VALUE_SINKS
+//RS         .lock()
+//RS         .expect("live value sink registry poisoned");
+//RS     let id = registry.next_id;
+//RS     registry.next_id = registry.next_id.saturating_add(1).max(1);
+//RS     registry
+//RS         .sinks
+//RS         .push(JetLiveValueSinkRegistration { id, sink });
+//RS     JetLiveValueSinkGuard { id }
+//RS }
+//RS 
+//RS fn jet_live_value_text_valid(value: &str) -> bool {
+//RS     value.len() <= JET_DEVTOOLS_MAX_TEXT_BYTES
+//RS         && !value.chars().any(char::is_control)
+//RS }
+//RS 
+//RS fn jet_live_value_identity_valid(value: &str) -> bool {
+//RS     !value.is_empty() && jet_live_value_text_valid(value)
+//RS }
+//RS 
+//RS fn jet_live_value_sensitive(value: &str) -> bool {
+//RS     let value = value.to_ascii_lowercase();
+//RS     value.contains("credential") || value.contains("secret") || value.contains("pii")
+//RS }
+//RS 
+//RS /// Apply the one Foundation live-value policy and fan the resulting typed
+//RS /// decision out to the installed host callbacks.  Producers must not construct
+//RS /// a disposition, reason, or payload of their own.
+//RS pub fn jet_observe_live_value_update(
+//RS     key: &str,
+//RS     type_identity: &str,
+//RS     rendered: Option<&str>,
+//RS ) {
+//RS     if !jet_live_value_identity_valid(key) || !jet_live_value_identity_valid(type_identity) {
+//RS         return;
+//RS     }
+//RS     let (rendered_value, reason) = match rendered {
+//RS         None => (None, "runtime assignment"),
+//RS         Some(value) if !jet_live_value_text_valid(value) => {
+//RS             (None, "rendered value rejected by policy")
+//RS         }
+//RS         Some(_)
+//RS             if jet_live_value_sensitive(key) || jet_live_value_sensitive(type_identity) =>
+//RS         {
+//RS             (None, "rendered value redacted by policy")
+//RS         }
+//RS         Some(value) => (Some(value.to_string()), "runtime assignment"),
+//RS     };
+//RS     let decision = JetLiveValueDecision {
+//RS         value_id: key.to_string(),
+//RS         type_identity: type_identity.to_string(),
+//RS         disposition: "kept".to_string(),
+//RS         reason: reason.to_string(),
+//RS         rendered_value,
+//RS     };
+//RS     let sinks = {
+//RS         let Ok(registry) = JET_LIVE_VALUE_SINKS.lock() else {
+//RS             return;
+//RS         };
+//RS         registry
+//RS             .sinks
+//RS             .iter()
+//RS             .map(|registration| registration.sink)
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     for sink in sinks {
+//RS         sink(decision.clone());
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetDevtoolsValue {
+//RS     Bool(bool),
+//RS     Int(i64),
+//RS     Float(f64),
+//RS     Text(String),
+//RS }
+//RS 
+//RS impl JetDevtoolsValue {
+//RS     pub fn text(value: impl Into<String>) -> Self {
+//RS         Self::Text(value.into())
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         match self {
+//RS             Self::Float(value) if !value.is_finite() => {
+//RS                 Err("jet.devtools.v1 payload float must be finite".to_string())
+//RS             }
+//RS             Self::Text(value) if value.len() > JET_DEVTOOLS_MAX_TEXT_BYTES => Err(
+//RS                 "jet.devtools.v1 payload text exceeds the Prelude limit".to_string(),
+//RS             ),
+//RS             _ => Ok(()),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDevtoolsField {
+//RS     pub key: String,
+//RS     pub value: JetDevtoolsValue,
+//RS }
+//RS 
+//RS impl JetDevtoolsField {
+//RS     pub fn new(key: impl Into<String>, value: JetDevtoolsValue) -> Self {
+//RS         Self {
+//RS             key: key.into(),
+//RS             value,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Values are absent unless an observation site explicitly calls `publish` on
+//RS /// an event. Metadata in event bodies remains typed and payload-free.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDevtoolsPayload {
+//RS     fields: Vec<JetDevtoolsField>,
+//RS }
+//RS 
+//RS impl JetDevtoolsPayload {
+//RS     pub fn new(fields: Vec<JetDevtoolsField>) -> Self {
+//RS         Self { fields }
+//RS     }
+//RS 
+//RS     pub fn one(key: impl Into<String>, value: JetDevtoolsValue) -> Self {
+//RS         Self::new(vec![JetDevtoolsField::new(key, value)])
+//RS     }
+//RS 
+//RS     pub fn fields(&self) -> &[JetDevtoolsField] {
+//RS         &self.fields
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), String> {
+//RS         if self.fields.len() > JET_DEVTOOLS_MAX_HISTORY {
+//RS             return Err("jet.devtools.v1 payload has too many fields".to_string());
+//RS         }
+//RS         for (index, field) in self.fields.iter().enumerate() {
+//RS             if field.key.is_empty() {
+//RS                 return Err(format!(
+//RS                     "jet.devtools.v1 payload field {index} has an empty key"
+//RS                 ));
+//RS             }
+//RS             if field.key.len() > JET_DEVTOOLS_MAX_TEXT_BYTES {
+//RS                 return Err("jet.devtools.v1 payload field key exceeds the Prelude limit".to_string());
+//RS             }
+//RS             field.value.validate()?;
+//RS             if self.fields[index + 1..]
+//RS                 .iter()
+//RS                 .any(|other| other.key == field.key)
+//RS             {
+//RS                 return Err(format!(
+//RS                     "jet.devtools.v1 payload contains duplicate field `{}`",
+//RS                     field.key
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetDevtoolsQueryState {
+//RS     Fetching,
+//RS     Fresh,
+//RS     Stale,
+//RS     Invalidated,
+//RS }
+//RS 
+//RS impl JetDevtoolsQueryState {
+//RS     fn wire(self) -> &'static str {
+//RS         match self {
+//RS             Self::Fetching => "fetching",
+//RS             Self::Fresh => "fresh",
+//RS             Self::Stale => "stale",
+//RS             Self::Invalidated => "invalidated",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetDevtoolsMutationLifecycle {
+//RS     Started,
+//RS     Committed,
+//RS     Failed,
+//RS     RolledBack,
+//RS }
+//RS 
+//RS impl JetDevtoolsMutationLifecycle {
+//RS     fn wire(self) -> &'static str {
+//RS         match self {
+//RS             Self::Started => "started",
+//RS             Self::Committed => "committed",
+//RS             Self::Failed => "failed",
+//RS             Self::RolledBack => "rolled_back",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetDevtoolsFormState {
+//RS     Pristine,
+//RS     Dirty,
+//RS     Valid,
+//RS     Invalid,
+//RS }
+//RS 
+//RS impl JetDevtoolsFormState {
+//RS     fn wire(self) -> &'static str {
+//RS         match self {
+//RS             Self::Pristine => "pristine",
+//RS             Self::Dirty => "dirty",
+//RS             Self::Valid => "valid",
+//RS             Self::Invalid => "invalid",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetDevtoolsTraceKind {
+//RS     Request,
+//RS     Render,
+//RS     Job,
+//RS     Reload,
+//RS     Frame,
+//RS }
+//RS 
+//RS impl JetDevtoolsTraceKind {
+//RS     fn wire(self) -> &'static str {
+//RS         match self {
+//RS             Self::Request => "request",
+//RS             Self::Render => "render",
+//RS             Self::Job => "job",
+//RS             Self::Reload => "reload",
+//RS             Self::Frame => "frame",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsSourceSpan {
+//RS     pub source_id: String,
+//RS     pub file: String,
+//RS     pub start_line: u32,
+//RS     pub start_column: u32,
+//RS     pub end_line: u32,
+//RS     pub end_column: u32,
+//RS }
+//RS 
+//RS impl JetDevtoolsSourceSpan {
+//RS     pub fn new(
+//RS         source_id: impl Into<String>,
+//RS         file: impl Into<String>,
+//RS         start_line: u32,
+//RS         start_column: u32,
+//RS         end_line: u32,
+//RS         end_column: u32,
+//RS     ) -> Self {
+//RS         Self {
+//RS             source_id: source_id.into(),
+//RS             file: file.into(),
+//RS             start_line,
+//RS             start_column,
+//RS             end_line,
+//RS             end_column,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         for (value, label) in [
+//RS             (&self.source_id, "source id"),
+//RS             (&self.file, "source file"),
+//RS         ] {
+//RS             validate_text(value, label)?;
+//RS         }
+//RS         if self.start_line == 0
+//RS             || self.start_column == 0
+//RS             || self.end_line == 0
+//RS             || self.end_column == 0
+//RS         {
+//RS             return Err("jet.devtools.v1 source span starts or ends at zero".to_string());
+//RS         }
+//RS         if (self.end_line, self.end_column) < (self.start_line, self.start_column) {
+//RS             return Err("jet.devtools.v1 source span ends before it starts".to_string());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsFunctionIdentity {
+//RS     pub function_id: String,
+//RS     pub name: String,
+//RS     pub source: JetDevtoolsSourceSpan,
+//RS }
+//RS 
+//RS impl JetDevtoolsFunctionIdentity {
+//RS     pub fn new(
+//RS         function_id: impl Into<String>,
+//RS         name: impl Into<String>,
+//RS         source: JetDevtoolsSourceSpan,
+//RS     ) -> Self {
+//RS         Self {
+//RS             function_id: function_id.into(),
+//RS             name: name.into(),
+//RS             source,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         validate_text(&self.function_id, "function id")?;
+//RS         validate_text(&self.name, "function name")?;
+//RS         self.source.validate()
+//RS     }
+//RS }
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsGameLaunchPhase {
+//RS     pub phase: String,
+//RS     pub status: String,
+//RS     pub detail: String,
+//RS }
+//RS 
+//RS impl JetDevtoolsGameLaunchPhase {
+//RS     pub fn new(
+//RS         phase: impl Into<String>,
+//RS         status: impl Into<String>,
+//RS         detail: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             phase: phase.into(),
+//RS             status: status.into(),
+//RS             detail: detail.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), String> {
+//RS         validate_text(&self.phase, "game launch phase")?;
+//RS         validate_text(&self.status, "game launch phase status")?;
+//RS         validate_text(&self.detail, "game launch phase detail")
+//RS     }
+//RS }
+//RS 
+//RS /// Closed first-party event bodies. Package-specific event payloads use the
+//RS /// `from_parts_with_payload` marshalling seam instead of widening this core.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum JetDevtoolsEventBody {
+//RS     Build {
+//RS         status: String,
+//RS         tier: String,
+//RS         diagnostics: Vec<String>,
+//RS         kept: u64,
+//RS         reset: u64,
+//RS     },
+//RS     Route {
+//RS         path: String,
+//RS         matched: bool,
+//RS         render_mode: String,
+//RS         reason: String,
+//RS     },
+//RS     Query {
+//RS         name: String,
+//RS         state: JetDevtoolsQueryState,
+//RS         footprint: u64,
+//RS     },
+//RS     Mutation {
+//RS         name: String,
+//RS         lifecycle: JetDevtoolsMutationLifecycle,
+//RS         rollback: bool,
+//RS     },
+//RS     Form {
+//RS         name: String,
+//RS         field: String,
+//RS         state: JetDevtoolsFormState,
+//RS         validation: String,
+//RS     },
+//RS     Table {
+//RS         name: String,
+//RS         viewport: u64,
+//RS         sort: String,
+//RS         filter: String,
+//RS     },
+//RS     Store {
+//RS         name: String,
+//RS         transaction: String,
+//RS         diff: String,
+//RS         cursor: u64,
+//RS     },
+//RS     Trace {
+//RS         name: String,
+//RS         kind: JetDevtoolsTraceKind,
+//RS         request: String,
+//RS         duration_ms: u64,
+//RS         status: String,
+//RS     },
+//RS     Cost {
+//RS         name: String,
+//RS         rule: String,
+//RS         bytes: u64,
+//RS         allocations: u64,
+//RS     },
+//RS     Gate {
+//RS         name: String,
+//RS         status: String,
+//RS         detail: String,
+//RS     },
+//RS     Structure {
+//RS         name: String,
+//RS         kind: String,
+//RS         status: String,
+//RS     },
+//RS     Test {
+//RS         name: String,
+//RS         status: String,
+//RS         duration_ms: u64,
+//RS         diagnostics: String,
+//RS     },
+//RS     Job {
+//RS         name: String,
+//RS         status: String,
+//RS         duration_ms: u64,
+//RS         diagnostics: String,
+//RS     },
+//RS     Frame {
+//RS         name: String,
+//RS         status: String,
+//RS         duration_ms: u64,
+//RS     },
+//RS     GameFrameSample {
+//RS         sequence: u64,
+//RS         frame_id: u64,
+//RS         scene: String,
+//RS         frame_index: u64,
+//RS         build: String,
+//RS         revision: String,
+//RS         trace_id: String,
+//RS         start_ns: u64,
+//RS         cpu_ns: u64,
+//RS         gpu_ns: Option<u64>,
+//RS         responsible_function: Option<JetDevtoolsFunctionIdentity>,
+//RS     },
+//RS     GameDrawEvent {
+//RS         sequence: u64,
+//RS         frame_id: u64,
+//RS         scene: String,
+//RS         frame_index: u64,
+//RS         build: String,
+//RS         revision: String,
+//RS         trace_id: String,
+//RS         event_index: u64,
+//RS         event_id: u64,
+//RS         function: JetDevtoolsFunctionIdentity,
+//RS         phase: String,
+//RS         domain: String,
+//RS         start_ns: u64,
+//RS         duration_ns: u64,
+//RS         object_id: Option<String>,
+//RS         resource_id: Option<String>,
+//RS     },
+//RS     GameLaunchProfile {
+//RS         target: String,
+//RS         run_mode: String,
+//RS         headless_compatible: bool,
+//RS         phases: Vec<JetDevtoolsGameLaunchPhase>,
+//RS     },
+//RS     GameSwap {
+//RS         sequence: u64,
+//RS         path: String,
+//RS         kind: String,
+//RS         status: String,
+//RS         old_schema_id: Option<String>,
+//RS         new_schema_id: Option<String>,
+//RS         migration: String,
+//RS         reason: String,
+//RS     },
+//RS     Request {
+//RS         id: String,
+//RS         method: String,
+//RS         path: String,
+//RS         status: u16,
+//RS     },
+//RS     Response {
+//RS         id: String,
+//RS         status: u16,
+//RS         bytes: u64,
+//RS     },
+//RS }
+//RS 
+//RS impl JetDevtoolsEventBody {
+//RS     fn family(&self) -> &'static str {
+//RS         match self {
+//RS             Self::Build { .. } => "Build",
+//RS             Self::Route { .. } => "Route",
+//RS             Self::Query { .. } => "Query",
+//RS             Self::Mutation { .. } => "Mutation",
+//RS             Self::Form { .. } => "Form",
+//RS             Self::Table { .. } => "Table",
+//RS             Self::Store { .. } => "Store",
+//RS             Self::Trace { .. } => "Trace",
+//RS             Self::Cost { .. } => "Cost",
+//RS             Self::Gate { .. } => "Gate",
+//RS             Self::Structure { .. } => "Structure",
+//RS             Self::Test { .. } => "Test",
+//RS             Self::Job { .. } => "Job",
+//RS             Self::Frame { .. } => "Frame",
+//RS             Self::GameFrameSample { .. } => "GameFrameSample",
+//RS             Self::GameDrawEvent { .. } => "GameDrawEvent",
+//RS             Self::GameLaunchProfile { .. } => "GameLaunchProfile",
+//RS             Self::GameSwap { .. } => "GameSwap",
+//RS             Self::Request { .. } => "Request",
+//RS             Self::Response { .. } => "Response",
+//RS         }
+//RS     }
+//RS 
+//RS     fn entity(&self) -> &str {
+//RS         match self {
+//RS             Self::Build { .. } => "build",
+//RS             Self::Route { path, .. } => path,
+//RS             Self::Query { name, .. }
+//RS             | Self::Mutation { name, .. }
+//RS             | Self::Table { name, .. }
+//RS             | Self::Trace { name, .. }
+//RS             | Self::Cost { name, .. }
+//RS             | Self::Gate { name, .. }
+//RS             | Self::Structure { name, .. }
+//RS             | Self::Test { name, .. }
+//RS             | Self::Job { name, .. }
+//RS             | Self::Frame { name, .. } => name,
+//RS             Self::GameFrameSample { scene, .. } | Self::GameDrawEvent { scene, .. } => scene,
+//RS             Self::GameLaunchProfile { target, .. } => target,
+//RS             Self::GameSwap { path, .. } => path,
+//RS             Self::Form { name, .. } => name,
+//RS             Self::Store { name, .. } => name,
+//RS             Self::Request { id, .. } | Self::Response { id, .. } => id,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One canonical event record. The wire shape is deliberately flat so every
+//RS /// host can project the same `kind`/`entity`/`fields`/`payload` record while
+//RS /// producers and in-process consumers retain the typed body.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDevtoolsEvent {
+//RS     sequence: u64,
+//RS     pub timestamp_ms: u64,
+//RS     pub source: String,
+//RS     pub kind: String,
+//RS     pub entity: String,
+//RS     fields: String,
+//RS     payload: Option<String>,
+//RS     body: Option<JetDevtoolsEventBody>,
+//RS }
+//RS 
+//RS impl JetDevtoolsEvent {
+//RS     pub fn try_new(
+//RS         timestamp_ms: u64,
+//RS         source: impl Into<String>,
+//RS         body: JetDevtoolsEventBody,
+//RS     ) -> Result<Self, String> {
+//RS         let kind = body.family().to_string();
+//RS         let entity = body.entity().to_string();
+//RS         let fields = render_body_fields(&body)?;
+//RS         let mut event = Self::from_parts(timestamp_ms, source, kind, entity, fields)?;
+//RS         event.body = Some(body);
+//RS         Ok(event)
+//RS     }
+//RS 
+//RS     /// Reconstruct a typed event from its flat wire projection.
+//RS     ///
+//RS     /// The supplied fields must be the canonical rendering of `body`; this
+//RS     /// keeps wire compatibility while rejecting a body/identity mismatch.
+//RS     pub fn from_wire(
+//RS         sequence: u64,
+//RS         timestamp_ms: u64,
+//RS         source: impl Into<String>,
+//RS         body: JetDevtoolsEventBody,
+//RS         fields_json: impl Into<String>,
+//RS         payload_json: Option<String>,
+//RS     ) -> Result<Self, String> {
+//RS         if sequence == 0 {
+//RS             return Err("jet.devtools.v1 event sequence must be positive".to_string());
+//RS         }
+//RS         let fields = fields_json.into();
+//RS         let mut event = Self::try_new(timestamp_ms, source, body)?;
+//RS         validate_json_object(&fields, "fields")?;
+//RS         event.fields = fields;
+//RS         if let Some(payload) = payload_json.as_deref() {
+//RS             validate_json_object(payload, "payload")?;
+//RS         }
+//RS         event.sequence = sequence;
+//RS         event.payload = payload_json;
+//RS         Ok(event)
+//RS     }
+//RS 
+//RS 
+//RS     /// Construct a host-marshalled event. `fields_json` must be one JSON
+//RS     /// object; values are attached only through the typed `publish` gate.
+//RS     pub fn from_parts(
+//RS         timestamp_ms: u64,
+//RS         source: impl Into<String>,
+//RS         kind: impl Into<String>,
+//RS         entity: impl Into<String>,
+//RS         fields_json: impl Into<String>,
+//RS     ) -> Result<Self, String> {
+//RS         Self::from_parts_with_payload(
+//RS             timestamp_ms,
+//RS             source,
+//RS             kind,
+//RS             entity,
+//RS             fields_json,
+//RS             None,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Game and package adapters use this boundary for their already-typed
+//RS     /// payload object. The shared serializer validates the object framing and
+//RS     /// keeps protocol/version outside the package payload.
+//RS     pub fn from_parts_with_payload(
+//RS         timestamp_ms: u64,
+//RS         source: impl Into<String>,
+//RS         kind: impl Into<String>,
+//RS         entity: impl Into<String>,
+//RS         fields_json: impl Into<String>,
+//RS         payload_json: Option<String>,
+//RS     ) -> Result<Self, String> {
+//RS         let source = source.into();
+//RS         let kind = kind.into();
+//RS         let entity = entity.into();
+//RS         let fields = fields_json.into();
+//RS         validate_text(&source, "source")?;
+//RS         validate_text(&kind, "kind")?;
+//RS         validate_text(&entity, "entity")?;
+//RS         validate_json_object(&fields, "fields")?;
+//RS         if let Some(payload) = payload_json.as_deref() {
+//RS             validate_json_object(payload, "payload")?;
+//RS         }
+//RS         Ok(Self {
+//RS             sequence: 0,
+//RS             timestamp_ms,
+//RS             source,
+//RS             kind,
+//RS             entity,
+//RS             fields,
+//RS             payload: payload_json,
+//RS             body: None,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Explicit publication is the only path that attaches values to an
+//RS     /// event. Ordinary event constructors never capture locals or data.
+//RS     pub fn publish(mut self, payload: JetDevtoolsPayload) -> Result<Self, String> {
+//RS         let mut rendered = String::new();
+//RS         render_payload(&payload, &mut rendered)?;
+//RS         self.payload = Some(rendered);
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn sequence(&self) -> u64 {
+//RS         self.sequence
+//RS     }
+//RS 
+//RS     pub fn fields_json(&self) -> &str {
+//RS         &self.fields
+//RS     }
+//RS 
+//RS     pub fn payload_json(&self) -> Option<&str> {
+//RS         self.payload.as_deref()
+//RS     }
+//RS     pub fn source(&self) -> &str {
+//RS         &self.source
+//RS     }
+//RS 
+//RS     pub fn kind(&self) -> &str {
+//RS         &self.kind
+//RS     }
+//RS 
+//RS     pub fn entity(&self) -> &str {
+//RS         &self.entity
+//RS     }
+//RS     pub fn body(&self) -> Option<&JetDevtoolsEventBody> {
+//RS         self.body.as_ref()
+//RS     }
+//RS 
+//RS }
+//RS /// A generic, host-independent sink for every canonical devtools event.
+//RS ///
+//RS /// Producers publish the same typed event regardless of whether a resident
+//RS /// session, a test harness, or another embedder is observing it.  The sink
+//RS /// does not depend on a devserver or panel-specific queue.
+//RS pub trait JetDevtoolsEventSink: Send + Sync {
+//RS     fn publish(&self, event: JetDevtoolsEvent);
+//RS }
+//RS 
+//RS pub type JetDevtoolsEventSinkHandle = std::sync::Arc<dyn JetDevtoolsEventSink>;
+//RS 
+//RS struct JetDevtoolsEventSinkRegistration {
+//RS     id: u64,
+//RS     sink: JetDevtoolsEventSinkHandle,
+//RS }
+//RS 
+//RS struct JetDevtoolsEventSinkRegistry {
+//RS     next_id: u64,
+//RS     sinks: Vec<JetDevtoolsEventSinkRegistration>,
+//RS }
+//RS 
+//RS impl Default for JetDevtoolsEventSinkRegistry {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             next_id: 1,
+//RS             sinks: Vec::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A scoped registration for one devtools event sink.
+//RS ///
+//RS /// Registrations fan out instead of replacing one another, so concurrent
+//RS /// resident sessions cannot silently steal events. Dropping the guard removes
+//RS /// only its own registration.
+//RS pub struct JetDevtoolsEventSinkGuard {
+//RS     id: u64,
+//RS }
+//RS 
+//RS impl Drop for JetDevtoolsEventSinkGuard {
+//RS     #[inline(always)]
+//RS     fn drop(&mut self) {
+//RS         if self.id == 0 {
+//RS             return;
+//RS         }
+//RS         let mut registry = JET_DEVTOOLS_EVENT_SINKS
+//RS             .lock()
+//RS             .expect("devtools event sink registry poisoned");
+//RS         registry.sinks.retain(|registration| registration.id != self.id);
+//RS     }
+//RS }
+//RS 
+//RS static JET_DEVTOOLS_EVENT_SINKS: std::sync::LazyLock<
+//RS     std::sync::Mutex<JetDevtoolsEventSinkRegistry>,
+//RS > = std::sync::LazyLock::new(|| {
+//RS     std::sync::Mutex::new(JetDevtoolsEventSinkRegistry::default())
+//RS });
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_devtools_install_event_sink(
+//RS     sink: JetDevtoolsEventSinkHandle,
+//RS ) -> JetDevtoolsEventSinkGuard {
+//RS     let mut registry = JET_DEVTOOLS_EVENT_SINKS
+//RS         .lock()
+//RS         .expect("devtools event sink registry poisoned");
+//RS     let id = registry.next_id;
+//RS     registry.next_id = registry.next_id.saturating_add(1).max(1);
+//RS     registry
+//RS         .sinks
+//RS         .push(JetDevtoolsEventSinkRegistration { id, sink });
+//RS     JetDevtoolsEventSinkGuard { id }
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_devtools_publish_event(event: JetDevtoolsEvent) {
+//RS     let sinks = {
+//RS         let registry = JET_DEVTOOLS_EVENT_SINKS
+//RS             .lock()
+//RS             .expect("devtools event sink registry poisoned");
+//RS         registry
+//RS             .sinks
+//RS             .iter()
+//RS             .map(|registration| registration.sink.clone())
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     for sink in sinks {
+//RS         sink.publish(event.clone());
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub type JetDevtoolsTimeCursor = u64;
+//RS 
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq, Default)]
+//RS pub struct JetDevtoolsSelection {
+//RS     pub panel_id: String,
+//RS     pub item_key: Option<String>,
+//RS }
+//RS 
+//RS impl JetDevtoolsSelection {
+//RS     pub fn new(panel_id: impl Into<String>, item_key: Option<String>) -> Self {
+//RS         Self {
+//RS             panel_id: panel_id.into(),
+//RS             item_key,
+//RS         }
+//RS     }
+//RS }
+//RS #[derive(Clone, Debug, PartialEq, Eq, Default)]
+//RS pub struct JetDevtoolsViewState {
+//RS     /// The selected devtools panel and optional item within that panel.
+//RS     pub selection: Option<JetDevtoolsSelection>,
+//RS     /// Event sequence selected by a host. This is not a wall-clock cursor.
+//RS     pub cursor: Option<JetDevtoolsTimeCursor>,
+//RS }
+//RS 
+//RS impl JetDevtoolsViewState {
+//RS     pub fn new(
+//RS         selection: Option<JetDevtoolsSelection>,
+//RS         cursor: Option<JetDevtoolsTimeCursor>,
+//RS     ) -> Self {
+//RS         Self { selection, cursor }
+//RS     }
+//RS 
+//RS     pub fn selection(&self) -> Option<&JetDevtoolsSelection> {
+//RS         self.selection.as_ref()
+//RS     }
+//RS 
+//RS     pub fn cursor(&self) -> Option<JetDevtoolsTimeCursor> {
+//RS         self.cursor
+//RS     }
+//RS 
+//RS     pub fn set_selection(&mut self, selection: Option<JetDevtoolsSelection>) {
+//RS         self.selection = selection;
+//RS     }
+//RS 
+//RS     pub fn set_cursor(&mut self, cursor: Option<JetDevtoolsTimeCursor>) {
+//RS         self.cursor = cursor;
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDevtoolsStateEntry {
+//RS     pub key: String,
+//RS     pub state: String,
+//RS     pub revision: u64,
+//RS     /// `None` is the normal payload-free state. A value is retained only when
+//RS     /// the state publication site explicitly supplies one.
+//RS     pub published: Option<JetDevtoolsValue>,
+//RS }
+//RS 
+//RS impl JetDevtoolsStateEntry {
+//RS     pub fn new(key: impl Into<String>, state: impl Into<String>, revision: u64) -> Self {
+//RS         Self {
+//RS             key: key.into(),
+//RS             state: state.into(),
+//RS             revision,
+//RS             published: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn publish(mut self, value: JetDevtoolsValue) -> Self {
+//RS         self.published = Some(value);
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDevtoolsStateSnapshot {
+//RS     pub cursor: JetDevtoolsTimeCursor,
+//RS     pub store: Vec<JetDevtoolsStateEntry>,
+//RS     pub query_cache: Vec<JetDevtoolsStateEntry>,
+//RS }
+//RS 
+//RS impl JetDevtoolsStateSnapshot {
+//RS     pub fn new(
+//RS         cursor: JetDevtoolsTimeCursor,
+//RS         store: Vec<JetDevtoolsStateEntry>,
+//RS         query_cache: Vec<JetDevtoolsStateEntry>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             cursor,
+//RS             store,
+//RS             query_cache,
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), String> {
+//RS         validate_state_entries(&self.store, "store")?;
+//RS         validate_state_entries(&self.query_cache, "query_cache")?;
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn validate_state_entries(entries: &[JetDevtoolsStateEntry], label: &str) -> Result<(), String> {
+//RS     if entries.len() > JET_DEVTOOLS_MAX_HISTORY {
+//RS         return Err(format!(
+//RS             "jet.devtools.v1 {label} snapshot exceeds the Prelude limit"
+//RS         ));
+//RS     }
+//RS     for (index, entry) in entries.iter().enumerate() {
+//RS         validate_text(&entry.key, "state key")?;
+//RS         validate_text(&entry.state, "state name")?;
+//RS         if entry.key.is_empty() {
+//RS             return Err(format!(
+//RS                 "jet.devtools.v1 {label} entry {index} has an empty key"
+//RS             ));
+//RS         }
+//RS         if let Some(value) = &entry.published {
+//RS             value.validate()?;
+//RS         }
+//RS         if entries[index + 1..]
+//RS             .iter()
+//RS             .any(|other| other.key == entry.key)
+//RS         {
+//RS             return Err(format!(
+//RS                 "jet.devtools.v1 {label} snapshot contains duplicate key `{}`",
+//RS                 entry.key
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Bounded, monotonic state history. A time cursor returns the newest
+//RS /// snapshot at or before that time; asking before the retained window returns
+//RS /// `None`.
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetDevtoolsStateRing {
+//RS     capacity: usize,
+//RS     snapshots: std::collections::VecDeque<JetDevtoolsStateSnapshot>,
+//RS }
+//RS 
+//RS impl JetDevtoolsStateRing {
+//RS     pub fn new() -> Self {
+//RS         Self::with_capacity(JET_DEVTOOLS_MAX_HISTORY)
+//RS     }
+//RS 
+//RS     pub fn with_capacity(capacity: usize) -> Self {
+//RS         Self {
+//RS             capacity: capacity.clamp(1, JET_DEVTOOLS_MAX_HISTORY),
+//RS             snapshots: std::collections::VecDeque::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn len(&self) -> usize {
+//RS         self.snapshots.len()
+//RS     }
+//RS 
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.snapshots.is_empty()
+//RS     }
+//RS 
+//RS     pub fn push(&mut self, snapshot: JetDevtoolsStateSnapshot) -> Result<(), String> {
+//RS         snapshot.validate()?;
+//RS         if let Some(previous) = self.snapshots.back() {
+//RS             if snapshot.cursor < previous.cursor {
+//RS                 return Err("jet.devtools.v1 state cursor must be monotonic".to_string());
+//RS             }
+//RS         }
+//RS         if self.snapshots.len() == self.capacity {
+//RS             self.snapshots.pop_front();
+//RS         }
+//RS         self.snapshots.push_back(snapshot);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn latest(&self) -> Option<&JetDevtoolsStateSnapshot> {
+//RS         self.snapshots.back()
+//RS     }
+//RS 
+//RS     pub fn at(&self, cursor: JetDevtoolsTimeCursor) -> Option<&JetDevtoolsStateSnapshot> {
+//RS         self.snapshots
+//RS             .iter()
+//RS             .rev()
+//RS             .find(|snapshot| snapshot.cursor <= cursor)
+//RS     }
+//RS 
+//RS     pub fn store_at(&self, cursor: JetDevtoolsTimeCursor) -> Option<&[JetDevtoolsStateEntry]> {
+//RS         self.at(cursor).map(|snapshot| snapshot.store.as_slice())
+//RS     }
+//RS 
+//RS     pub fn query_cache_at(
+//RS         &self,
+//RS         cursor: JetDevtoolsTimeCursor,
+//RS     ) -> Option<&[JetDevtoolsStateEntry]> {
+//RS         self.at(cursor)
+//RS             .map(|snapshot| snapshot.query_cache.as_slice())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetDevtoolsEnvelope {
+//RS     pub session_id: String,
+//RS     pub started_at_ms: u64,
+//RS     pub view: JetDevtoolsViewState,
+//RS     pub lifecycle: JetDevtoolsLifecycleState,
+//RS     pub freshness: JetDevtoolsFreshnessFact,
+//RS     pub privacy: JetDevtoolsPrivacy,
+//RS     pub source_identity: Option<JetDevtoolsSourceIdentityFact>,
+//RS     pub reset: bool,
+//RS     pub truncated: bool,
+//RS     events: std::collections::VecDeque<JetDevtoolsEvent>,
+//RS     next_sequence: u64,
+//RS     max_events: usize,
+//RS }
+//RS 
+//RS impl JetDevtoolsEnvelope {
+//RS     pub fn new(session_id: impl Into<String>, started_at_ms: u64) -> Self {
+//RS         Self::with_policy(session_id, started_at_ms, JetDevtoolsPolicy::development())
+//RS     }
+//RS 
+//RS     pub fn with_policy(
+//RS         session_id: impl Into<String>,
+//RS         started_at_ms: u64,
+//RS         policy: JetDevtoolsPolicy,
+//RS     ) -> Self {
+//RS         Self {
+//RS             session_id: session_id.into(),
+//RS             started_at_ms,
+//RS             view: JetDevtoolsViewState::default(),
+//RS             lifecycle: JetDevtoolsLifecycleState::Starting,
+//RS             freshness: JetDevtoolsFreshnessFact::default(),
+//RS             privacy: JetDevtoolsPrivacy::from_policy(policy),
+//RS             source_identity: None,
+//RS             reset: false,
+//RS             truncated: false,
+//RS             events: std::collections::VecDeque::new(),
+//RS             next_sequence: 1,
+//RS             max_events: policy.max_events.clamp(1, JET_DEVTOOLS_MAX_EVENTS),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Append one event and return its assigned sequence. The event sequence
+//RS     pub fn push(&mut self, mut event: JetDevtoolsEvent) -> u64 {
+//RS         event.sequence = self.next_sequence;
+//RS         self.next_sequence = self.next_sequence.saturating_add(1);
+//RS         if event.payload.is_some() {
+//RS             self.privacy.published_payloads = true;
+//RS         }
+//RS         let sequence = event.sequence;
+//RS         if self.events.len() == self.max_events {
+//RS             self.events.pop_front();
+//RS             self.truncated = true;
+//RS         }
+//RS         self.events.push_back(event);
+//RS         self.view.set_cursor(Some(sequence));
+//RS         sequence
+//RS     }
+//RS 
+//RS 
+//RS     /// Ingest a canonical envelope without interpreting event fields. The
+//RS     /// destination assigns its own monotonic sequence while retaining the
+//RS     /// producer's typed event record and metadata.
+//RS     pub fn ingest(&mut self, incoming: &JetDevtoolsEnvelope) -> Result<usize, String> {
+//RS         if incoming.session_id != self.session_id {
+//RS             return Err("jet.devtools.v1 envelope session identity mismatch".to_string());
+//RS         }
+//RS         incoming
+//RS             .source_identity
+//RS             .as_ref()
+//RS             .map_or(Ok(()), JetDevtoolsSourceIdentityFact::validate)?;
+//RS         let mut count = 0usize;
+//RS         for event in incoming.events() {
+//RS             self.push(event.clone());
+//RS             count = count.saturating_add(1);
+//RS         }
+//RS         if incoming.view.selection.is_some() {
+//RS             self.view.set_selection(incoming.view.selection.clone());
+//RS         }
+//RS         if incoming.view.cursor.is_some() {
+//RS             self.view.set_cursor(incoming.view.cursor);
+//RS         }
+//RS         self.lifecycle = incoming.lifecycle;
+//RS         self.freshness = incoming.freshness;
+//RS         self.privacy.loopback_only = incoming.privacy.loopback_only;
+//RS         self.privacy.payload_free_by_default = incoming.privacy.payload_free_by_default;
+//RS         self.privacy.published_payloads |= incoming.privacy.published_payloads;
+//RS         self.source_identity = incoming.source_identity.clone();
+//RS         self.reset |= incoming.reset;
+//RS         self.truncated |= incoming.truncated;
+//RS         Ok(count)
+//RS     }
+//RS 
+//RS     pub fn events_since(
+//RS         &self,
+//RS         cursor: Option<JetDevtoolsTimeCursor>,
+//RS     ) -> impl Iterator<Item = &JetDevtoolsEvent> {
+//RS         self.events
+//RS             .iter()
+//RS             .filter(move |event| cursor.map_or(true, |value| event.sequence() > value))
+//RS     }
+//RS 
+//RS     pub fn oldest_sequence(&self) -> Option<u64> {
+//RS         self.events.front().map(JetDevtoolsEvent::sequence)
+//RS     }
+//RS 
+//RS     pub fn latest_sequence(&self) -> Option<u64> {
+//RS         self.events.back().map(JetDevtoolsEvent::sequence)
+//RS     }
+//RS 
+//RS     pub fn events(&self) -> impl Iterator<Item = &JetDevtoolsEvent> {
+//RS         self.events.iter()
+//RS     }
+//RS 
+//RS     /// Return typed game trace bodies retained by the canonical envelope.
+//RS     /// Wire kind strings and payload text are never parsed here.
+//RS     pub fn game_trace_bodies(&self) -> Vec<JetDevtoolsEventBody> {
+//RS         self.events
+//RS             .iter()
+//RS             .filter_map(|event| {
+//RS                 let body = event.body()?;
+//RS                 match body {
+//RS                     JetDevtoolsEventBody::GameFrameSample { .. }
+//RS                     | JetDevtoolsEventBody::GameDrawEvent { .. } => Some(body.clone()),
+//RS                     _ => None,
+//RS                 }
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS 
+//RS     pub fn event_count(&self) -> usize {
+//RS         self.events.len()
+//RS     }
+//RS     pub fn view(&self) -> &JetDevtoolsViewState {
+//RS         &self.view
+//RS     }
+//RS 
+//RS     pub fn selection(&self) -> Option<&JetDevtoolsSelection> {
+//RS         self.view.selection()
+//RS     }
+//RS 
+//RS     pub fn cursor(&self) -> Option<JetDevtoolsTimeCursor> {
+//RS         self.view.cursor()
+//RS     }
+//RS 
+//RS 
+//RS     pub fn set_selection(&mut self, selection: Option<JetDevtoolsSelection>) {
+//RS         self.view.set_selection(selection);
+//RS     }
+//RS 
+//RS     pub fn set_cursor(&mut self, cursor: Option<JetDevtoolsTimeCursor>) {
+//RS         self.view.set_cursor(cursor);
+//RS     }
+//RS 
+//RS     pub fn set_lifecycle(&mut self, lifecycle: JetDevtoolsLifecycleState) {
+//RS         self.lifecycle = lifecycle;
+//RS     }
+//RS 
+//RS     pub fn set_freshness(&mut self, freshness: JetDevtoolsFreshnessFact) {
+//RS         self.freshness = freshness;
+//RS     }
+//RS 
+//RS     pub fn set_source_identity(
+//RS         &mut self,
+//RS         identity: Option<JetDevtoolsSourceIdentityFact>,
+//RS     ) -> Result<(), String> {
+//RS         if let Some(identity) = &identity {
+//RS             identity.validate()?;
+//RS         }
+//RS         self.source_identity = identity;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn serialize(&self) -> Result<String, String> {
+//RS         jet_devtools_serialize(self)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS pub fn jet_devtools_serialize(envelope: &JetDevtoolsEnvelope) -> Result<String, String> {
+//RS     validate_text(&envelope.session_id, "session_id")?;
+//RS     if let Some(identity) = &envelope.source_identity {
+//RS         identity.validate()?;
+//RS     }
+//RS     let mut out = String::new();
+//RS     out.push_str("{\"protocol\":");
+//RS     render_text(JET_DEVTOOLS_PROTOCOL, &mut out)?;
+//RS     out.push_str(",\"session_id\":");
+//RS     render_text(&envelope.session_id, &mut out)?;
+//RS     out.push_str(",\"started_at_ms\":");
+//RS     out.push_str(&envelope.started_at_ms.to_string());
+//RS     out.push_str(",\"events\":[");
+//RS     render_event_ring(envelope.events(), &mut out)?;
+//RS     out.push_str("],\"selection\":");
+//RS     match &envelope.view.selection {
+//RS         Some(selection) => render_selection(selection, &mut out)?,
+//RS         None => out.push_str("null"),
+//RS     }
+//RS     out.push_str(",\"cursor\":");
+//RS     match envelope.view.cursor {
+//RS         Some(cursor) => out.push_str(&cursor.to_string()),
+//RS         None => out.push_str("null"),
+//RS     }
+//RS     let has_metadata = envelope.lifecycle != JetDevtoolsLifecycleState::Starting
+//RS         || envelope.freshness != JetDevtoolsFreshnessFact::default()
+//RS         || envelope.privacy.published_payloads
+//RS         || envelope.source_identity.is_some()
+//RS         || envelope.reset
+//RS         || envelope.truncated;
+//RS     if has_metadata {
+//RS         out.push_str(",\"lifecycle\":");
+//RS         render_text(envelope.lifecycle.as_str(), &mut out)?;
+//RS         out.push_str(",\"freshness\":{\"state\":");
+//RS         render_text(envelope.freshness.state.as_str(), &mut out)?;
+//RS         out.push_str(",\"observed_at_ms\":");
+//RS         out.push_str(&envelope.freshness.observed_at_ms.to_string());
+//RS         out.push_str("},\"privacy\":{\"loopback_only\":");
+//RS         out.push_str(if envelope.privacy.loopback_only { "true" } else { "false" });
+//RS         out.push_str(",\"payload_free_by_default\":");
+//RS         out.push_str(if envelope.privacy.payload_free_by_default {
+//RS             "true"
+//RS         } else {
+//RS             "false"
+//RS         });
+//RS         out.push_str(",\"published_payloads\":");
+//RS         out.push_str(if envelope.privacy.published_payloads {
+//RS             "true"
+//RS         } else {
+//RS             "false"
+//RS         });
+//RS         out.push_str("},\"reset\":");
+//RS         out.push_str(if envelope.reset { "true" } else { "false" });
+//RS         out.push_str(",\"truncated\":");
+//RS         out.push_str(if envelope.truncated { "true" } else { "false" });
+//RS         out.push_str(",\"source_identity\":");
+//RS         match &envelope.source_identity {
+//RS             Some(identity) => render_source_identity(identity, &mut out)?,
+//RS             None => out.push_str("null"),
+//RS         }
+//RS     }
+//RS     out.push('}');
+//RS     if out.len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
+//RS         return Err("jet.devtools.v1 envelope exceeds the Prelude byte limit".to_string());
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn render_event_ring<'a>(
+//RS     events: impl Iterator<Item = &'a JetDevtoolsEvent>,
+//RS     out: &mut String,
+//RS ) -> Result<(), String> {
+//RS     for (index, event) in events.enumerate() {
+//RS         if index != 0 {
+//RS             out.push(',');
+//RS         }
+//RS         render_event(event, out)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn render_event(event: &JetDevtoolsEvent, out: &mut String) -> Result<(), String> {
+//RS     if event.sequence == 0 {
+//RS         return Err("jet.devtools.v1 event has no assigned sequence".to_string());
+//RS     }
+//RS     validate_text(&event.source, "source")?;
+//RS     validate_text(&event.kind, "kind")?;
+//RS     validate_text(&event.entity, "entity")?;
+//RS     validate_json_object(&event.fields, "fields")?;
+//RS     if let Some(payload) = event.payload.as_deref() {
+//RS         validate_json_object(payload, "payload")?;
+//RS     }
+//RS     out.push_str("{\"sequence\":");
+//RS     out.push_str(&event.sequence.to_string());
+//RS     out.push_str(",\"timestamp_ms\":");
+//RS     out.push_str(&event.timestamp_ms.to_string());
+//RS     out.push_str(",\"source\":");
+//RS     render_text(&event.source, out)?;
+//RS     out.push_str(",\"kind\":");
+//RS     render_text(&event.kind, out)?;
+//RS     out.push_str(",\"entity\":");
+//RS     render_text(&event.entity, out)?;
+//RS     out.push_str(",\"fields\":");
+//RS     out.push_str(&event.fields);
+//RS     out.push_str(",\"payload\":");
+//RS     match event.payload.as_deref() {
+//RS         Some(payload) => out.push_str(payload),
+//RS         None => out.push_str("null"),
+//RS     }
+//RS     out.push('}');
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn render_selection(
+//RS     selection: &JetDevtoolsSelection,
+//RS     out: &mut String,
+//RS ) -> Result<(), String> {
+//RS     validate_text(&selection.panel_id, "selection.panel_id")?;
+//RS     if let Some(item_key) = &selection.item_key {
+//RS         validate_text(item_key, "selection.item_key")?;
+//RS     }
+//RS     out.push_str("{\"panel_id\":");
+//RS     render_text(&selection.panel_id, out)?;
+//RS     out.push_str(",\"item_key\":");
+//RS     match &selection.item_key {
+//RS         Some(item_key) => render_text(item_key, out)?,
+//RS         None => out.push_str("null"),
+//RS     }
+//RS     out.push('}');
+//RS     Ok(())
+//RS }
+//RS fn render_source_identity(
+//RS     identity: &JetDevtoolsSourceIdentityFact,
+//RS     out: &mut String,
+//RS ) -> Result<(), String> {
+//RS     identity.validate()?;
+//RS     out.push('{');
+//RS     let mut first = true;
+//RS     for (key, value) in [
+//RS         ("source_id", identity.source_id.as_deref()),
+//RS         ("build_id", identity.build_id.as_deref()),
+//RS         ("revision", identity.revision.as_deref()),
+//RS         ("world_id", identity.world_id.as_deref()),
+//RS     ] {
+//RS         if let Some(value) = value {
+//RS             if !first {
+//RS                 out.push(',');
+//RS             }
+//RS             first = false;
+//RS             render_text(key, out)?;
+//RS             out.push(':');
+//RS             render_text(value, out)?;
+//RS         }
+//RS     }
+//RS     out.push('}');
+//RS     Ok(())
+//RS }
+//RS 
+//RS 
+//RS fn render_body_fields(body: &JetDevtoolsEventBody) -> Result<String, String> {
+//RS     let mut out = String::new();
+//RS     out.push('{');
+//RS     match body {
+//RS         JetDevtoolsEventBody::Build {
+//RS             status,
+//RS             tier,
+//RS             diagnostics,
+//RS             kept,
+//RS             reset,
+//RS         } => {
+//RS             render_text_field("status", status, &mut out)?;
+//RS             render_text_field("tier", tier, &mut out)?;
+//RS             if diagnostics.len() > JET_DEVTOOLS_MAX_HISTORY {
+//RS                 return Err("jet.devtools.v1 build has too many diagnostics".to_string());
+//RS             }
+//RS             out.push_str(",\"diagnostics\":[");
+//RS             for (index, diagnostic) in diagnostics.iter().enumerate() {
+//RS                 if index != 0 {
+//RS                     out.push(',');
+//RS                 }
+//RS                 render_text(diagnostic, &mut out)?;
+//RS             }
+//RS             out.push(']');
+//RS             render_u64_field("kept", *kept, &mut out);
+//RS             render_u64_field("reset", *reset, &mut out);
+//RS         }
+//RS         JetDevtoolsEventBody::Route {
+//RS             path,
+//RS             matched,
+//RS             render_mode,
+//RS             reason,
+//RS         } => {
+//RS             render_text_field("path", path, &mut out)?;
+//RS             render_bool_field("matched", *matched, &mut out);
+//RS             render_text_field("render_mode", render_mode, &mut out)?;
+//RS             render_text_field("reason", reason, &mut out)?;
+//RS         }
+//RS         JetDevtoolsEventBody::Query {
+//RS             name,
+//RS             state,
+//RS             footprint,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("state", state.wire(), &mut out)?;
+//RS             render_u64_field("footprint", *footprint, &mut out);
+//RS         }
+//RS         JetDevtoolsEventBody::Mutation {
+//RS             name,
+//RS             lifecycle,
+//RS             rollback,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("lifecycle", lifecycle.wire(), &mut out)?;
+//RS             render_bool_field("rollback", *rollback, &mut out);
+//RS         }
+//RS         JetDevtoolsEventBody::Form {
+//RS             name,
+//RS             field,
+//RS             state,
+//RS             validation,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("field", field, &mut out)?;
+//RS             render_text_field("state", state.wire(), &mut out)?;
+//RS             render_text_field("validation", validation, &mut out)?;
+//RS         }
+//RS         JetDevtoolsEventBody::Table {
+//RS             name,
+//RS             viewport,
+//RS             sort,
+//RS             filter,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_u64_field("viewport", *viewport, &mut out);
+//RS             render_text_field("sort", sort, &mut out)?;
+//RS             render_text_field("filter", filter, &mut out)?;
+//RS         }
+//RS         JetDevtoolsEventBody::Store {
+//RS             name,
+//RS             transaction,
+//RS             diff,
+//RS             cursor,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("transaction", transaction, &mut out)?;
+//RS             render_text_field("diff", diff, &mut out)?;
+//RS             render_u64_field("cursor", *cursor, &mut out);
+//RS         }
+//RS         JetDevtoolsEventBody::Trace {
+//RS             name,
+//RS             kind,
+//RS             request,
+//RS             duration_ms,
+//RS             status,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("kind", kind.wire(), &mut out)?;
+//RS             render_text_field("request", request, &mut out)?;
+//RS             render_u64_field("duration_ms", *duration_ms, &mut out);
+//RS             render_text_field("status", status, &mut out)?;
+//RS         }
+//RS         JetDevtoolsEventBody::Cost {
+//RS             name,
+//RS             rule,
+//RS             bytes,
+//RS             allocations,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("rule", rule, &mut out)?;
+//RS             render_u64_field("bytes", *bytes, &mut out);
+//RS             render_u64_field("allocations", *allocations, &mut out);
+//RS         }
+//RS         JetDevtoolsEventBody::Gate {
+//RS             name,
+//RS             status,
+//RS             detail,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("status", status, &mut out)?;
+//RS             render_text_field("detail", detail, &mut out)?;
+//RS         }
+//RS         JetDevtoolsEventBody::Structure {
+//RS             name,
+//RS             kind,
+//RS             status,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("kind", kind, &mut out)?;
+//RS             render_text_field("status", status, &mut out)?;
+//RS         }
+//RS         JetDevtoolsEventBody::Test {
+//RS             name,
+//RS             status,
+//RS             duration_ms,
+//RS             diagnostics,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("status", status, &mut out)?;
+//RS             render_u64_field("duration_ms", *duration_ms, &mut out);
+//RS             render_text_field("diagnostics", diagnostics, &mut out)?;
+//RS         }
+//RS         JetDevtoolsEventBody::Job {
+//RS             name,
+//RS             status,
+//RS             duration_ms,
+//RS             diagnostics,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("status", status, &mut out)?;
+//RS             render_u64_field("duration_ms", *duration_ms, &mut out);
+//RS             render_text_field("diagnostics", diagnostics, &mut out)?;
+//RS         }
+//RS         JetDevtoolsEventBody::Frame {
+//RS             name,
+//RS             status,
+//RS             duration_ms,
+//RS         } => {
+//RS             render_text_field("name", name, &mut out)?;
+//RS             render_text_field("status", status, &mut out)?;
+//RS             render_u64_field("duration_ms", *duration_ms, &mut out);
+//RS         }
+//RS         JetDevtoolsEventBody::GameFrameSample {
+//RS             sequence,
+//RS             frame_id,
+//RS             scene,
+//RS             frame_index,
+//RS             build,
+//RS             revision,
+//RS             trace_id,
+//RS             start_ns,
+//RS             cpu_ns,
+//RS             gpu_ns,
+//RS             responsible_function,
+//RS         } => {
+//RS             render_u64_field("sequence", *sequence, &mut out);
+//RS             render_u64_field("frame_id", *frame_id, &mut out);
+//RS             render_text_field("scene", scene, &mut out)?;
+//RS             render_u64_field("frame_index", *frame_index, &mut out);
+//RS             render_text_field("build", build, &mut out)?;
+//RS             render_text_field("revision", revision, &mut out)?;
+//RS             render_text_field("trace_id", trace_id, &mut out)?;
+//RS             render_u64_field("start_ns", *start_ns, &mut out);
+//RS             render_u64_field("cpu_ns", *cpu_ns, &mut out);
+//RS             match gpu_ns {
+//RS                 Some(value) => render_u64_field("gpu_ns", *value, &mut out),
+//RS                 None => render_null_field("gpu_ns", &mut out),
+//RS             }
+//RS             match responsible_function {
+//RS                 Some(function) => render_function_field("responsible_function", function, &mut out)?,
+//RS                 None => render_null_field("responsible_function", &mut out),
+//RS             }
+//RS         }
+//RS         JetDevtoolsEventBody::GameDrawEvent {
+//RS             sequence,
+//RS             frame_id,
+//RS             scene,
+//RS             frame_index,
+//RS             build,
+//RS             revision,
+//RS             trace_id,
+//RS             event_index,
+//RS             event_id,
+//RS             function,
+//RS             phase,
+//RS             domain,
+//RS             start_ns,
+//RS             duration_ns,
+//RS             object_id,
+//RS             resource_id,
+//RS         } => {
+//RS             render_u64_field("sequence", *sequence, &mut out);
+//RS             render_u64_field("frame_id", *frame_id, &mut out);
+//RS             render_text_field("scene", scene, &mut out)?;
+//RS             render_u64_field("frame_index", *frame_index, &mut out);
+//RS             render_text_field("build", build, &mut out)?;
+//RS             render_text_field("revision", revision, &mut out)?;
+//RS             render_text_field("trace_id", trace_id, &mut out)?;
+//RS             render_u64_field("event_index", *event_index, &mut out);
+//RS             render_u64_field("event_id", *event_id, &mut out);
+//RS             render_function_field("function", function, &mut out)?;
+// END-PORT-PENDING 2086 crates/jet-foundation/src/Devtools.rs:1-1800
+

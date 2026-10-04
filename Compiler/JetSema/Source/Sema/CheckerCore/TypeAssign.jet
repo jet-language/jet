@@ -1,0 +1,1741 @@
+// PORT-PENDING 2104 crates-jet-sema-src-sema-checkercore-type-assign: crates/jet-sema/src/Sema/CheckerCore/type_assign.rs:1-1737
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::helpers::{no_any_type, type_hole_diag};
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
+//RS use crate::Sema::Bundle::fn_types_compatible;
+//RS use crate::Sema::CheckerCoreLib::{
+//RS     core_type_known, data_renamed_to_datatree, layout_handle_renamed_to_layout,
+//RS     phantom_fact_menu_diag, retired_acronym_spelling_diag, retired_authority_vocabulary_diag,
+//RS };
+//RS use crate::Sema::Diagnostics::{
+//RS     option_used_where_plain_expected, plain_used_where_result_expected,
+//RS     result_used_where_plain_expected, soft_public_use, suggest_field, type_fix_hint,
+//RS     undeclared_value_tag,
+//RS };
+//RS use crate::Sema::{Checker, KnowledgeGate, KnowledgePlane, TypeDef};
+//RS use crate::Syntax;
+//RS use crate::AST::Type;
+//RS 
+//RS fn union_member_has_open_shape(ty: &Type) -> bool {
+//RS     match ty {
+//RS         Type::TraitObject(_) | Type::Fn { .. } => true,
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::FixedList { elem: inner, .. } => union_member_has_open_shape(inner),
+//RS         Type::Map { key, value, .. }
+//RS         | Type::Result {
+//RS             ok: key,
+//RS             err: value,
+//RS         } => union_member_has_open_shape(key) || union_member_has_open_shape(value),
+//RS         Type::Apply { args, .. } | Type::Union(args) => {
+//RS             args.iter().any(union_member_has_open_shape)
+//RS         }
+//RS         Type::Tuple(fields) => fields
+//RS             .iter()
+//RS             .any(|(_, field)| union_member_has_open_shape(field)),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn is_core_view_generic(ty: &Type) -> bool {
+//RS     // D-PIN1=A / D-PIN3=A: `Pin<T>` joins the borrowed-window family. It is a
+//RS     // core generic like `View`/`ViewMut` — declarable on fields, parameters,
+//RS     // and returns, and constructed only by `mem.pin`.
+//RS     matches!(
+//RS         ty,
+//RS         Type::Apply { name, .. }
+//RS             if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN | Syntax::TYPE_VIEW_ITER)
+//RS     )
+//RS }
+//RS 
+//RS /// Reject `Never` wherever a declaration stores an ordinary value. The only
+//RS /// exceptions are a callable's successful return slot and the already-ratified
+//RS /// failure-side `!Never` carrier.
+//RS pub(crate) fn reject_never_value_positions(
+//RS     ty: &Type,
+//RS     span: Span,
+//RS     allow_success_never: bool,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     match ty {
+//RS         Type::Named(name) if name == Syntax::TYPE_NEVER && !allow_success_never => {
+//RS             diags.push(Diagnostic::from_row("E2422", &[], Some(span)));
+//RS         }
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::Tagged { inner, .. }
+//RS         | Type::FixedList { elem: inner, .. }
+//RS         | Type::InlineRange { base: inner, .. }
+//RS         | Type::Quantity { base: inner, .. } => {
+//RS             reject_never_value_positions(inner, span, false, diags);
+//RS         }
+//RS         Type::Map { key, value, .. } => {
+//RS             reject_never_value_positions(key, span, false, diags);
+//RS             reject_never_value_positions(value, span, false, diags);
+//RS         }
+//RS         Type::Result { ok, err } => {
+//RS             reject_never_value_positions(ok, span, allow_success_never, diags);
+//RS             reject_never_value_positions(err, span, true, diags);
+//RS         }
+//RS         Type::Fn { params, ret, .. } => {
+//RS             for param in params {
+//RS                 reject_never_value_positions(param, span, false, diags);
+//RS             }
+//RS             if let Some(ret) = ret {
+//RS                 reject_never_value_positions(ret, span, true, diags);
+//RS             }
+//RS         }
+//RS         Type::Apply { args, .. } | Type::Union(args) => {
+//RS             for arg in args {
+//RS                 reject_never_value_positions(arg, span, false, diags);
+//RS             }
+//RS         }
+//RS         Type::Tuple(fields) => {
+//RS             for (_, field) in fields {
+//RS                 reject_never_value_positions(field, span, false, diags);
+//RS             }
+//RS         }
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::IntN { .. }
+//RS         | Type::Float32
+//RS         | Type::TraitObject(_)
+//RS         | Type::Measure(_)
+//RS         | Type::Named(_) => {}
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> Checker<'a> {
+//RS     pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
+//RS         self.check_declared_type_common(ty, span);
+//RS         self.reject_never_value_positions(ty, span, false);
+//RS     }
+//RS 
+//RS     /// Check a function's declared return contract. `Never` is legal only in
+//RS     /// this success slot (and nested function-type return slots); ordinary
+//RS     /// value declarations use `check_declared_type` instead.
+//RS     pub(crate) fn check_declared_return_type(&mut self, ty: &Type, span: Span) {
+//RS         self.check_declared_type_common(ty, span);
+//RS         self.reject_never_value_positions(ty, span, true);
+//RS     }
+//RS 
+//RS     fn check_declared_type_common(&mut self, ty: &Type, span: Span) {
+//RS         self.warn_soft_public_declared_type(ty, span);
+//RS         self.check_declared_type_rules(ty, span);
+//RS         if self.cell_guard_storage_is_unsupported(ty) {
+//RS             self.report_cell_guard_storage(
+//RS                 format!("a Cell guard cannot be stored in `{}`", ty.show()),
+//RS                 span,
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     fn reject_never_value_positions(&mut self, ty: &Type, span: Span, allow_success_never: bool) {
+//RS         reject_never_value_positions(ty, span, allow_success_never, &mut self.diags);
+//RS     }
+//RS 
+//RS     pub(crate) fn warn_soft_public_declared_type(&mut self, ty: &Type, span: Span) {
+//RS         self.warn_soft_public_type_tree(ty, span);
+//RS     }
+//RS 
+//RS     fn warn_soft_public_type_tree(&mut self, ty: &Type, span: Span) {
+//RS         match ty {
+//RS             Type::Named(name) => self.warn_soft_public_type_name(name, span),
+//RS             Type::Apply { name, args } => {
+//RS                 self.warn_soft_public_type_name(name, span);
+//RS                 for arg in args {
+//RS                     self.warn_soft_public_type_tree(arg, span);
+//RS                 }
+//RS             }
+//RS             Type::TraitObject(names) => {
+//RS                 for name in names {
+//RS                     self.warn_soft_public_type_name(name, span);
+//RS                 }
+//RS             }
+//RS             Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => {
+//RS                 self.warn_soft_public_type_tree(inner, span);
+//RS             }
+//RS             Type::Map { key, value, .. } => {
+//RS                 self.warn_soft_public_type_tree(key, span);
+//RS                 self.warn_soft_public_type_tree(value, span);
+//RS             }
+//RS             Type::Result { ok, err } => {
+//RS                 self.warn_soft_public_type_tree(ok, span);
+//RS                 self.warn_soft_public_type_tree(err, span);
+//RS             }
+//RS             Type::Union(members) => {
+//RS                 for m in members {
+//RS                     self.warn_soft_public_type_tree(m, span);
+//RS                 }
+//RS             }
+//RS             Type::Tuple(fields) => {
+//RS                 for (_, field) in fields {
+//RS                     self.warn_soft_public_type_tree(field, span);
+//RS                 }
+//RS             }
+//RS             Type::FixedList { elem, .. }
+//RS             | Type::Tagged { inner: elem, .. }
+//RS             | Type::InlineRange { base: elem, .. } => {
+//RS                 self.warn_soft_public_type_tree(elem, span);
+//RS             }
+//RS             Type::Fn { params, ret, .. } => {
+//RS                 for param in params {
+//RS                     self.warn_soft_public_type_tree(param, span);
+//RS                 }
+//RS                 if let Some(ret) = ret {
+//RS                     self.warn_soft_public_type_tree(ret, span);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn warn_soft_public_type_name(&mut self, name: &str, span: Span) {
+//RS         self.warn_deprecated_type_name(name, span);
+//RS         let (owner, public_name) = if let Some((alias, leaf)) = name.rsplit_once('.') {
+//RS             (self.imports.get(alias).copied(), leaf)
+//RS         } else {
+//RS             let locally_owned = self.registry.contains(name) || {
+//RS                 let declared = self
+//RS                     .name_ledger
+//RS                     .declaration(self.module_idx, name)
+//RS                     .is_some();
+//RS                 self.modules.is_some_and(|modules| {
+//RS                     declared && modules[self.module_idx].trait_reg.is_trait_name(name)
+//RS                 })
+//RS             };
+//RS             let owner = if locally_owned {
+//RS                 Some(self.module_idx)
+//RS             } else {
+//RS                 self.modules.and_then(|modules| {
+//RS                     self.imports.values().copied().find(|&idx| {
+//RS                         modules[idx].registry.contains(name)
+//RS                             || modules[idx].trait_reg.is_trait_name(name)
+//RS                     })
+//RS                 })
+//RS             };
+//RS             (owner, name)
+//RS         };
+//RS         if Syntax::classify_identifier(public_name) != Syntax::IdentifierClass::SoftPublic {
+//RS             return;
+//RS         }
+//RS         let Some(owner) = owner else { return };
+//RS         if owner == self.module_idx || !self.type_is_pub_in(owner, public_name) {
+//RS             return;
+//RS         }
+//RS         self.diags.push(soft_public_use(public_name, span));
+//RS     }
+//RS 
+//RS     pub(crate) fn warn_deprecated_type_name(&mut self, name: &str, span: Span) {
+//RS         let (import_ns, leaf) = self.struct_type_name_parts(name);
+//RS         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+//RS             return;
+//RS         };
+//RS         let deprecation = if owner == self.module_idx {
+//RS             self.registry
+//RS                 .types
+//RS                 .get(leaf)
+//RS                 .and_then(|definition| match definition {
+//RS                     TypeDef::Struct { deprecation, .. }
+//RS                     | TypeDef::Enum { deprecation, .. }
+//RS                     | TypeDef::Distinct { deprecation, .. }
+//RS                     | TypeDef::Alias { deprecation, .. } => deprecation.as_ref(),
+//RS                 })
+//RS         } else {
+//RS             self.modules
+//RS                 .and_then(|modules| modules.get(owner))
+//RS                 .and_then(|module| module.registry.types.get(leaf))
+//RS                 .and_then(|definition| match definition {
+//RS                     TypeDef::Struct { deprecation, .. }
+//RS                     | TypeDef::Enum { deprecation, .. }
+//RS                     | TypeDef::Distinct { deprecation, .. }
+//RS                     | TypeDef::Alias { deprecation, .. } => deprecation.as_ref(),
+//RS                 })
+//RS         }
+//RS         .cloned();
+//RS         if let Some(deprecation) = deprecation {
+//RS             let item = import_ns.map_or_else(
+//RS                 || leaf.to_string(),
+//RS                 |namespace| format!("{namespace}.{leaf}"),
+//RS             );
+//RS             self.check_deprecation(&item, &deprecation, span);
+//RS         }
+//RS     }
+//RS 
+//RS     pub(in crate::Sema) fn check_declared_type_rules(&mut self, ty: &Type, span: Span) {
+//RS         if let Some(chain) = generic_depth_exceeded(ty) {
+//RS             self.diags.push(e0909(&chain, span));
+//RS         }
+//RS         match ty {
+//RS             Type::Named(n) => {
+//RS                 if n == "Any" {
+//RS                     self.diags.push(no_any_type(span));
+//RS                     return;
+//RS                 }
+//RS                 if n == "_" {
+//RS                     self.diags.push(type_hole_diag(span));
+//RS                     return;
+//RS                 }
+//RS                 // D-SERDE13=B: the retired `Data` spelling points at `DataTree`.
+//RS                 if n == "Data" {
+//RS                     self.diags.push(data_renamed_to_datatree(span));
+//RS                     return;
+//RS                 }
+//RS                 // D-LAYOUT-CTOR1: the retired `LayoutHandle` spelling points at `Layout`.
+//RS                 if n == Syntax::LAYOUT_HANDLE_TYPE_RETIRED {
+//RS                     self.diags.push(layout_handle_renamed_to_layout(span));
+//RS                     return;
+//RS                 }
+//RS                 if let Some(canonical) = crate::Syntax::retired_acronym_spelling(n) {
+//RS                     self.diags.push(retired_acronym_spelling_diag(n, &canonical, span));
+//RS                     return;
+//RS                 }
+//RS                 if let Some(diag) = retired_authority_vocabulary_diag(n, span) {
+//RS                     self.diags.push(diag);
+//RS                     return;
+//RS                 }
+//RS                 if let Some((alias, leaf)) = n.split_once('.') {
+//RS                     if let Some(module) = self.core_imports.get(alias) {
+//RS                         if let Some(kind) =
+//RS                             jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf)
+//RS                         {
+//RS                             match kind {
+//RS                                 jet_foundation::CoreModuleExports::CoreLeafKind::Generic(arity) => {
+//RS                                     self.diags.push(Diagnostic::error(
+//RS                                         "E0119",
+//RS                                         format!(
+//RS                                             "`{n}` expects {arity} type argument{}, got 0",
+//RS                                             if arity == 1 { "" } else { "s" }
+//RS                                         ),
+//RS                                         "every generic Core type needs a matching type argument"
+//RS                                             .to_string(),
+//RS                                         format!(
+//RS                                             "write `{n}<...>` with exactly {arity} type argument{}",
+//RS                                             if arity == 1 { "" } else { "s" }
+//RS                                         ),
+//RS                                         Some(span),
+//RS                                     ));
+//RS                                 }
+//RS                                 _ => {}
+//RS                             }
+//RS                             return;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if !self.registry.contains(n) {
+//RS                     if let Some(arity) =
+//RS                         jet_foundation::CoreModuleExports::core_generic_arity(n)
+//RS                     {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0119",
+//RS                             format!(
+//RS                                 "`{n}` expects {arity} type argument{}, got 0",
+//RS                                 if arity == 1 { "" } else { "s" }
+//RS                             ),
+//RS                             "every generic Core type needs a matching type argument".to_string(),
+//RS                             format!(
+//RS                                 "write `{n}<...>` with exactly {arity} type argument{}",
+//RS                                 if arity == 1 { "" } else { "s" }
+//RS                             ),
+//RS                             Some(span),
+//RS                         ));
+//RS                         return;
+//RS                     }
+//RS                 }
+//RS                 if core_type_known(n) {
+//RS                     return;
+//RS                 }
+//RS                 if self.type_param_scope.iter().any(|p| p.name == *n) {
+//RS                     return;
+//RS                 }
+//RS                 if self.trait_reg.is_trait_name(n) {
+//RS                     return;
+//RS                 }
+//RS                 if self.registry.is_type_alias(n) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0119",
+//RS                         format!("`{}` is a type alias and needs type arguments", n),
+//RS                         format!(
+//RS                             "write `{}`<{}>",
+//RS                             n,
+//RS                             self.registry
+//RS                                 .type_alias(n)
+//RS                                 .map(|(params, _)| {
+//RS                                     params
+//RS                                         .iter()
+//RS                                         .map(|p| p.name.as_str())
+//RS                                         .collect::<Vec<_>>()
+//RS                                         .join(", ")
+//RS                                 })
+//RS                                 .unwrap_or_default()
+//RS                         ),
+//RS                         format!("instantiate the alias, like `{}`<T>", n),
+//RS                         Some(span),
+//RS                     ));
+//RS                     return;
+//RS                 }
+//RS                 if self.registry.contains(n) {
+//RS                     return;
+//RS                 }
+//RS                 // Canonical imported nominals are already resolved. Keep the
+//RS                 // fully-qualified identity through validation; only the leaf
+//RS                 // is projected for the owning module's registry lookup.
+//RS                 if let Some((namespace, leaf)) = n.rsplit_once("::") {
+//RS                     if let Some(owner) = self.struct_owner_module(leaf, Some(namespace)) {
+//RS                         if owner == self.module_idx || self.type_is_pub_in(owner, leaf) {
+//RS                             return;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if let Some((module, leaf)) = n.rsplit_once('.') {
+//RS                     if let (Some(modules), Some(&index)) = (self.modules, self.imports.get(module))
+//RS                     {
+//RS                         if modules[index].registry.contains(leaf)
+//RS                             && self.type_is_pub_in(index, leaf)
+//RS                         {
+//RS                             return;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 // D-CORE-USELIST1=A: a grouped Core item import
+//RS                 // (`use core.web.forms.[WebFormError]`) names that module's
+//RS                 // public source record.
+//RS                 if let Some(leaf) = self.core_item_imports.get(n.as_str()) {
+//RS                     if self
+//RS                         .struct_owner_module(n, None)
+//RS                         .is_some_and(|owner| self.type_is_pub_in(owner, leaf))
+//RS                     {
+//RS                         return;
+//RS                     }
+//RS                 }
+//RS                 // Check imported file-module registries for pub types.
+//RS                 if let Some(mods) = self.modules {
+//RS                     let found = self
+//RS                         .imports
+//RS                         .values()
+//RS                         .copied()
+//RS                         .filter(|&idx| {
+//RS                             mods[idx].registry.contains(n) && self.type_is_pub_in(idx, n)
+//RS                         })
+//RS                         .collect::<std::collections::HashSet<_>>();
+//RS                     // A bare imported leaf is a source lookup convenience only when it
+//RS                     // has one visible owner. Keeping it unresolved when two modules export
+//RS                     // the same leaf would create a second, collision-prone nominal identity.
+//RS                     if found.len() == 1 && self.struct_owner_module(n, None).is_some() {
+//RS                         return;
+//RS                     }
+//RS                 }
+//RS                 // D-FACT-HOME1=A: a phantom fact-menu name (`Effect`,
+//RS                 // `InlineMode`, ...) is refused with a fix naming the real
+//RS                 // path, not the generic "no type called" message.
+//RS                 if let Some(diag) = phantom_fact_menu_diag(n, span) {
+//RS                     self.diags.push(diag);
+//RS                     return;
+//RS                 }
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0119",
+//RS                     format!("there's no type called `{}`", n),
+//RS                     format!(
+//RS                         "the types are `{}`, `{}`, `{}`, and `{}` (plus types you define)",
+//RS                         Syntax::TYPE_INT,
+//RS                         Syntax::TYPE_FLOAT,
+//RS                         Syntax::TYPE_BOOL,
+//RS                         Syntax::TYPE_STRING
+//RS                     ),
+//RS                     "check the spelling, or define the struct or enum first".to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS             }
+//RS             Type::Apply { name, args } => {
+//RS                 let (import_ns, lookup_name) = Self::split_type_name(name);
+//RS                 let canonical_owner = name
+//RS                     .contains("::")
+//RS                     .then(|| self.name_ledger.nominal_module(name))
+//RS                     .flatten();
+//RS                 if lookup_name == "Any" {
+//RS                     self.diags.push(no_any_type(span));
+//RS                     for arg in args {
+//RS                         self.check_declared_type_rules(arg, span);
+//RS                     }
+//RS                     return;
+//RS                 }
+//RS                 let local_alias = canonical_owner.is_none() && import_ns.is_none();
+//RS                 if local_alias {
+//RS                     if let Some((params, target)) = self.registry.type_alias(lookup_name) {
+//RS                         if params.len() != args.len() {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0119",
+//RS                                 format!(
+//RS                                     "`{}` expects {} type argument{}, got {}",
+//RS                                     name,
+//RS                                     params.len(),
+//RS                                     if params.len() == 1 { "" } else { "s" },
+//RS                                     args.len()
+//RS                                 ),
+//RS                                 "every generic parameter needs a matching type argument"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "write `{}`<{}>",
+//RS                                     name,
+//RS                                     params
+//RS                                         .iter()
+//RS                                         .map(|p| p.name.as_str())
+//RS                                         .collect::<Vec<_>>()
+//RS                                         .join(", ")
+//RS                                 ),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         }
+//RS                         for arg in args {
+//RS                             self.check_declared_type_rules(arg, span);
+//RS                         }
+//RS                         let subst: std::collections::HashMap<String, Type> = params
+//RS                             .iter()
+//RS                             .zip(args.iter())
+//RS                             .map(|(p, a)| (p.name.clone(), a.clone()))
+//RS                             .collect();
+//RS                         self.check_declared_type_rules(&substitute_type(target, &subst), span);
+//RS                         return;
+//RS                     }
+//RS                 }
+//RS                 let core_generic_arity = match import_ns {
+//RS                     Some(namespace) => self
+//RS                         .core_imports
+//RS                         .get(namespace)
+//RS                         .and_then(|module| {
+//RS                             match jet_foundation::CoreModuleExports::core_leaf_kind(
+//RS                                 module,
+//RS                                 lookup_name,
+//RS                             ) {
+//RS                                 Some(
+//RS                                     jet_foundation::CoreModuleExports::CoreLeafKind::Generic(
+//RS                                         arity,
+//RS                                     ),
+//RS                                 ) => Some(arity),
+//RS                                 _ => None,
+//RS                             }
+//RS                         }),
+//RS                     None => jet_foundation::CoreModuleExports::core_generic_arity(lookup_name),
+//RS                 };
+//RS                 if let Some(expected) = core_generic_arity {
+//RS                     if args.len() != expected {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0119",
+//RS                             format!(
+//RS                                 "`{name}` expects {expected} type argument{}, got {}",
+//RS                                 if expected == 1 { "" } else { "s" },
+//RS                                 args.len()
+//RS                             ),
+//RS                             "every generic Core type needs a matching type argument".to_string(),
+//RS                             format!("write `{name}<...>` with exactly {expected} type argument{}", if expected == 1 { "" } else { "s" }),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 let is_core_generic = core_generic_arity.is_some()
+//RS                     || (local_alias
+//RS                         && matches!(
+//RS                             lookup_name,
+//RS                             "Task"
+//RS                                 | Syntax::TYPE_RECEIVER
+//RS                                 | "Sender"
+//RS                                 | "Ptr"
+//RS                                 | "Tensor"
+//RS                                 | "Vec"
+//RS                                 | "Matrix"
+//RS                                 | Syntax::TYPE_ATOMIC
+//RS                             | "Set" | Syntax::TYPE_TALLY | Syntax::TYPE_QUEUE
+//RS                             // D-ITER-RESUME1=A: a helper that pulls from a
+//RS                             // caller's lazy source names it as `&Iter<T>`.
+//RS                             | Syntax::TYPE_ITER
+//RS                             // D-ITERTOOLS1=A: expanded generic collection handles.
+//RS                             | Syntax::TYPE_RANK | "PriorityQueue" | "Cache"
+//RS                             | "Decimal"
+//RS                             // D-REACT1=B: reactive handle types.
+//RS                             | "Signal" | "Derived" | "Computed"
+//RS                             // D-EVENT1=D: first-party typed Event/Hook family.
+//RS                             | "Event" | "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome"
+//RS                             | "DispatchReport"
+//RS                             // D-STREAMYIELD1: generator return type.
+//RS                             | "Stream"
+//RS                             // D-FOUND-COREAPI1 / #2853: event-time stream
+//RS                             // intermediate and window carriers are core generics.
+//RS                             | "StreamEventTime" | "KeyedStream" | "Window"
+//RS                             // D-QUERY-RETAIN1=A: one deferred query and
+//RS                             // generic grouped result replace the old wrappers.
+//RS                             | "Query" | "DataGroupedQuery" | "Group"
+//RS                             // D-DATAFRAME1=A: joins remain typed list products.
+//RS                             | "DataJoin"
+//RS                             | "Pool" | "ID"
+//RS                             // D-LOCALCELL1=A: one-thread cell and projected guard types.
+//RS                             | "Cell" | "CellReadGuard" | "CellEditGuard"
+//RS                             // The one closed secret-lifetime wrapper.
+//RS                             | "ExpiringSecret" | Syntax::TYPE_SHARED_GUARD
+//RS                             | Syntax::TYPE_SHARED_WEAK
+//RS                             // D-SHARED-REVISION1=A: owner-bound snapshot has
+//RS                             // source and projection type arguments.
+//RS                             | Syntax::TYPE_SHARED_SNAPSHOT
+//RS                             | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
+//RS                             // D-SPACE-GEOMETRY1=A: point/delta carry a scalar
+//RS                             // and one nominal space; transforms carry two.
+//RS                             | "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
+//RS                         ))
+//RS                     || (local_alias && is_core_view_generic(ty));
+//RS                 if is_core_generic
+//RS                     && matches!(
+//RS                         lookup_name,
+//RS                         "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
+//RS                     )
+//RS                 {
+//RS                     let valid = match lookup_name {
+//RS                         "Point2" | "Delta2" => {
+//RS                             args.len() == 2
+//RS                                 && args[0].is_float()
+//RS                                 && matches!(&args[1], Type::Named(_))
+//RS                         }
+//RS                         "Transform" => {
+//RS                             args.len() == 2
+//RS                                 && matches!((&args[0], &args[1]), (Type::Named(_), Type::Named(_)))
+//RS                         }
+//RS                         "Transform2" => {
+//RS                             args.len() == 3
+//RS                                 && args[0].is_float()
+//RS                                 && matches!((&args[1], &args[2]), (Type::Named(_), Type::Named(_)))
+//RS                         }
+//RS                         "Ray2" => {
+//RS                             args.len() == 3
+//RS                                 && args[0].is_float()
+//RS                                 && matches!((&args[1], &args[2]), (Type::Named(_), Type::Named(_)))
+//RS                         }
+//RS                         _ => false,
+//RS                     };
+//RS                     if !valid {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0119",
+//RS                             format!("`{name}` is not a valid coordinate-space type"),
+//RS                             "Point2 and Delta2 are `<Float, Space>`; Transform is `<From, To>` and Transform2/Ray2 are `<Float, From, To>`".to_string(),
+//RS                             "use a known nominal space such as `Screen`, `World`, `View`, `Camera`, or `Device` and keep the argument order".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     for arg in args {
+//RS                         self.check_declared_type_rules(arg, span);
+//RS                     }
+//RS                     return;
+//RS                 }
+//RS                 if is_core_generic && matches!(lookup_name, "Vec" | "Matrix") {
+//RS                     let expected = if lookup_name == "Vec" { 1 } else { 2 };
+//RS                     if args.len() != expected
+//RS                         || args
+//RS                             .iter()
+//RS                             .any(|arg| arg.compute_dimension_value().is_none())
+//RS                     {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                                 "E0119",
+//RS                                 format!(
+//RS                                     "`{name}` needs {expected} literal shape dimension{}",
+//RS                                     if expected == 1 { "" } else { "s" }
+//RS                                 ),
+//RS                                 "compute aliases carry fixed dimensions that sema checks before codegen".to_string(),
+//RS                                 if lookup_name == "Vec" {
+//RS                                     "write `Vec<N>` with one non-negative integer".to_string()
+//RS                                 } else {
+//RS                                     "write `Matrix<M, N>` with two non-negative integers".to_string()
+//RS                                 },
+//RS                                 Some(span),
+//RS                             ));
+//RS                     }
+//RS                     return;
+//RS                 }
+//RS                 if is_core_generic && lookup_name == Syntax::TYPE_ATOMIC {
+//RS                     let valid = args.len() == 1
+//RS                         && args
+//RS                             .first()
+//RS                             .is_some_and(jet_foundation::Layout::atomic_scalar_type);
+//RS                     if !valid {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0119",
+//RS                             format!(
+//RS                                 "`{name}` accepts exactly one closed scalar: `Bool`, `I32`, `U32`, `I64`, `Int`, or `U64`"
+//RS                             ),
+//RS                             "Atomic values use one compiler-owned lock-free word; arbitrary widths and compound types have no portable representation".to_string(),
+//RS                             "use `Atomic<Bool>`, `Atomic<I32>`, `Atomic<U32>`, `Atomic<I64>`, `Atomic<Int>`, or `Atomic<U64>`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                     for arg in args {
+//RS                         self.check_declared_type_rules(arg, span);
+//RS                     }
+//RS                     return;
+//RS                 }
+//RS                 if is_core_generic
+//RS                     && lookup_name == "ExpiringSecret"
+//RS                     && (args.len() != 1
+//RS                         || !args
+//RS                             .first()
+//RS                             .is_some_and(crate::Sema::Diagnostics::is_expiring_secret_member_type))
+//RS                 {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                             "E0112",
+//RS                             "`ExpiringSecret<T>` requires a secret type".to_string(),
+//RS                             "only Secret, SigningKey, and X25519SecretKey have the audited move-only zeroizing contract required by this wrapper".to_string(),
+//RS                             "use `ExpiringSecret<crypto.Secret>`, `ExpiringSecret<crypto.SigningKey>`, or `ExpiringSecret<crypto.X25519SecretKey>`".to_string(),
+//RS                             Some(span),
+//RS                         ));
+//RS                 }
+//RS                 let explicit_import_owner = import_ns
+//RS                     .filter(|namespace| !namespace.contains("::"))
+//RS                     .and_then(|namespace| self.struct_owner_module(lookup_name, Some(namespace)));
+//RS                 let mut imported_owners = std::collections::HashSet::new();
+//RS                 if let Some(owner) = canonical_owner {
+//RS                     if owner != self.module_idx
+//RS                         && self
+//RS                             .modules
+//RS                             .is_some_and(|modules| modules[owner].registry.contains(lookup_name))
+//RS                         && self.type_is_pub_in(owner, lookup_name)
+//RS                     {
+//RS                         imported_owners.insert(owner);
+//RS                     }
+//RS                 } else if let Some(owner) = explicit_import_owner {
+//RS                     if owner != self.module_idx && self.type_is_pub_in(owner, lookup_name) {
+//RS                         imported_owners.insert(owner);
+//RS                     }
+//RS                 } else if let Some(modules) = self.modules {
+//RS                     for &idx in self.imports.values() {
+//RS                         if modules[idx].registry.contains(lookup_name)
+//RS                             && self.type_is_pub_in(idx, lookup_name)
+//RS                         {
+//RS                             imported_owners.insert(idx);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 let imported_owner =
+//RS                     (imported_owners.len() == 1).then(|| *imported_owners.iter().next().unwrap());
+//RS                 let local_type = self.registry.contains(lookup_name)
+//RS                     && match canonical_owner {
+//RS                         Some(owner) => owner == self.module_idx,
+//RS                         None => import_ns.is_none(),
+//RS                     };
+//RS                 if !is_core_generic && !local_type && imported_owner.is_none() {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0119",
+//RS                         format!("there's no type called `{}`", name),
+//RS                         "generic types must name a struct or enum you defined".to_string(),
+//RS                         "check the spelling, or define the type first".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 if !is_core_generic {
+//RS                     let expected_owner = canonical_owner
+//RS                         .or(imported_owner)
+//RS                         .or(local_type.then_some(self.module_idx));
+//RS                     let expected = expected_owner.and_then(|idx| {
+//RS                         if idx == self.module_idx {
+//RS                             self.trait_reg
+//RS                                 .struct_params
+//RS                                 .get(lookup_name)
+//RS                                 .or_else(|| self.trait_reg.enum_params.get(lookup_name))
+//RS                                 .cloned()
+//RS                         } else {
+//RS                             self.modules.and_then(|modules| {
+//RS                                 modules[idx]
+//RS                                     .trait_reg
+//RS                                     .struct_params
+//RS                                     .get(lookup_name)
+//RS                                     .or_else(|| modules[idx].trait_reg.enum_params.get(lookup_name))
+//RS                                     .cloned()
+//RS                             })
+//RS                         }
+//RS                     });
+//RS                     if let Some(params) = expected {
+//RS                         if params.len() != args.len() {
+//RS                             self.diags.push(Diagnostic::error(
+//RS                                 "E0119",
+//RS                                 format!(
+//RS                                     "`{}` expects {} type argument{}, got {}",
+//RS                                     name,
+//RS                                     params.len(),
+//RS                                     if params.len() == 1 { "" } else { "s" },
+//RS                                     args.len()
+//RS                                 ),
+//RS                                 "every generic parameter needs a matching type argument"
+//RS                                     .to_string(),
+//RS                                 format!(
+//RS                                     "write `{}`<{}>",
+//RS                                     name,
+//RS                                     params
+//RS                                         .iter()
+//RS                                         .map(|p| p.name.as_str())
+//RS                                         .collect::<Vec<_>>()
+//RS                                         .join(", ")
+//RS                                 ),
+//RS                                 Some(span),
+//RS                             ));
+//RS                         }
+//RS                     } else if !args.is_empty() {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0119",
+//RS                             format!("`{}` isn't generic", name),
+//RS                             "only types declared with type parameters accept `<…>`".to_string(),
+//RS                             format!("use `{}` without type arguments", name),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 for arg in args {
+//RS                     // D-MEM-VIEWRET1: `View<str>` is the named string-view
+//RS                     // spelling. `str` is not a free-standing type — only
+//RS                     // this View argument slot may name it.
+//RS                     if lookup_name == "View" && matches!(arg, Type::Named(inner) if inner == "str")
+//RS                     {
+//RS                         continue;
+//RS                     }
+//RS                     self.check_declared_type_rules(arg, span);
+//RS                 }
+//RS             }
+//RS             Type::TraitObject(ts) => {
+//RS                 for t in ts {
+//RS                     if !self.trait_reg.is_trait_name(t) {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                             "E0119",
+//RS                             format!("there's no trait called `{t}`"),
+//RS                             "a trait name in type position must name a declared trait".to_string(),
+//RS                             format!("add `trait {t} {{ … }}` first"),
+//RS                             Some(span),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Type::Option(inner) => {
+//RS                 if matches!(**inner, Type::Option(_)) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0309",
+//RS                         "an optional type can't hold another optional type".to_string(),
+//RS                         format!(
+//RS                             "`{}?` isn't supported — use one `?` only (S32)",
+//RS                             inner.name()
+//RS                         ),
+//RS                         "drop the inner `?` or unwrap before wrapping again".to_string(),
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS                 self.check_declared_type_rules(inner, span);
+//RS             }
+//RS             Type::List(inner) | Type::Shared(inner) => self.check_declared_type_rules(inner, span),
+//RS             Type::Map {
+//RS                 key,
+//RS                 key_span,
+//RS                 value,
+//RS             } => {
+//RS                 self.check_declared_type_rules(key, span);
+//RS                 self.check_declared_type_rules(value, span);
+//RS                 if !self.map_key_type_eligible(key) {
+//RS                     self.diags.push(Diagnostic::error(
+//RS                         "E0502",
+//RS                         format!("`{}` can't be a map key type (D-MAP-KEY1)", key.name()),
+//RS                         "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible".to_string(),
+//RS                         "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately".to_string(),
+//RS                         Some(key_span.unwrap_or(span)),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Type::Char => {}
+//RS             Type::Result { ok, err } => {
+//RS                 self.check_declared_type_rules(ok, span);
+//RS                 let domain_errors = self.diags.len();
+//RS                 self.check_declared_type_rules(err, span);
+//RS                 // D-FAILURE-FOUNDATION1=A: every explicit `!` domain is
+//RS                 // checked after source/import spellings are resolved. Keep
+//RS                 // this beside the recursive declared-type walk so callbacks,
+//RS                 // aliases, fields, and function returns share one rule. A
+//RS                 // domain that is already reported (an unknown name or the `_`
+//RS                 // hole) gets no second, dependent E2417.
+//RS                 let resolved_error = self.resolve_type((**err).clone());
+//RS                 // D-CALLBACK-ERR1=A: a type parameter may stand for a failure
+//RS                 // domain (`fn(T) -> U E!`); each call binds it to the
+//RS                 // callback's own failure type, or to `Never`.
+//RS                 let generic_domain = matches!(
+//RS                     &resolved_error,
+//RS                     Type::Named(name) if self.type_param_scope.iter().any(|param| param.name == *name)
+//RS                 );
+//RS                 if self.diags.len() == domain_errors
+//RS                     && !generic_domain
+//RS                     && !self.is_error_domain(&resolved_error)
+//RS                 {
+//RS                     let domain = resolved_error.show();
+//RS                     self.diags.push(Diagnostic::from_row(
+//RS                         "E2417",
+//RS                         &[("domain", domain.as_str())],
+//RS                         Some(span),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Type::Union(members) => {
+//RS                 // D-UNIONTYPE1=A: only concrete closed member types.
+//RS                 let param_names_owned = self
+//RS                     .type_param_scope
+//RS                     .iter()
+//RS                     .map(|p| p.name.clone())
+//RS                     .collect::<Vec<_>>();
+//RS                 let param_names = param_names_owned
+//RS                     .iter()
+//RS                     .map(String::as_str)
+//RS                     .collect::<std::collections::HashSet<_>>();
+//RS                 for m in members {
+//RS                     let mut mentioned = std::collections::HashSet::new();
+//RS                     crate::Generics::collect_type_param_mentions(m, &param_names, &mut mentioned);
+//RS                     if union_member_has_open_shape(m) || !mentioned.is_empty() {
+//RS                         self.diags.push(Diagnostic::error(
+//RS                                 "E0363",
+//RS                                 format!("`{}` can't be a union member", m.name()),
+//RS                                 "anonymous unions hold concrete closed types — not type parameters, trait objects, or function types".to_string(),
+//RS                                 "use a named enum when a member needs an open shape".to_string(),
+//RS                                 Some(span),
+//RS                             ));
+//RS                     }
+//RS                     self.check_declared_type_rules(m, span);
+//RS                 }
+//RS             }
+//RS             Type::Fn { params, ret, .. } => {
+//RS                 for p in params {
+//RS                     self.check_declared_type_rules(p, span);
+//RS                 }
+//RS                 if let Some(r) = ret {
+//RS                     self.check_declared_type_rules(r, span);
+//RS                 }
+//RS             }
+//RS             Type::Tuple(fields) => {
+//RS                 for (_, t) in fields {
+//RS                     self.check_declared_type_rules(t, span);
+//RS                 }
+//RS             }
+//RS             // Only a user-written D-QUAL4 tag needs a "declared" check — a
+//RS             // compiler `Internal` fact is synthesized after this pass runs
+//RS             // over source-written types, so it never reaches here anyway.
+//RS             Type::Tagged {
+//RS                 marker: crate::AST::TagMarker::User(name),
+//RS                 inner,
+//RS             } => {
+//RS                 if !self.tag_is_declared(name) {
+//RS                     self.diags.push(undeclared_value_tag(
+//RS                         name,
+//RS                         self.closest_declared_tag(name).as_deref(),
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS                 self.check_declared_type_rules(inner, span);
+//RS             }
+//RS             Type::Tagged { inner, .. } => self.check_declared_type_rules(inner, span),
+//RS             Type::InlineRange { base, .. } => self.check_declared_type_rules(base, span),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn tag_is_declared(&self, name: &str) -> bool {
+//RS         crate::Syntax::BUILTIN_TAGS.contains(&name)
+//RS             || self.trait_reg.local_tags.contains(name)
+//RS             || self.modules.is_some_and(|modules| {
+//RS                 self.imports.values().copied().any(|idx| {
+//RS                     modules[idx].trait_reg.local_tags.contains(name)
+//RS                         && self.type_is_pub_in(idx, name)
+//RS                 })
+//RS             })
+//RS     }
+//RS 
+//RS     pub(crate) fn closest_declared_tag(&self, name: &str) -> Option<String> {
+//RS         let mut candidates = self
+//RS             .trait_reg
+//RS             .local_tags
+//RS             .iter()
+//RS             .cloned()
+//RS             .collect::<Vec<_>>();
+//RS         candidates.extend(
+//RS             crate::Syntax::BUILTIN_TAGS
+//RS                 .iter()
+//RS                 .map(|tag| (*tag).to_string()),
+//RS         );
+//RS         if let Some(modules) = self.modules {
+//RS             for idx in self.imports.values().copied() {
+//RS                 candidates.extend(
+//RS                     modules[idx]
+//RS                         .trait_reg
+//RS                         .local_tags
+//RS                         .iter()
+//RS                         .filter(|tag| self.type_is_pub_in(idx, tag))
+//RS                         .cloned(),
+//RS                 );
+//RS             }
+//RS         }
+//RS         candidates.sort();
+//RS         candidates.dedup();
+//RS         suggest_field(name, &candidates)
+//RS     }
+//RS 
+//RS     /// Find a checked-text slot that would receive a plain `String`.
+//RS     ///
+//RS     /// Most callers add their own context-specific mismatch after this method
+//RS     /// returns false. A few owning literal paths intentionally ignore that
+//RS     /// boolean, so checked text needs one shared rejection before those paths
+//RS     /// can manufacture a nominal outer value around an unchecked string.
+//RS     fn checked_text_string_target(&self, want: &Type, got: &Type) -> bool {
+//RS         match (want, got) {
+//RS             (Type::Named(name), Type::String)
+//RS                 if self.is_checked_text_type_name(name)
+//RS                     || self.type_param_has_bound(want, crate::Generics::CHECKED_TEXT) =>
+//RS             {
+//RS                 true
+//RS             }
+//RS             (Type::List(want), Type::List(got))
+//RS             | (Type::Shared(want), Type::Shared(got))
+//RS             | (Type::Option(want), Type::Option(got)) => self.checked_text_string_target(want, got),
+//RS             (Type::List(want), Type::FixedList { elem: got, .. })
+//RS             | (Type::FixedList { elem: want, .. }, Type::List(got)) => {
+//RS                 self.checked_text_string_target(want, got)
+//RS             }
+//RS             (
+//RS                 Type::Map {
+//RS                     key: want_key,
+//RS                     value: want_value,
+//RS                     ..
+//RS                 },
+//RS                 Type::Map {
+//RS                     key: got_key,
+//RS                     value: got_value,
+//RS                     ..
+//RS                 },
+//RS             ) => {
+//RS                 self.checked_text_string_target(want_key, got_key)
+//RS                     || self.checked_text_string_target(want_value, got_value)
+//RS             }
+//RS             (
+//RS                 Type::Result {
+//RS                     ok: want_ok,
+//RS                     err: want_err,
+//RS                 },
+//RS                 Type::Result {
+//RS                     ok: got_ok,
+//RS                     err: got_err,
+//RS                 },
+//RS             ) => {
+//RS                 self.checked_text_string_target(want_ok, got_ok)
+//RS                     || self.checked_text_string_target(want_err, got_err)
+//RS             }
+//RS             (
+//RS                 Type::Apply {
+//RS                     args: want_args, ..
+//RS                 },
+//RS                 Type::Apply { args: got_args, .. },
+//RS             ) => want_args
+//RS                 .iter()
+//RS                 .zip(got_args)
+//RS                 .any(|(want, got)| self.checked_text_string_target(want, got)),
+//RS             (Type::Tuple(want_fields), Type::Tuple(got_fields)) => want_fields
+//RS                 .iter()
+//RS                 .zip(got_fields)
+//RS                 .any(|((_, want), (_, got))| self.checked_text_string_target(want, got)),
+//RS             (Type::FixedList { elem: want, .. }, Type::FixedList { elem: got, .. }) => {
+//RS                 self.checked_text_string_target(want, got)
+//RS             }
+//RS             (
+//RS                 Type::Fn {
+//RS                     params: want_params,
+//RS                     ret: want_ret,
+//RS                     ..
+//RS                 },
+//RS                 Type::Fn {
+//RS                     params: got_params,
+//RS                     ret: got_ret,
+//RS                     ..
+//RS                 },
+//RS             ) => {
+//RS                 want_params
+//RS                     .iter()
+//RS                     .zip(got_params)
+//RS                     .any(|(want, got)| self.checked_text_string_target(want, got))
+//RS                     || want_ret
+//RS                         .as_deref()
+//RS                         .zip(got_ret.as_deref())
+//RS                         .is_some_and(|(want, got)| self.checked_text_string_target(want, got))
+//RS             }
+//RS             (Type::Tagged { inner: want, .. }, Type::Tagged { inner: got, .. })
+//RS             | (Type::InlineRange { base: want, .. }, Type::InlineRange { base: got, .. })
+//RS             | (Type::Quantity { base: want, .. }, Type::Quantity { base: got, .. }) => {
+//RS                 self.checked_text_string_target(want, got)
+//RS             }
+//RS             (Type::Union(want_members), Type::Union(got_members)) => {
+//RS                 want_members.iter().any(|want| {
+//RS                     got_members
+//RS                         .iter()
+//RS                         .any(|got| self.checked_text_string_target(want, got))
+//RS                 })
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-OPT-LIFT1=A: a plain `T` fills a slot whose checked type is `T?`
+//RS     /// (returns, call arguments, struct fields, list and map items, typed
+//RS     /// bindings, and reassignment). The slot type is already fixed, so the
+//RS     /// lift never picks a callee or infers a generic; it adds exactly one
+//RS     /// `Present` around the value (after any numeric widening), which every
+//RS     /// tier lowers through the existing optional constructor. Nested
+//RS     /// optionals never arise: a value that is already optional or fallible
+//RS     /// is left for the ordinary checks (E0108/E0309). Returns the slot type
+//RS     /// when the value was lifted.
+//RS     pub(crate) fn lift_optional_slot(
+//RS         &mut self,
+//RS         want: &Type,
+//RS         got: &Type,
+//RS         expr: &mut crate::AST::Expr,
+//RS     ) -> Option<Type> {
+//RS         let Type::Option(payload) = want.without_user_tags() else {
+//RS             return None;
+//RS         };
+//RS         let plain = got.without_user_tags();
+//RS         if plain.unwrap_option().is_some() || plain.unwrap_result().is_some() || plain.is_never()
+//RS         {
+//RS             return None;
+//RS         }
+//RS         if matches!(
+//RS             expr.without_parens(),
+//RS             crate::AST::Expr::Present(..) | crate::AST::Expr::Absent(_)
+//RS         ) {
+//RS             return None;
+//RS         }
+//RS         let payload = payload.as_ref();
+//RS         let fits = got == payload
+//RS             || self.nominal_type_identity(payload, got)
+//RS             || matches!(payload, Type::Union(members) if members.iter().any(|m| m == got));
+//RS         if !fits {
+//RS             if got.numeric_widening_to(payload).is_none() {
+//RS                 return None;
+//RS             }
+//RS             self.widen_numeric_expr(expr, got, payload);
+//RS         }
+//RS         let span = expr.span();
+//RS         let value = std::mem::replace(expr, crate::AST::Expr::Absent(span));
+//RS         *expr = crate::AST::Expr::Present(Box::new(value), span);
+//RS         Some(want.clone())
+//RS     }
+//RS 
+//RS     /// D-OPT-LIFT1=A at a call argument: the callee is already chosen, so a
+//RS     /// plain payload fills its `T?` parameter. A write parameter edits the
+//RS     /// caller's own binding and never lifts.
+//RS     pub(crate) fn lift_optional_argument(
+//RS         &mut self,
+//RS         expr: &mut crate::AST::Expr,
+//RS         got: Type,
+//RS         want: &Type,
+//RS         convention: crate::AST::AccessConvention,
+//RS     ) -> Type {
+//RS         if convention == crate::AST::AccessConvention::Write {
+//RS             return got;
+//RS         }
+//RS         self.lift_optional_slot(want, &got, expr).unwrap_or(got)
+//RS     }
+//RS 
+//RS     /// Returns true when a diagnostic was emitted or compatibility was
+//RS     /// handled; callers may add a context-specific error otherwise.
+//RS     ///
+//RS     pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
+//RS         if want == got {
+//RS             if !Type::obligations_satisfy(want, got) {
+//RS                 if matches!((want, got), (Type::Fn { .. }, Type::Fn { .. })) {
+//RS                     // Let callable-value callers report the concrete required
+//RS                     // and offered signatures instead of a generic E0108.
+//RS                     return false;
+//RS                 }
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0108",
+//RS                     format!(
+//RS                         "this needs {}, but the callable obligations are not satisfied",
+//RS                         want.show()
+//RS                     ),
+//RS                     "the callable value does not provide the obligations required here".to_string(),
+//RS                     "pass a callable with matching effects, labels, and view provenance"
+//RS                         .to_string(),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return true;
+//RS             }
+//RS             return true;
+//RS         }
+//RS         // D-NEVER2=B: a callable promised to return `Never` cannot be
+//RS         // satisfied by a value-producing function. Check the normalized
+//RS         // callable returns so raw `fn() Int` and fallible `fn() Int !E`
+//RS         // both fail this contract.
+//RS         if let (
+//RS             Type::Fn {
+//RS                 ret: Some(want_ret),
+//RS                 ..
+//RS             },
+//RS             Type::Fn {
+//RS                 ret: Some(got_ret),
+//RS                 ..
+//RS             },
+//RS         ) = (
+//RS             want.with_effective_fn_returns(),
+//RS             got.with_effective_fn_returns(),
+//RS         ) {
+//RS             if want_ret.has_never_success() && !got_ret.has_never_success() {
+//RS                 self.diags.push(Diagnostic::from_row("E2426", &[], Some(span)));
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         if self.checked_text_string_target(want, got) {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0112",
+//RS                 format!(
+//RS                     "this needs {}, but the value is {}",
+//RS                     want.show(),
+//RS                     got.show()
+//RS                 ),
+//RS                 "a checked text type is nominal; a plain String needs validation before it crosses this boundary".to_string(),
+//RS                 "construct the checked text with its checked literal or `from(text)`".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS             return true;
+//RS         }
+//RS         // D-TYPE2-EXACT1: an inline range is proof attached to its carrier.
+//RS         // Reaching the carrier boundary erases that proof, so it is still
+//RS         // a knowledge loss even though the runtime representation is the
+//RS         // same integer.
+//RS         if matches!(got, Type::InlineRange { .. }) && got.erased_inline_ranges() == *want {
+//RS             self.require_knowledge_gate(
+//RS                 KnowledgePlane::Range,
+//RS                 KnowledgeGate::BoundedArithmetic,
+//RS                 span,
+//RS             );
+//RS             return true;
+//RS         }
+//RS         // Callable contracts are directional even when the structural function
+//RS         // shape is identical. An erased function type carries no proof that it
+//RS         // can honor a strict positional/label-only zone; do not let it cross
+//RS         // that boundary. Labels remain declaration metadata here, not inferred
+//RS         // parameter-name identity, so direct named-function mismatches retain
+//RS         // their existing E0112 path below.
+//RS         if let (
+//RS             Type::Fn {
+//RS                 param_contract: Some(want_contract),
+//RS                 ..
+//RS             },
+//RS             Type::Fn {
+//RS                 param_contract: None,
+//RS                 ..
+//RS             },
+//RS         ) = (want, got)
+//RS         {
+//RS             let has_strict_zone = want_contract.iter().any(|(_, zone)| {
+//RS                 matches!(
+//RS                     zone,
+//RS                     crate::AST::ParamZone::PositionalOnly | crate::AST::ParamZone::LabelOnly
+//RS                 )
+//RS             });
+//RS             if fn_types_compatible(want, got) && has_strict_zone {
+//RS                 self.diags.push(Diagnostic::error(
+//RS                     "E0771",
+//RS                     format!(
+//RS                         "this needs {}, but the function value is {}",
+//RS                         want.show(),
+//RS                         got.show()
+//RS                     ),
+//RS                     "public labels and parameter zones are part of a function's callable type"
+//RS                         .to_string(),
+//RS                     format!("use `{}` here", want.name()),
+//RS                     Some(span),
+//RS                 ));
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         // Function values are structurally assignable. Keep call metadata for
+//RS         // binding a value call, but it cannot make equal callable shapes into
+//RS         // different value types.
+//RS         if matches!((want, got), (Type::Fn { .. }, Type::Fn { .. }))
+//RS             && fn_types_compatible(want, got)
+//RS             && Type::obligations_satisfy(want, got)
+//RS         {
+//RS             return true;
+//RS         }
+//RS         // A qualified constructor carries the owning module in its nominal
+//RS         // spelling, while a value from an imported signature may still carry
+//RS         // the source leaf. Treat those spellings as one struct type before
+//RS         // the ordinary mismatch diagnostics run. The helper is deliberately
+//RS         // limited to registered structs and their type arguments; enum,
+//RS         // trait, and tagged nominal identity remain distinct mechanisms.
+//RS         if self.nominal_type_identity(want, got) {
+//RS             return true;
+//RS         }
+//RS         if Type::compute_tensor_compatible(want, got) {
+//RS             // The erased `Tensor` spelling is the storage boundary. A
+//RS             // shaped alias remains exact when both sides carry shape.
+//RS             return true;
+//RS         }
+//RS         if plain_used_where_result_expected(want, got) {
+//RS             // D-FAILCOMP1: `[T !E]{ok_value, …}` and other fallible slots can
+//RS             // store a plain success `T` without an explicit `Ok` wrapper.
+//RS             return true;
+//RS         }
+//RS         if result_used_where_plain_expected(want, got) {
+//RS             // An unannotated callback may widen its expected success row to
+//RS             // Result when a nested call can fail. The expression wrapper will
+//RS             // insert the canonical Try node after this argument check; retain
+//RS             // the carrier here instead of reporting the pre-elaboration shape.
+//RS             if self.failure_carrier_inference {
+//RS                 if self.failure_carrier.is_none() {
+//RS                     self.failure_carrier = Some(got.clone());
+//RS                     self.ret = Some(got.clone());
+//RS                 }
+//RS                 self.task_body_propagates = true;
+//RS                 return true;
+//RS             }
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0401",
+//RS                 format!(
+//RS                     "this needs {}, but the value is {}",
+//RS                     want.show(),
+//RS                     got.show()
+//RS                 ),
+//RS                 "a fallible result must be checked before its value is used".to_string(),
+//RS                 format!(
+//RS                     "use `{}`, `{}`, or test with `== {}(...)` / `== {}(...)`",
+//RS                     Syntax::OP_TRY_SUFFIX,
+//RS                     Syntax::OP_FALLBACK,
+//RS                     Syntax::LIT_OK,
+//RS                     Syntax::LIT_ERR
+//RS                 ),
+//RS                 Some(span),
+//RS             ));
+//RS             return true;
+//RS         }
+//RS         if option_used_where_plain_expected(want, got) {
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0310",
+//RS                 format!(
+//RS                     "this needs {}, but the value is {}",
+//RS                     want.show(),
+//RS                     got.show()
+//RS                 ),
+//RS                 "a plain value is required here, not an optional one".to_string(),
+//RS                 format!(
+//RS                     "test with `== {}(...)` or `== {}` first, e.g. `if x == {}(n) {{ ... }}`",
+//RS                     Syntax::LIT_VALUE,
+//RS                     Syntax::LIT_NULL,
+//RS                     Syntax::LIT_VALUE
+//RS                 ),
+//RS                 Some(span),
+//RS             ));
+//RS             return true;
+//RS         }
+//RS         if let Type::Option(inner) = got {
+//RS             if want.unwrap_option().is_some() {
+//RS                 if let Some(want_inner) = want.unwrap_option() {
+//RS                     if **inner != *want_inner {
+//RS                         self.report_option_mismatch(want, got, span);
+//RS                         return true;
+//RS                     }
+//RS                 }
+//RS             } else if **inner != *want {
+//RS                 self.report_option_mismatch(want, got, span);
+//RS                 return true;
+//RS             }
+//RS             return true;
+//RS         }
+//RS         if let (Some(payload), None) = (want.unwrap_option(), got.unwrap_option()) {
+//RS             // D-OPT-LIFT1=A: slots lift a plain payload before this check
+//RS             // (`lift_optional_slot`), so this row reports a real payload
+//RS             // mismatch. A position that is not a lifting slot keeps the
+//RS             // explicit constructor.
+//RS             let fix = if payload == got {
+//RS                 format!(
+//RS                     "this position does not lift a plain value; write `{}(...)`",
+//RS                     Syntax::LIT_VALUE
+//RS                 )
+//RS             } else {
+//RS                 type_fix_hint(payload, got)
+//RS             };
+//RS             self.diags.push(Diagnostic::error(
+//RS                 "E0108",
+//RS                 format!(
+//RS                     "this needs {}, but the value is {}",
+//RS                     want.show(),
+//RS                     got.show()
+//RS                 ),
+//RS                 format!(
+//RS                     "`{}` means a `{}` or `{}`",
+//RS                     want.name(),
+//RS                     payload.name(),
+//RS                     Syntax::LIT_NULL
+//RS                 ),
+//RS                 fix,
+//RS                 Some(span),
+//RS             ));
+//RS             return true;
+//RS         }
+//RS         match (want, got) {
+//RS             // D-FIXARR1: a `[T#N]` widens to `[T]` — codegen emits `.to_vec()`.
+//RS             (Type::List(want_elem), Type::FixedList { elem: got_elem, .. })
+//RS                 if want_elem == got_elem =>
+//RS             {
+//RS                 return true;
+//RS             }
+//RS             // D-UNIONTYPE1=A: a member value widens into its union.
+//RS             (Type::Union(members), got) if members.iter().any(|m| m == got) => {
+//RS                 return true;
+//RS             }
+//RS             (Type::TraitObject(trait_names), got) => {
+//RS                 for trait_name in trait_names {
+//RS                     if !self.trait_reg.type_implements_trait(got, trait_name) {
+//RS                         let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
+//RS                         self.diags
+//RS                             .push(e0905(&got.name(), trait_name, span, needs_derive));
+//RS                         return true;
+//RS                     }
+//RS                 }
+//RS                 return true;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS         false
+//RS     }
+//RS 
+//RS     /// S48 (syntax-decisions.md:1613; spec.md:839, ratified): a
+//RS     /// trait name in type position (`fn f(s: Shape)`) means dynamic dispatch
+//RS     /// with INVISIBLE boxing. A concrete value whose type implements the
+//RS     /// named trait therefore MEETS that slot — sema decides acceptance only;
+//RS     /// the box itself is materialised by the slot-driven boxing lowering
+//RS     /// already applies to a `[Shape]` list element (`TCallArg::box_as_trait`
+//RS     /// / `preserve_typed_list_shape`), never by a second mechanism here.
+//RS     ///
+//RS     /// Single-trait only (the S48 shape). A multi-name `TraitObject` is the
+//RS     /// D-ANY-JAI1 variadic loop element, which has no one `Box<dyn T>` to
+//RS     /// coerce toward and stays on the ordinary equality path.
+//RS     pub(crate) fn trait_slot_accepts(&self, want: &Type, got: &Type) -> bool {
+//RS         // A value that already IS the trait value needs no coercion: an
+//RS         // unresolved bare-trait parameter spelling can equal the argument's
+//RS         // own type, and a `TraitObject` argument is the resolved same thing.
+//RS         if want == got || matches!(got, Type::TraitObject(_)) {
+//RS             return false;
+//RS         }
+//RS         let trait_name = match want {
+//RS             Type::TraitObject(names) if names.len() == 1 => names.first(),
+//RS             // An unresolved signature type still spells the trait as a plain
+//RS             // nominal; `CheckerCore/types.rs:179` uses the same test.
+//RS             Type::Named(name)
+//RS                 if self.trait_reg.is_trait_name(name) && !self.registry.contains(name) =>
+//RS             {
+//RS                 Some(name)
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         trait_name.is_some_and(|trait_name| self.trait_reg.type_implements_trait(got, trait_name))
+//RS     }
+//RS 
+//RS     pub(crate) fn nominal_type_identity(&self, want: &Type, got: &Type) -> bool {
+//RS         if want == got {
+//RS             return true;
+//RS         }
+//RS         match (want, got) {
+//RS             (Type::Named(want_name), Type::Named(got_name))
+//RS                 if Syntax::is_data_type_name(want_name) && Syntax::is_data_type_name(got_name) =>
+//RS             {
+//RS                 true
+//RS             }
+//RS             (Type::Named(want_name), Type::Named(got_name)) => {
+//RS                 self.same_declared_name_identity(want_name, got_name)
+//RS             }
+//RS             (
+//RS                 Type::Apply {
+//RS                     name: want_name,
+//RS                     args: want_args,
+//RS                 },
+//RS                 Type::Apply {
+//RS                     name: got_name,
+//RS                     args: got_args,
+//RS                 },
+//RS             ) => {
+//RS                 want_args.len() == got_args.len()
+//RS                     && self.same_declared_name_identity(want_name, got_name)
+//RS                     && want_args
+//RS                         .iter()
+//RS                         .zip(got_args)
+//RS                         .all(|(want, got)| self.nominal_type_identity(want, got))
+//RS             }
+//RS             (Type::List(want), Type::List(got))
+//RS             | (Type::Shared(want), Type::Shared(got))
+//RS             | (Type::Option(want), Type::Option(got)) => self.nominal_type_identity(want, got),
+//RS             (
+//RS                 Type::Result {
+//RS                     ok: want_ok,
+//RS                     err: want_err,
+//RS                 },
+//RS                 Type::Result {
+//RS                     ok: got_ok,
+//RS                     err: got_err,
+//RS                 },
+//RS             ) => {
+//RS                 self.nominal_type_identity(want_ok, got_ok)
+//RS                     && self.nominal_type_identity(want_err, got_err)
+//RS             }
+//RS             (
+//RS                 Type::Map {
+//RS                     key: want_key,
+//RS                     value: want_value,
+//RS                     ..
+//RS                 },
+//RS                 Type::Map {
+//RS                     key: got_key,
+//RS                     value: got_value,
+//RS                     ..
+//RS                 },
+//RS             ) => {
+//RS                 self.nominal_type_identity(want_key, got_key)
+//RS                     && self.nominal_type_identity(want_value, got_value)
+//RS             }
+//RS             (
+//RS                 Type::FixedList {
+//RS                     elem: want_elem,
+//RS                     len: want_len,
+//RS                     ..
+//RS                 },
+//RS                 Type::FixedList {
+//RS                     elem: got_elem,
+//RS                     len: got_len,
+//RS                     ..
+//RS                 },
+//RS             ) => want_len == got_len && self.nominal_type_identity(want_elem, got_elem),
+//RS             (Type::Tuple(want_fields), Type::Tuple(got_fields)) => {
+//RS                 want_fields.len() == got_fields.len()
+//RS                     && want_fields.iter().zip(got_fields).all(
+//RS                         |((want_name, want), (got_name, got))| {
+//RS                             want_name == got_name && self.nominal_type_identity(want, got)
+//RS                         },
+//RS                     )
+//RS             }
+//RS             (Type::Union(want_members), Type::Union(got_members)) => {
+//RS                 if want_members.len() != got_members.len() {
+//RS                     return false;
+//RS                 }
+//RS                 let mut matched = vec![false; got_members.len()];
+//RS                 want_members.iter().all(|want_member| {
+//RS                     let Some(index) =
+//RS                         got_members
+//RS                             .iter()
+//RS                             .enumerate()
+//RS                             .position(|(index, got_member)| {
+//RS                                 !matched[index]
+//RS                                     && self.nominal_type_identity(want_member, got_member)
+//RS                             })
+//RS                     else {
+//RS                         return false;
+//RS                     };
+//RS                     matched[index] = true;
+//RS                     true
+//RS                 })
+//RS             }
+//RS             (
+//RS                 Type::Tagged {
+//RS                     marker: want_marker,
+//RS                     inner: want_inner,
+//RS                 },
+//RS                 Type::Tagged {
+//RS                     marker: got_marker,
+//RS                     inner: got_inner,
+//RS                 },
+//RS             ) if want_marker == got_marker => self.nominal_type_identity(want_inner, got_inner),
+//RS             (
+//RS                 Type::Tagged {
+//RS                     marker:
+//RS                         crate::AST::TagMarker::Internal(
+//RS                             crate::AST::InternalTag::CoreCryptoNominal,
+//RS                         ),
+//RS                     inner,
+//RS                 },
+//RS                 other,
+//RS             )
+//RS             | (
+//RS                 other,
+//RS                 Type::Tagged {
+//RS                     marker:
+//RS                         crate::AST::TagMarker::Internal(
+//RS                             crate::AST::InternalTag::CoreCryptoNominal,
+//RS                         ),
+//RS                     inner,
+//RS                 },
+//RS             ) => self.nominal_type_identity(inner, other),
+//RS             (
+//RS                 Type::Quantity {
+//RS                     base: want_base,
+//RS                     dimension: want_dimension,
+//RS                 },
+//RS                 Type::Quantity {
+//RS                     base: got_base,
+//RS                     dimension: got_dimension,
+//RS                 },
+//RS             ) if want_dimension == got_dimension => self.nominal_type_identity(want_base, got_base),
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     fn declared_nominal_identity(&self, spelling: &str) -> Option<String> {
+//RS         let (namespace, leaf) = Self::split_type_name(spelling);
+//RS         if let Some(owner) = self.struct_owner_module(leaf, namespace) {
+//RS             return Some(self.canonical_nominal_name(owner, leaf));
+//RS         }
+//RS 
+//RS         // Inline-module types have a compiler-owned leaf (`M...Account`) but
+//RS         // source names (`bank.Account`). A return path can add the enclosing
+//RS         // file alias (`vis2.bank.Account`) before display projection. Resolve
+//RS         // both through the ledger's one display map instead of comparing
+//RS         // spellings or inventing another alias table.
+//RS         let current_prefix = self
+//RS             .modules
+//RS             .and_then(|modules| modules.get(self.module_idx))
+//RS             .map(|module| format!("{}.", module.module_alias));
+//RS         // A named helper, not a closure: the returned iterator borrows the
+//RS         // caller's `name`, and a closure would tie that borrow to the
+//RS         // closure's own inferred lifetime.
+//RS         fn visible_spellings<'n>(
+//RS             name: &'n str,
+//RS             current_prefix: Option<&'n str>,
+//RS         ) -> impl Iterator<Item = &'n str> {
+//RS             std::iter::once(name).chain(current_prefix.and_then(|prefix| name.strip_prefix(prefix)))
+//RS         }
+//RS         let Some(modules) = self.modules else {
+//RS             return None;
+//RS         };
+//RS         // A bare built-in spelling (`Path`) is the built-in, never a loaded
+//RS         // record that merely shares its leaf (`core.files.path`'s `Path`).
+//RS         let bare_builtin = namespace.is_none() && Syntax::typed_head_kind(spelling).is_some();
+//RS         for (owner, module) in modules.iter().enumerate() {
+//RS             for candidate in module.registry.types.keys() {
+//RS                 if owner != self.module_idx && !self.type_is_pub_in(owner, candidate) {
+//RS                     continue;
+//RS                 }
+//RS                 if bare_builtin && self.record_distinct_from_builtin(owner, candidate) {
+//RS                     continue;
+//RS                 }
+//RS                 let display =
+//RS                     self.name_ledger
+//RS                         .display_path(self.module_idx, candidate, Some(owner));
+//RS                 let matches = display
+//RS                     .as_deref()
+//RS                     .into_iter()
+//RS                     .chain(std::iter::once(candidate.as_str()))
+//RS                     .any(|target| {
+//RS                         visible_spellings(spelling, current_prefix.as_deref())
+//RS                             .any(|name| name == target)
+//RS                     });
+//RS                 if matches {
+//RS                     return Some(self.canonical_nominal_name(owner, candidate));
+//RS                 }
+//RS             }
+//RS         }
+//RS         None
+//RS     }
+//RS 
+//RS     fn core_source_type_key<'b>(
+//RS         &self,
+//RS         spelling: &'b str,
+//RS     ) -> Option<(&'static str, &'b str)> {
+//RS         let (namespace, leaf) = Self::split_type_name(spelling);
+//RS         let modules = self.modules?;
+//RS         let source = namespace
+//RS             .and_then(|namespace| {
+//RS                 self.core_imports
+//RS                     .get(namespace)
+//RS                     .and_then(|module| {
+//RS                         jet_foundation::CoreModuleExports::core_source_module(module)
+//RS                     })
+//RS                     .or_else(|| {
+//RS                         jet_foundation::CoreModuleExports::core_source_module_by_alias(namespace)
+//RS                     })
+//RS             })
+//RS             .or_else(|| {
+//RS                 let owner = self.struct_owner_module(leaf, namespace)?;
+//RS                 let module = modules.get(owner)?;
+//RS                 jet_foundation::CoreModuleExports::core_source_modules()
+//RS                     .iter()
+//RS                     .find(|source| {
+//RS                         crate::CoreSources::core_source_text(source.module)
+//RS                             == Some(module.source.as_str())
+//RS                             && (module.module_alias == source.alias
+//RS                                 || module.package_scope == ".")
+//RS                     })
+//RS             })?;
+//RS         let owner = self
+//RS             .struct_owner_module(leaf, namespace)
+//RS             .or_else(|| {
+//RS                 modules.iter().enumerate().find_map(|(idx, module)| {
+//RS                     (module.module_alias == source.alias && module.registry.contains(leaf))
+//RS                         .then_some(idx)
+//RS                 })
+//RS             })?;
+//RS         modules
+//RS             .get(owner)
+//RS             .filter(|module| module.registry.contains(leaf))?;
+//RS         Some((source.module, leaf))
+//RS     }
+//RS 
+//RS     fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
+//RS         if want == got {
+//RS             return true;
+//RS         }
+//RS         if let (Some((want_module, want_leaf)), Some((got_module, got_leaf))) = (
+//RS             self.core_source_type_key(want),
+//RS             self.core_source_type_key(got),
+//RS         ) {
+//RS             if want_module == got_module && want_leaf == got_leaf {
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         self.declared_nominal_identity(want)
+//RS             .zip(self.declared_nominal_identity(got))
+//RS             .is_some_and(|(want, got)| want == got)
+//RS     }
+//RS 
+//RS     pub(crate) fn report_option_mismatch(&mut self, want: &Type, got: &Type, span: Span) {
+//RS         self.diags.push(Diagnostic::error(
+//RS             "E0108",
+//RS             format!(
+//RS                 "this needs {}, but the value is {}",
+//RS                 want.show(),
+//RS                 got.show()
+//RS             ),
+//RS             "the types must match".to_string(),
+//RS             type_fix_hint(want, got),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::is_core_view_generic;
+//RS     use crate::AST::Type;
+//RS 
+//RS     #[test]
+//RS     fn returned_view_generic_recognition_is_exact() {
+//RS         for name in ["View", "ViewMut"] {
+//RS             assert!(is_core_view_generic(&Type::Apply {
+//RS                 name: name.to_string(),
+//RS                 args: vec![Type::Int],
+//RS             }));
+//RS             assert!(!is_core_view_generic(&Type::Named(name.to_string())));
+//RS         }
+//RS         assert!(!is_core_view_generic(&Type::Apply {
+//RS             name: "UserView".to_string(),
+//RS             args: vec![Type::Int],
+//RS         }));
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2104 crates/jet-sema/src/Sema/CheckerCore/type_assign.rs:1-1737
+

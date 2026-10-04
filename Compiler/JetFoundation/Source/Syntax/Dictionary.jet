@@ -1,980 +1,356 @@
-// PORT-PENDING 2000 crates-jet-foundation-src-syntax-dictionary: crates/jet-foundation/src/Syntax/dictionary.rs:1-976
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! User-facing syntax dictionary.
-//RS //!
-//RS //! Rows start with `JET_HIGHLIGHT_TOKENS`, which already references the
-//RS //! canonical `Syntax` constants. Decision IDs come from those constants'
-//RS //! source comments or the applied-rule registry; no second token list exists.
-//RS 
-//RS use std::sync::LazyLock;
-//RS 
-//RS use super::{highlighted_tokens_sorted, HighlightClass, HighlightToken, JET_KEYWORD_LIST};
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum SyntaxDictionaryKind {
-//RS     Keyword,
-//RS     Marker,
-//RS     Operator,
-//RS     Sigil,
-//RS     Literal,
-//RS     Type,
-//RS     Builtin,
-//RS }
-//RS 
-//RS /// One meaning of a token at one kind of position. A sigil or operator can
-//RS /// mean different things before a name, between two values, or inside a
-//RS /// signature; each meaning carries its own example and what to expect after.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct SyntaxMeaning {
-//RS     /// Where the token sits, in plain words ("Before a name"). Empty for
-//RS     /// tokens whose meaning does not depend on position.
-//RS     pub position: String,
-//RS     pub text: String,
-//RS     /// A short example, one statement per line.
-//RS     pub example: String,
-//RS     /// What the reader should expect after this use. May be empty.
-//RS     pub afterwards: String,
-//RS     pub related_codes: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct SyntaxDictionaryRow {
-//RS     pub token: String,
-//RS     /// Internal constant name; shown only on request (`jet explain --verbose`).
-//RS     pub name: String,
-//RS     /// Owning decision ID; shown only on request (`jet explain --verbose`).
-//RS     pub decision: String,
-//RS     pub meanings: Vec<SyntaxMeaning>,
-//RS     pub kind: SyntaxDictionaryKind,
-//RS }
-//RS 
-//RS static ROWS: LazyLock<Vec<SyntaxDictionaryRow>> = LazyLock::new(build_rows);
-//RS 
-//RS pub fn rows() -> &'static [SyntaxDictionaryRow] {
-//RS     &ROWS
-//RS }
-//RS 
-//RS pub fn lookup(query: &str) -> Option<&'static SyntaxDictionaryRow> {
-//RS     let query = query.trim();
-//RS     rows().iter().find(|row| {
-//RS         row.token.eq_ignore_ascii_case(query)
-//RS             || display(row).eq_ignore_ascii_case(query)
-//RS             || row.kind == SyntaxDictionaryKind::Marker
-//RS                 && row
-//RS                     .token
-//RS                     .eq_ignore_ascii_case(query.strip_prefix('#').unwrap_or(query))
-//RS     })
-//RS }
-//RS 
-//RS pub fn nearest(query: &str) -> Option<&'static SyntaxDictionaryRow> {
-//RS     let query = query.trim();
-//RS     rows().iter().min_by_key(|row| {
-//RS         levenshtein(
-//RS             &query.to_ascii_lowercase(),
-//RS             &display(row).to_ascii_lowercase(),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub fn looks_like_query(query: &str) -> bool {
-//RS     let query = query.trim();
-//RS     if query.starts_with("package-overlay:") {
-//RS         return false;
-//RS     }
-//RS     if is_package_ref(query) {
-//RS         return false;
-//RS     }
-//RS     query.starts_with('@')
-//RS         || query.starts_with('#')
-//RS         || query.starts_with("::")
-//RS         || query.starts_with(":=")
-//RS         || query
-//RS             .chars()
-//RS             .any(|ch| !ch.is_ascii_alphanumeric() && !matches!(ch, '_' | '.' | '-' | '/' | '@'))
-//RS }
-//RS 
-//RS fn is_package_ref(query: &str) -> bool {
-//RS     if query.contains('@') && !query.starts_with('@') {
-//RS         return true;
-//RS     }
-//RS     query.split_once(':').is_some_and(|(prefix, suffix)| {
-//RS         !prefix.is_empty()
-//RS             && !suffix.is_empty()
-//RS             && prefix
-//RS                 .chars()
-//RS                 .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/'))
-//RS             && suffix.chars().any(|ch| ch.is_ascii_alphanumeric())
-//RS     })
-//RS }
-//RS 
-//RS fn build_rows() -> Vec<SyntaxDictionaryRow> {
-//RS     let decisions = source_decisions();
-//RS     let acronym_decision = source_header_decision(include_str!("acronyms.rs"));
-//RS     let mut rows = Vec::new();
-//RS     let mut tokens = highlighted_tokens_sorted();
-//RS     for text in [
-//RS         super::MARKER_REGION,
-//RS         super::MARKER_LIVE,
-//RS         super::MARKER_NONDETERMINISTIC,
-//RS     ] {
-//RS         if !tokens.iter().any(|token| token.text == text) {
-//RS             tokens.push(HighlightToken {
-//RS                 text,
-//RS                 class: HighlightClass::MarkerRule,
-//RS             });
-//RS         }
-//RS     }
-//RS     for &text in JET_KEYWORD_LIST {
-//RS         if !tokens.iter().any(|token| token.text == text) {
-//RS             tokens.push(HighlightToken {
-//RS                 text,
-//RS                 class: HighlightClass::KeywordOther,
-//RS             });
-//RS         }
-//RS     }
-//RS     for row in crate::Registry::rows()
-//RS         .iter()
-//RS         .filter(|row| row.kind() == crate::Registry::RowKind::Marker)
-//RS     {
-//RS         if !tokens.iter().any(|token| token.text == row.name) {
-//RS             tokens.push(HighlightToken {
-//RS                 text: row.name,
-//RS                 class: HighlightClass::MarkerRule,
-//RS             });
-//RS         }
-//RS     }
-//RS     for token in tokens {
-//RS         if rows
-//RS             .iter()
-//RS             .any(|row: &SyntaxDictionaryRow| row.token == token.text)
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let kind = kind(token.class);
-//RS         let (name, decision) = metadata(&decisions, token.text, kind, acronym_decision.as_deref());
-//RS         rows.push(SyntaxDictionaryRow {
-//RS             token: token.text.to_string(),
-//RS             name,
-//RS             decision,
-//RS             meanings: meanings(token.text, kind),
-//RS             kind,
-//RS         });
-//RS     }
-//RS     rows
-//RS }
-//RS 
-//RS fn metadata(
-//RS     decisions: &[(String, (String, String))],
-//RS     token: &str,
-//RS     kind: SyntaxDictionaryKind,
-//RS     acronym_decision: Option<&str>,
-//RS ) -> (String, String) {
-//RS     let mut candidates = decisions
-//RS         .iter()
-//RS         .filter(|(value, (_, decision))| value.as_str() == token && decision != "Syntax.rs");
-//RS     let candidate = candidates
-//RS         .find(|(_, (name, _))| constant_matches_kind(name, kind))
-//RS         .or_else(|| {
-//RS             decisions
-//RS                 .iter()
-//RS                 .find(|(value, (_, decision))| value.as_str() == token && decision != "Syntax.rs")
-//RS         });
-//RS     if let Some((_, metadata)) = candidate {
-//RS         return metadata.clone();
-//RS     }
-//RS     if let Some(row) = crate::Registry::row(token) {
-//RS         return (token.to_string(), row.decision.to_string());
-//RS     }
-//RS     if is_acronym(token) {
-//RS         if let Some(decision) = acronym_decision {
-//RS             return (token.to_string(), decision.to_string());
-//RS         }
-//RS     }
-//RS     (token.to_string(), "Syntax.rs".to_string())
-//RS }
-//RS 
-//RS fn constant_matches_kind(name: &str, kind: SyntaxDictionaryKind) -> bool {
-//RS     match kind {
-//RS         SyntaxDictionaryKind::Keyword => {
-//RS             name.starts_with("KW_") || name.starts_with("LIT_") || name.starts_with("BUILTIN_")
-//RS         }
-//RS         SyntaxDictionaryKind::Marker => name.starts_with("MARKER_") || name.starts_with("RULE_"),
-//RS         SyntaxDictionaryKind::Operator => name.starts_with("OP_"),
-//RS         SyntaxDictionaryKind::Sigil => {
-//RS             name.starts_with("SIGIL_")
-//RS                 || name.ends_with("_PREFIX")
-//RS                 || name.ends_with("_MARK")
-//RS                 || name == "TYPE_FIXED_SIZE_SEP"
-//RS         }
-//RS         SyntaxDictionaryKind::Literal => name.starts_with("LIT_"),
-//RS         SyntaxDictionaryKind::Type => name.starts_with("TYPE_") || name.ends_with("_TYPE"),
-//RS         SyntaxDictionaryKind::Builtin => name.starts_with("BUILTIN_"),
-//RS     }
-//RS }
-//RS 
-//RS fn source_header_decision(source: &str) -> Option<String> {
-//RS     source
-//RS         .lines()
-//RS         .take(24)
-//RS         .find_map(decision_id)
-//RS         .map(str::to_string)
-//RS }
-//RS 
-//RS fn is_acronym(token: &str) -> bool {
-//RS     token.chars().filter(|ch| ch.is_ascii_uppercase()).count() >= 2
-//RS         && token.chars().any(|ch| ch.is_ascii_lowercase())
-//RS }
-//RS 
-//RS fn kind(class: HighlightClass) -> SyntaxDictionaryKind {
-//RS     match class {
-//RS         HighlightClass::KeywordControl
-//RS         | HighlightClass::KeywordDeclaration
-//RS         | HighlightClass::KeywordOwnership
-//RS         | HighlightClass::KeywordOther => SyntaxDictionaryKind::Keyword,
-//RS         HighlightClass::MarkerRule => SyntaxDictionaryKind::Marker,
-//RS         HighlightClass::Operator => SyntaxDictionaryKind::Operator,
-//RS         HighlightClass::Sigil => SyntaxDictionaryKind::Sigil,
-//RS         HighlightClass::Literal => SyntaxDictionaryKind::Literal,
-//RS         HighlightClass::TypeBuiltin => SyntaxDictionaryKind::Type,
-//RS         HighlightClass::Builtin => SyntaxDictionaryKind::Builtin,
-//RS     }
-//RS }
-//RS 
-//RS /// The plain-words default text for a row: every meaning, each with its
-//RS /// example, what happens afterwards, and related diagnostic codes. `jet
-//RS /// explain`, the REPL `?` and LSP hover all show this text; internal
-//RS /// constant names and decision IDs are not part of it.
-//RS pub fn plain_text(row: &SyntaxDictionaryRow) -> String {
-//RS     let mut out = String::new();
-//RS     for (index, meaning) in row.meanings.iter().enumerate() {
-//RS         if index > 0 {
-//RS             out.push('\n');
-//RS         }
-//RS         let indent = if meaning.position.is_empty() {
-//RS             ""
-//RS         } else {
-//RS             out.push_str(&meaning.position);
-//RS             out.push_str(":\n");
-//RS             "  "
-//RS         };
-//RS         out.push_str(&format!("{indent}{}\n{indent}Example:\n", meaning.text));
-//RS         for line in meaning.example.lines() {
-//RS             out.push_str(&format!("{indent}  {line}\n"));
-//RS         }
-//RS         if !meaning.afterwards.is_empty() {
-//RS             out.push_str(&format!("{indent}Afterwards: {}\n", meaning.afterwards));
-//RS         }
-//RS         if !meaning.related_codes.is_empty() {
-//RS             out.push_str(&format!(
-//RS                 "{indent}Related: {}\n",
-//RS                 meaning.related_codes.join(", ")
-//RS             ));
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS /// `(position, text, example, afterwards, related codes)`.
-//RS type Curated = (
-//RS     &'static str,
-//RS     &'static str,
-//RS     &'static str,
-//RS     &'static str,
-//RS     &'static [&'static str],
-//RS );
-//RS 
-//RS const COMPOUND_AFTER: &str =
-//RS     "The name must be mutable (`:=`) or a place marked `&`; its new value is used from here on.";
-//RS 
-//RS /// Plain-words meanings for every registered sigil and operator. Rows are the
-//RS /// only home for this text.
-//RS fn curated(token: &str) -> &'static [Curated] {
-//RS     use super::*;
-//RS     match token {
-//RS         SIGIL_BIND_IMMUT => &[(
-//RS             "Between a name and a value",
-//RS             "Binds the name to a value that never changes.",
-//RS             "answer :: 42\nprint(answer)",
-//RS             "`answer` keeps this value for the rest of its block; assigning to it again is an error.",
-//RS             &["E0111"],
-//RS         )],
-//RS         SIGIL_BIND_MUT => &[(
-//RS             "Between a name and a value",
-//RS             "Binds the name to a value that can change later with `=`.",
-//RS             "count := 0\ncount = count + 1",
-//RS             "Change it with `=` or a compound form such as `+=`. A `:=` name that never changes gets a hint to use `::`.",
-//RS             &["L0528"],
-//RS         )],
-//RS         COMPTIME_MARK => &[(
-//RS             "Before a name",
-//RS             "Marks a fact the compiler supplies: a `$` member of the thing it describes, or one of the roots `$build`, `$package`, `$phase` and `$program`. Programs read facts; they never declare a `$` name.",
-//RS             "print(Point.$name)\nprep if $build.os == {\n    .Linux -> { print(\"linux\") }\n    else -> { print(\"other\") }\n}",
-//RS             "A fact is known while building, so reading it costs nothing at run time. Marker and fact declarations mark their compiler metadata the same way: `$sites:`.",
-//RS             &[],
-//RS         )],
-//RS         SIGIL_FENCE_OPEN => &[(
-//RS             "At the start of a list of entries",
-//RS             "Opens a fence: the whole statement repeats once for each entry between `<:` and `:>`.",
-//RS             "<: a, b, c :> :: 0\nprint(<: a, b, c :>)",
-//RS             "No list is created; each entry gets its own copy of the statement. Fences in one statement advance together, so they need the same number of entries.",
-//RS             &["E0368", "E0370"],
-//RS         )],
-//RS         SIGIL_FENCE_CLOSE => &[(
-//RS             "At the end of a list of entries",
-//RS             "Closes a fence opened with `<:`.",
-//RS             "<: low, high :> :: 1\nprint(<: low, high :>)",
-//RS             "The statement around the fence runs once per entry.",
-//RS             &["E0371"],
-//RS         )],
-//RS         SIGIL_MOVE => &[
-//RS             (
-//RS                 "Before a name (move)",
-//RS                 "Moves the value out of the name and hands it to where the mark is written. Jet already moves a name at its last use, so the mark is optional; it makes the move exact and visible.",
-//RS                 "names :: [\"ada\", \"grace\"]\narchive(^names)",
-//RS                 "`names` can no longer be used: a later use is error E0121. To keep using it, pass a copy with `~names` instead.",
-//RS                 &["E0121", "E0225"],
-//RS             ),
-//RS             (
-//RS                 "Before a parameter's type",
-//RS                 "`name: ^T` says the function takes ownership of that argument.",
-//RS                 "fn archive(name: ^String) -> String { name }\nsaved :: archive(^title)",
-//RS                 "The caller's value moves into the function; the caller can't use it after the call.",
-//RS                 &["E0209"],
-//RS             ),
-//RS             (
-//RS                 "Between two numbers (power)",
-//RS                 "Raises the left number to the power of the right one.",
-//RS                 "side :: 3\narea :: side ^ 2",
-//RS                 "Both numbers are unchanged and the result is a new number (here 9). `x ^= 2` raises `x` in place.",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         SIGIL_WRITE => &[
-//RS             (
-//RS                 "Before a name or a call on it",
-//RS                 "Marks the place that this call changes, so every write is visible where it happens.",
-//RS                 "score := 41\nbump(&score)\n&items.push(4)",
-//RS                 "The change shows up in `score` and `items` afterwards. A call that writes without the mark is error E0202.",
-//RS                 &["E0202", "E0213"],
-//RS             ),
-//RS             (
-//RS                 "Before a parameter's type",
-//RS                 "`name: &T` lets the function change the caller's value.",
-//RS                 "fn bump(n: &Int) { n += 1 }\nbump(&score)",
-//RS                 "Callers must mark the argument with `&`.",
-//RS                 &["E0202"],
-//RS             ),
-//RS             (
-//RS                 "Between two whole numbers",
-//RS                 "Bitwise AND: each result bit is 1 only where both numbers have a 1.",
-//RS                 "flags :: 6\nlow :: flags & 3",
-//RS                 "Both numbers are unchanged; here `low` is 2.",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         SIGIL_COPY => &[(
-//RS             "Before a value",
-//RS             "Makes an independent copy of the value.",
-//RS             "items := [1, 2, 3]\nbackup :: ~items",
-//RS             "Changing one does not change the other, and the original stays usable.",
-//RS             &["E0211"],
-//RS         )],
-//RS         SIGIL_SPREAD => &[
-//RS             (
-//RS                 "Before a list in a call or list literal",
-//RS                 "Spreads the list's items in place, as if each were written out.",
-//RS                 "both :: [...first, 0, ...second]\nshow(...names)",
-//RS                 "The spread list itself is unchanged.",
-//RS                 &["E1311", "E1312"],
-//RS             ),
-//RS             (
-//RS                 "Before the last parameter's type",
-//RS                 "`name: ...T` accepts any number of arguments and collects them into a list.",
-//RS                 "fn total(numbers: ...Int) -> Int { … }\ntotal(1, 2, 3)",
-//RS                 "Only the last parameter can collect arguments, and it can't have a default.",
-//RS                 &["E1310"],
-//RS             ),
-//RS         ],
-//RS         OP_MEMBER_SPREAD => &[(
-//RS             "After a value or module name",
-//RS             "Picks several members at once.",
-//RS             "checks :: v.[length, charset]\nuse numeric.[clamp, abs]",
-//RS             "On a value you get a list of those members; after `use` each name comes into scope.",
-//RS             &["E0961"],
-//RS         )],
-//RS         OP_TRY_SUFFIX => &[
-//RS             (
-//RS                 "After a type",
-//RS                 "`T?` is an optional value: it holds a `T` or nothing (`None`).",
-//RS                 "fn find(id: Int) -> Entry? { … }\nentry :: find(7) ?? return",
-//RS                 "Handle the missing case with `??`, `?.` or an `if` check before using the value.",
-//RS                 &["E0308", "E0047"],
-//RS             ),
-//RS             (
-//RS                 "After a call, followed by a note in parentheses",
-//RS                 "Adds a note to any failure that passes through this call.",
-//RS                 "raw :: read_raw()?(\"reading the config\")\nreturn Ok(raw)",
-//RS                 "On success nothing changes; on failure the caller sees the failure with the note attached.",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         OP_RANGE => &[(
-//RS             "Between two whole numbers",
-//RS             "A range from the first number to the last, both included.",
-//RS             "loop i in 1..3 { print(i) }",
-//RS             "The loop sees 1, 2 and 3. Use `..<` to leave out the last number.",
-//RS             &["E0364"],
-//RS         )],
-//RS         OP_RANGE_EXCLUSIVE => &[(
-//RS             "Between two whole numbers",
-//RS             "A range that stops just before the last number.",
-//RS             "loop i in 0..<3 { print(i) }",
-//RS             "The loop sees 0, 1 and 2. The range is empty when the start is not less than the end.",
-//RS             &[],
-//RS         )],
-//RS         OP_UNIFIED_ARROW => &[(
-//RS             "After parameters, a pattern, or a loop head",
-//RS             "Points to the result: a function's return type, or the value or statement of a lambda, match arm, or loop body.",
-//RS             "fn twice(n: Int) -> Int { n * 2 }\nloop value in values -> print(value)",
-//RS             "Write `-[IO]>` instead of `->` to state which effects a function may use.",
-//RS             &[],
-//RS         )],
-//RS         OP_PLUS => &[(
-//RS             "Between two numbers",
-//RS             "Adds the numbers.",
-//RS             "total :: price + tax",
-//RS             "Both numbers are unchanged; the sum is a new value.",
-//RS             &[],
-//RS         )],
-//RS         OP_MINUS => &[
-//RS             (
-//RS                 "Between two numbers",
-//RS                 "Subtracts the right number from the left one.",
-//RS                 "change :: paid - price",
-//RS                 "Both numbers are unchanged.",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "Before a number",
-//RS                 "Negates the number.",
-//RS                 "below :: -5\nflipped :: -below",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         OP_STAR => &[
-//RS             (
-//RS                 "Between two numbers",
-//RS                 "Multiplies the numbers.",
-//RS                 "area :: width * height",
-//RS                 "Both numbers are unchanged.",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "Alone in a parameter list",
-//RS                 "Starts the label-only parameters: callers must name each argument after it.",
-//RS                 "fn draw(size: Int, *, color: String) { … }\ndraw(3, color: \"red\")",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         OP_SLASH => &[
-//RS             (
-//RS                 "Between two numbers",
-//RS                 "Divides the left number by the right one. Whole numbers drop the fraction (7 / 2 is 3); `/%` rounds down instead.",
-//RS                 "half :: total / 2",
-//RS                 "Both numbers are unchanged. `%%` gives the matching remainder.",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "Alone in a parameter list",
-//RS                 "Ends the position-only parameters: callers pass them without names.",
-//RS                 "fn show(n: Int, /) { print(\"{n}\") }\nshow(5)",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         OP_SLASH_PERCENT => &[(
-//RS             "Between two whole numbers",
-//RS             "Divides and rounds down, toward negative infinity.",
-//RS             "rows :: -7 /% 2",
-//RS             "Here `rows` is -4. `%` gives the matching remainder.",
-//RS             &[],
-//RS         )],
-//RS         OP_PERCENT => &[(
-//RS             "Between two whole numbers",
-//RS             "Modulo: the answer takes the divisor's sign, so -7 % 2 is 1.",
-//RS             "slot :: index % size",
-//RS             "It pairs with `/%`.",
-//RS             &[],
-//RS         )],
-//RS         OP_PERCENT_PERCENT => &[(
-//RS             "Between two whole numbers",
-//RS             "Remainder: the answer takes the dividend's sign, so -7 %% 2 is -1.",
-//RS             "left_over :: total %% 3",
-//RS             "It pairs with `/`.",
-//RS             &[],
-//RS         )],
-//RS         OP_PIPE => &[
-//RS             (
-//RS                 "Between types or patterns",
-//RS                 "Either alternative is accepted.",
-//RS                 "fn load(path: String) -> Config (IOError | ParseError)! { … }",
-//RS                 "Code that handles the result must cover every alternative.",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "Between two whole numbers",
-//RS                 "Bitwise OR: each result bit is 1 where either number has a 1.",
-//RS                 "mode :: READ | WRITE",
-//RS                 "Both numbers are unchanged.",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         OP_SHL => &[(
-//RS             "Between two whole numbers",
-//RS             "Shifts the left number's bits left by the right number of places.",
-//RS             "eight :: 1 << 3",
-//RS             "",
-//RS             &[],
-//RS         )],
-//RS         OP_SHR => &[(
-//RS             "Between two whole numbers",
-//RS             "Shifts the left number's bits right by the right number of places.",
-//RS             "two :: 16 >> 3",
-//RS             "",
-//RS             &[],
-//RS         )],
-//RS         OP_AND => &[(
-//RS             "Between two conditions",
-//RS             "True when both are true. The right side runs only when the left is true.",
-//RS             "if ready && count > 0 { start() }",
-//RS             "",
-//RS             &[],
-//RS         )],
-//RS         OP_OR => &[(
-//RS             "Between two conditions",
-//RS             "True when either is true. The right side runs only when the left is false.",
-//RS             "if empty || closed { return }",
-//RS             "",
-//RS             &[],
-//RS         )],
-//RS         OP_NOT => &[
-//RS             (
-//RS                 "Before a condition",
-//RS                 "Flips true and false.",
-//RS                 "if !done { keep_going() }",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "After an error type in a signature",
-//RS                 "`E!` marks the errors a function can fail with; `(A | B)!` lists several.",
-//RS                 "fn parse(text: String) -> Int ParseError! { … }\nvalue :: parse(input) ?? 0",
-//RS                 "A failure passes to the caller on its own; handle it where you want with `??`.",
-//RS                 &["E0405"],
-//RS             ),
-//RS         ],
-//RS         OP_EQ => &[(
-//RS             "Between two values",
-//RS             "True when the values are equal.",
-//RS             "if answer == 42 { print(\"found\") }",
-//RS             "`=` assigns; `==` only compares.",
-//RS             &[],
-//RS         )],
-//RS         OP_NE => &[(
-//RS             "Between two values",
-//RS             "True when the values differ.",
-//RS             "if value != None { use(value) }",
-//RS             "",
-//RS             &[],
-//RS         )],
-//RS         OP_LT => &[
-//RS             (
-//RS                 "Between two values",
-//RS                 "True when the left value is smaller.",
-//RS                 "if age < 18 { print(\"minor\") }",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "After a type or function name",
-//RS                 "Opens a list of type arguments, closed by `>`.",
-//RS                 "names :: List<String>.new()\n(sender, receiver) :: channel<Int>()",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         OP_GT => &[
-//RS             (
-//RS                 "Between two values",
-//RS                 "True when the left value is larger.",
-//RS                 "if score > best { best = score }",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "After type arguments",
-//RS                 "Closes a list of type arguments opened by `<`.",
-//RS                 "cache :: Map<String, Int>.new()",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         OP_LE => &[(
-//RS             "Between two values",
-//RS             "True when the left value is smaller or equal.",
-//RS             "if count <= limit { add() }",
-//RS             "",
-//RS             &[],
-//RS         )],
-//RS         OP_GE => &[(
-//RS             "Between two values",
-//RS             "True when the left value is larger or equal.",
-//RS             "if total >= 100 { print(\"free shipping\") }",
-//RS             "",
-//RS             &[],
-//RS         )],
-//RS         OP_COMPARE => &[(
-//RS             "Between two values",
-//RS             "Compares in one step and gives an `Ordering`: `.Less`, `.Equal` or `.Greater`.",
-//RS             "order :: left <=> right",
-//RS             "Match on the `Ordering` to handle each case.",
-//RS             &[],
-//RS         )],
-//RS         OP_PLUS_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Adds to the name in place: `x += 1` is `x = x + 1`.",
-//RS             "count := 0\ncount += 1",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_MINUS_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Subtracts from the name in place: `x -= 1` is `x = x - 1`.",
-//RS             "lives := 3\nlives -= 1",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_STAR_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Multiplies the name in place: `x *= 2` is `x = x * 2`.",
-//RS             "size := 4\nsize *= 2",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_SLASH_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Divides the name in place: `x /= 2` is `x = x / 2`.",
-//RS             "size := 8\nsize /= 2",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_SLASH_PERCENT_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Divides the name in place, rounding down: `x /%= 2` is `x = x /% 2`.",
-//RS             "step := -7\nstep /%= 2",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_PERCENT_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Replaces the name with its modulo: `x %= 3` is `x = x % 3`.",
-//RS             "slot := 10\nslot %= 3",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_PERCENT_PERCENT_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Replaces the name with its remainder: `x %%= 3` is `x = x %% 3`.",
-//RS             "rest := -7\nrest %%= 3",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_AMP_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Bitwise AND in place: `x &= m` is `x = x & m`.",
-//RS             "flags := 7\nflags &= 3",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_PIPE_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Bitwise OR in place: `x |= m` is `x = x | m`.",
-//RS             "flags := 1\nflags |= 4",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_CARET_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Raises the name to a power in place: `x ^= 2` is `x = x ^ 2`.",
-//RS             "side := 3\nside ^= 2",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_TILDE_PIPE => &[(
-//RS             "Between two whole numbers",
-//RS             "Bitwise exclusive OR: each result bit is 1 where exactly one number has a 1.",
-//RS             "toggled :: flags ~| 1",
-//RS             "Both numbers are unchanged. Prefix `~` alone still means copy.",
-//RS             &[],
-//RS         )],
-//RS         OP_TILDE_PIPE_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Bitwise exclusive OR in place: `x ~|= m` is `x = x ~| m`.",
-//RS             "flags := 5\nflags ~|= 1",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_SHL_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Shifts the name's bits left in place: `x <<= 1` is `x = x << 1`.",
-//RS             "bits := 1\nbits <<= 3",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_SHR_EQ => &[(
-//RS             "After a mutable name",
-//RS             "Shifts the name's bits right in place: `x >>= 1` is `x = x >> 1`.",
-//RS             "bits := 16\nbits >>= 3",
-//RS             COMPOUND_AFTER,
-//RS             &["E0111"],
-//RS         )],
-//RS         OP_FALLBACK => &[(
-//RS             "After an optional or fallible value",
-//RS             "Supplies what to use when the left side is missing (`None`) or failed: a value, or a way out such as `return`, `break`, `next` or `panic(…)`.",
-//RS             "port :: env_port() ?? 8080\nuser :: load_user() ?? return",
-//RS             "The result is a plain value, no longer optional. Inside a fallback after a failure, `err` names the failure.",
-//RS             &["E0405", "E0408"],
-//RS         )],
-//RS         OP_OPTIONAL_CHAIN => &[(
-//RS             "After an optional value",
-//RS             "Reads a field or calls a method only when the value is there; it stops at the first missing link.",
-//RS             "city :: user?.address?.city\nname :: user?.display_name()",
-//RS             "The result is optional (`T?`), so handle the missing case with `??`.",
-//RS             &["E0047"],
-//RS         )],
-//RS         OP_NAMED_CTOR => &[
-//RS             (
-//RS                 "After a type name",
-//RS                 "Builds a value by naming its fields. Without a type name, the type comes from context.",
-//RS                 "origin :: Point{x: 0, y: 0}\nmove_to({x: 3, y: 4})",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "After a field or parameter type",
-//RS                 "`T{value}` gives the field or parameter a default.",
-//RS                 "fn greet(name: String{\"world\"}) { print(\"hello, {name}\") }\ngreet()",
-//RS                 "Callers may leave that argument out.",
-//RS                 &["E2414"],
-//RS             ),
-//RS         ],
-//RS         TYPE_FIXED_SIZE_SEP => &[
-//RS             (
-//RS                 "Before a name",
-//RS                 "Applies a marker to what follows, such as `#Test`; `#[A, B]` applies several.",
-//RS                 "#Test(\"adds\") {\n    assert_eq(1 + 1, 2)\n}",
-//RS                 "Run `jet explain #Name` to read what a marker does.",
-//RS                 &[],
-//RS             ),
-//RS             (
-//RS                 "Inside a list type",
-//RS                 "`[T#N]` is a list of exactly N items.",
-//RS                 "fn mix(color: [Int#3]) -> Int { color[0] }",
-//RS                 "The length is fixed: `push` and `pop` are errors, and a constant index past the end is caught before the program runs.",
-//RS                 &["E0964", "E0965"],
-//RS             ),
-//RS             (
-//RS                 "After a package name",
-//RS                 "Pins an exact package version.",
-//RS                 "json#1.2.0",
-//RS                 "",
-//RS                 &[],
-//RS             ),
-//RS         ],
-//RS         _ => &[],
-//RS     }
-//RS }
-//RS 
-//RS fn meanings(token: &str, kind: SyntaxDictionaryKind) -> Vec<SyntaxMeaning> {
-//RS     let curated = curated(token);
-//RS     if !curated.is_empty() {
-//RS         return curated
-//RS             .iter()
-//RS             .map(|(position, text, example, afterwards, codes)| SyntaxMeaning {
-//RS                 position: position.to_string(),
-//RS                 text: text.to_string(),
-//RS                 example: example.to_string(),
-//RS                 afterwards: afterwards.to_string(),
-//RS                 related_codes: codes.iter().map(|code| code.to_string()).collect(),
-//RS             })
-//RS             .collect();
-//RS     }
-//RS     let (text, example) = match token {
-//RS         super::MARKER_LIVE => (
-//RS             "Marks a block that takes input directly from the terminal.".to_string(),
-//RS             "#Live { input() }".to_string(),
-//RS         ),
-//RS         _ => match kind {
-//RS             SyntaxDictionaryKind::Keyword => {
-//RS                 (format!("The Jet keyword `{token}`."), format!("{token} …"))
-//RS             }
-//RS             SyntaxDictionaryKind::Marker => {
-//RS                 (format!("The marker `#{token}`."), format!("#{token} …"))
-//RS             }
-//RS             SyntaxDictionaryKind::Operator => {
-//RS                 (format!("The operator `{token}`."), format!("left {token} right"))
-//RS             }
-//RS             SyntaxDictionaryKind::Sigil => {
-//RS                 (format!("The sigil `{token}`."), format!("name {token} value"))
-//RS             }
-//RS             SyntaxDictionaryKind::Literal => (format!("The literal `{token}`."), token.to_string()),
-//RS             SyntaxDictionaryKind::Type => {
-//RS                 (format!("The built-in type `{token}`."), token.to_string())
-//RS             }
-//RS             SyntaxDictionaryKind::Builtin => (format!("The built-in `{token}`."), token.to_string()),
-//RS         },
-//RS     };
-//RS     vec![SyntaxMeaning {
-//RS         position: String::new(),
-//RS         text,
-//RS         example,
-//RS         afterwards: String::new(),
-//RS         related_codes: Vec::new(),
-//RS     }]
-//RS }
-//RS 
-//RS pub fn display(row: &SyntaxDictionaryRow) -> String {
-//RS     if row.kind == SyntaxDictionaryKind::Marker {
-//RS         format!("#{}", row.token)
-//RS     } else {
-//RS         row.token.clone()
-//RS     }
-//RS }
-//RS 
-//RS fn source_decisions() -> Vec<(String, (String, String))> {
-//RS     const SOURCES: &[&str] = &[
-//RS         include_str!("../Syntax.rs"),
-//RS         include_str!("core_surface.rs"),
-//RS         include_str!("effects_surface.rs"),
-//RS         include_str!("math_layout.rs"),
-//RS         include_str!("markers.rs"),
-//RS         include_str!("package_files.rs"),
-//RS         include_str!("jetpack_config.rs"),
-//RS         include_str!("predicates.rs"),
-//RS     ];
-//RS     let mut out = Vec::new();
-//RS     for source in SOURCES {
-//RS         let mut comments = String::new();
-//RS         let mut inherited_comments = String::new();
-//RS         for line in source.lines() {
-//RS             let trimmed = line.trim();
-//RS             if trimmed.starts_with("//") {
-//RS                 comments.push_str(trimmed);
-//RS                 comments.push('\n');
-//RS                 continue;
-//RS             }
-//RS             let Some(rest) = trimmed.strip_prefix("pub const ") else {
-//RS                 comments.clear();
-//RS                 inherited_comments.clear();
-//RS                 continue;
-//RS             };
-//RS             let Some((name, rhs)) = rest.split_once(':') else {
-//RS                 comments.clear();
-//RS                 continue;
-//RS             };
-//RS             let Some(value) = rhs
-//RS                 .split_once("= \"")
-//RS                 .and_then(|(_, rest)| rest.split_once('"'))
-//RS             else {
-//RS                 comments.clear();
-//RS                 continue;
-//RS             };
-//RS             let decision = decision_id(trimmed)
-//RS                 .or_else(|| comment_decision(&comments))
-//RS                 .or_else(|| decision_id(&inherited_comments))
-//RS                 .unwrap_or("Syntax.rs")
-//RS                 .to_string();
-//RS             if !comments.is_empty() {
-//RS                 inherited_comments.clone_from(&comments);
-//RS             }
-//RS             out.push((value.0.to_string(), (name.trim().to_string(), decision)));
-//RS             comments.clear();
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn decision_id(text: &str) -> Option<&str> {
-//RS     text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-')
-//RS         .find(|word| {
-//RS             word.starts_with("D-")
-//RS                 || word.starts_with('S') && word[1..].chars().all(|ch| ch.is_ascii_digit())
-//RS                 || word.starts_with('M') && word[1..].chars().all(|ch| ch.is_ascii_digit())
-//RS                 || word.starts_with('U') && word[1..].chars().all(|ch| ch.is_ascii_digit())
-//RS         })
-//RS }
-//RS 
-//RS fn comment_decision(text: &str) -> Option<&str> {
-//RS     text.lines().rev().find_map(decision_id)
-//RS }
-//RS 
-//RS fn levenshtein(left: &str, right: &str) -> usize {
-//RS     let mut row: Vec<usize> = (0..=right.chars().count()).collect();
-//RS     for (i, left) in left.chars().enumerate() {
-//RS         let mut next = vec![i + 1];
-//RS         for (j, right) in right.chars().enumerate() {
-//RS             next.push(if left == right {
-//RS                 row[j]
-//RS             } else {
-//RS                 1 + row[j].min(row[j + 1]).min(next[j])
-//RS             });
-//RS         }
-//RS         row = next;
-//RS     }
-//RS     row[right.chars().count()]
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn dictionary_covers_highlights_and_keywords_without_foreign_words() {
-//RS         for token in crate::Syntax::JET_HIGHLIGHT_TOKENS {
-//RS             assert!(
-//RS                 lookup(token.text).is_some(),
-//RS                 "missing highlight token `{}`",
-//RS                 token.text
-//RS             );
-//RS         }
-//RS         for token in JET_KEYWORD_LIST {
-//RS             assert!(lookup(token).is_some(), "missing keyword `{token}`");
-//RS         }
-//RS 
-//RS         let constants = source_decisions();
-//RS         for row in rows() {
-//RS             assert!(
-//RS                 constants.iter().any(|(token, _)| token == &row.token)
-//RS                     || crate::Registry::row(&row.token).is_some(),
-//RS                 "dictionary token `{}` is not a Syntax constant or registry marker",
-//RS                 row.token
-//RS             );
-//RS             assert_ne!(
-//RS                 row.decision, "Syntax.rs",
-//RS                 "missing decision ID for `{}`",
-//RS                 row.token
-//RS             );
-//RS             assert!(
-//RS                 !row.meanings.is_empty()
-//RS                     && row.meanings.iter().all(|meaning| !meaning.example.is_empty()),
-//RS                 "missing example for `{}`",
-//RS                 row.token
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2000 crates/jet-foundation/src/Syntax/dictionary.rs:1-976
+// User-facing syntax dictionary; canonical Syntax constants own the token vocabulary.
+use JetFoundation.Syntax as syntax
+use JetFoundation.Registry as registry
+use JetFoundation.Syntax.[highlighted_tokens_sorted, HighlightClass, HighlightToken, JET_KEYWORD_LIST]
+// GATE #4494: process-global lazy initialization and compile-time source embedding.
+use std.sync.LazyLock
+use std.include_str
 
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:12
+pub enum SyntaxDictionaryKind { Keyword Marker Operator Sigil Literal Type Builtin }
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:26
+pub struct SyntaxMeaning {
+    pub position: String
+    pub text: String
+    pub example: String
+    pub afterwards: String
+    pub related_codes: [String]
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:39
+pub struct SyntaxDictionaryRow {
+    pub token: String
+    pub name: String
+    pub decision: String
+    pub meanings: [SyntaxMeaning]
+    pub kind: SyntaxDictionaryKind
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:49
+ROWS :: LazyLock<[SyntaxDictionaryRow]>.new(build_rows)
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:51
+pub fn rows() -> [SyntaxDictionaryRow] { ROWS.get() }
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:55
+pub fn lookup(query: String) -> SyntaxDictionaryRow? {
+    query := query.trim() // #4303
+    loop row in rows() {
+        if row.token.eq_ignore_ascii_case(query) || display(row).eq_ignore_ascii_case(query) ||
+            row.kind == .Marker && row.token.eq_ignore_ascii_case(query.strip_prefix("#") ?? query) -> return Val(row)
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:67
+pub fn nearest(query: String) -> SyntaxDictionaryRow? {
+    query := query.trim() // #4303
+    lower :: query.to_ascii_lowercase()
+    best := None as SyntaxDictionaryRow?
+    distance := Int.MAX
+    loop row in rows() {
+        score :: levenshtein(lower, display(row).to_ascii_lowercase())
+        if score < distance { best = Val(row); distance = score }
+    }
+    best
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:77
+pub fn looks_like_query(query: String) -> Bool {
+    query := query.trim() // #4303
+    if query.starts_with("package-overlay:") || is_package_ref(query) -> return false
+    if query.starts_with("@") || query.starts_with("#") || query.starts_with("::") || query.starts_with(":=") -> return true
+    loop ch in query.chars() {
+        if !ch.is_ascii_alphanumeric() && ch != '_' && ch != '.' && ch != '-' && ch != '/' && ch != '@' -> return true
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:94
+fn is_package_ref(query: String) -> Bool {
+    if query.contains("@") && !query.starts_with("@") -> return true
+    if pair :: query.split_once(":") {
+        (prefix, suffix) :: pair
+        if prefix.is_empty() || suffix.is_empty() -> return false
+        loop ch in prefix.chars() {
+            if !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-' && ch != '.' && ch != '/' -> return false
+        }
+        loop ch in suffix.chars() { if ch.is_ascii_alphanumeric() -> return true }
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:108
+fn build_rows() -> [SyntaxDictionaryRow] {
+    decisions :: source_decisions()
+    acronym_decision :: source_header_decision(include_str("crates/jet-foundation/src/Syntax/acronyms.rs"))
+    result := [SyntaxDictionaryRow]{}
+    tokens := highlighted_tokens_sorted()
+    present := [String:Bool]{}
+    loop token in tokens { present[token.text] = true }
+    loop text in [syntax.MARKER_REGION, syntax.MARKER_LIVE, syntax.MARKER_NONDETERMINISTIC] {
+        if !present.contains_key(text) { &tokens.push(HighlightToken{text: text, class: .MarkerRule}); present[text] = true }
+    }
+    loop text in JET_KEYWORD_LIST {
+        if !present.contains_key(text) { &tokens.push(HighlightToken{text: text, class: .KeywordOther}); present[text] = true }
+    }
+    loop row in registry.rows() {
+        if row.kind() == registry.RowKind.Marker && !present.contains_key(row.name) {
+            &tokens.push(HighlightToken{text: row.name, class: .MarkerRule}); present[row.name] = true
+        }
+    }
+    seen := [String:Bool]{}
+    loop token in tokens {
+        if seen.contains_key(token.text) -> next
+        seen[token.text] = true
+        row_kind :: kind(token.class)
+        (name, decision) :: metadata(decisions, token.text, row_kind, acronym_decision)
+        &result.push(SyntaxDictionaryRow{token: token.text, name: name, decision: decision, meanings: meanings(token.text, row_kind), kind: row_kind})
+    }
+    result
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:164
+fn metadata(decisions: [(String, (String, String))], token: String, row_kind: SyntaxDictionaryKind, acronym_decision: String?) -> (String, String) {
+    fallback := None as (String, String)?
+    loop (value, data) in decisions {
+        if value != token || data.1 == "Syntax.rs" -> next
+        if constant_matches_kind(data.0, row_kind) -> return data
+        if fallback == None -> fallback = Val(data)
+    }
+    if candidate :: fallback -> return candidate
+    if row :: registry.row(token) -> return (token, row.decision)
+    if is_acronym(token) { if decision :: acronym_decision -> return (token, decision) }
+    (token, "Syntax.rs")
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:194
+fn constant_matches_kind(name: String, row_kind: SyntaxDictionaryKind) -> Bool {
+    if row_kind == {
+        .Keyword -> name.starts_with("KW_") || name.starts_with("LIT_") || name.starts_with("BUILTIN_")
+        .Marker -> name.starts_with("MARKER_") || name.starts_with("RULE_")
+        .Operator -> name.starts_with("OP_")
+        .Sigil -> name.starts_with("SIGIL_") || name.ends_with("_PREFIX") || name.ends_with("_MARK") || name == "TYPE_FIXED_SIZE_SEP"
+        .Literal -> name.starts_with("LIT_")
+        .Type -> name.starts_with("TYPE_") || name.ends_with("_TYPE")
+        .Builtin -> name.starts_with("BUILTIN_")
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:213
+fn source_header_decision(source: String) -> String? {
+    count := 0
+    loop line in source.lines() {
+        if count == 24 -> break
+        count += 1
+        if id :: decision_id(line) -> return Val(id)
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:221
+fn is_acronym(token: String) -> Bool {
+    uppercase := 0
+    lowercase := false
+    loop ch in token.chars() {
+        if ch.is_ascii_uppercase() -> uppercase += 1
+        if ch.is_ascii_lowercase() -> lowercase = true
+    }
+    uppercase >= 2 && lowercase
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:226
+fn kind(class: HighlightClass) -> SyntaxDictionaryKind {
+    if class == {
+        .KeywordControl | .KeywordDeclaration | .KeywordOwnership | .KeywordOther -> .Keyword
+        .MarkerRule -> .Marker
+        .Operator -> .Operator
+        .Sigil -> .Sigil
+        .Literal -> .Literal
+        .TypeBuiltin -> .Type
+        .Builtin -> .Builtin
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:245
+pub fn plain_text(row: SyntaxDictionaryRow) -> String {
+    out := ""
+    loop (index, meaning) in row.meanings.enumerate() {
+        if index > 0 -> out += "\n"
+        indent := ""
+        if !meaning.position.is_empty() { out += meaning.position + ":\n"; indent = "  " }
+        out += indent + meaning.text + "\n" + indent + "Example:\n"
+        loop line in meaning.example.lines() { out += indent + "  " + line + "\n" }
+        if !meaning.afterwards.is_empty() -> out += indent + "Afterwards: " + meaning.afterwards + "\n"
+        if !meaning.related_codes.is_empty() -> out += indent + "Related: " + meaning.related_codes.join(", ") + "\n"
+    }
+    out
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:276
+type Curated = (String, String, String, String, [String])
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:284
+COMPOUND_AFTER :: "The name must be mutable (`:=`) or a place marked `&`; its new value is used from here on."
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:289
+fn curated(token: String) -> [Curated] {
+    if token == {
+        syntax.SIGIL_BIND_IMMUT -> [("Between a name and a value", "Binds the name to a value that never changes.", "answer :: 42\nprint(answer)", "`answer` keeps this value for the rest of its block; assigning to it again is an error.", ["E0111"])]
+        syntax.SIGIL_BIND_MUT -> [("Between a name and a value", "Binds the name to a value that can change later with `=`.", "count := 0\ncount = count + 1", "Change it with `=` or a compound form such as `+=`. A `:=` name that never changes gets a hint to use `::`.", ["L0528"])]
+        syntax.COMPTIME_MARK -> [("Before a name", "Marks a fact the compiler supplies: a `$` member of the thing it describes, or one of the roots `$build`, `$package`, `$phase` and `$program`. Programs read facts; they never declare a `$` name.", "print(Point.$name)\nprep if $build.os == {\n    .Linux -> { print(\"linux\") }\n    else -> { print(\"other\") }\n}", "A fact is known while building, so reading it costs nothing at run time. Marker and fact declarations mark their compiler metadata the same way: `$sites:`.", [])]
+        syntax.SIGIL_FENCE_OPEN -> [("At the start of a list of entries", "Opens a fence: the whole statement repeats once for each entry between `<:` and `:>`.", "<: a, b, c :> :: 0\nprint(<: a, b, c :>)", "No list is created; each entry gets its own copy of the statement. Fences in one statement advance together, so they need the same number of entries.", ["E0368", "E0370"])]
+        syntax.SIGIL_FENCE_CLOSE -> [("At the end of a list of entries", "Closes a fence opened with `<:`.", "<: low, high :> :: 1\nprint(<: low, high :>)", "The statement around the fence runs once per entry.", ["E0371"])]
+        syntax.SIGIL_MOVE -> [
+            ("Before a name (move)", "Moves the value out of the name and hands it to where the mark is written. Jet already moves a name at its last use, so the mark is optional; it makes the move exact and visible.", "names :: [\"ada\", \"grace\"]\narchive(^names)", "`names` can no longer be used: a later use is error E0121. To keep using it, pass a copy with `~names` instead.", ["E0121", "E0225"]),
+            ("Before a parameter's type", "`name: ^T` says the function takes ownership of that argument.", "fn archive(name: ^String) -> String { name }\nsaved :: archive(^title)", "The caller's value moves into the function; the caller can't use it after the call.", ["E0209"]),
+            ("Between two numbers (power)", "Raises the left number to the power of the right one.", "side :: 3\narea :: side ^ 2", "Both numbers are unchanged and the result is a new number (here 9). `x ^= 2` raises `x` in place.", [])]
+        syntax.SIGIL_WRITE -> [
+            ("Before a name or a call on it", "Marks the place that this call changes, so every write is visible where it happens.", "score := 41\nbump(&score)\n&items.push(4)", "The change shows up in `score` and `items` afterwards. A call that writes without the mark is error E0202.", ["E0202", "E0213"]),
+            ("Before a parameter's type", "`name: &T` lets the function change the caller's value.", "fn bump(n: &Int) { n += 1 }\nbump(&score)", "Callers must mark the argument with `&`.", ["E0202"]),
+            ("Between two whole numbers", "Bitwise AND: each result bit is 1 only where both numbers have a 1.", "flags :: 6\nlow :: flags & 3", "Both numbers are unchanged; here `low` is 2.", [])]
+        syntax.SIGIL_COPY -> [("Before a value", "Makes an independent copy of the value.", "items := [1, 2, 3]\nbackup :: ~items", "Changing one does not change the other, and the original stays usable.", ["E0211"])]
+        syntax.SIGIL_SPREAD -> [
+            ("Before a list in a call or list literal", "Spreads the list's items in place, as if each were written out.", "both :: [...first, 0, ...second]\nshow(...names)", "The spread list itself is unchanged.", ["E1311", "E1312"]),
+            ("Before the last parameter's type", "`name: ...T` accepts any number of arguments and collects them into a list.", "fn total(numbers: ...Int) -> Int { … }\ntotal(1, 2, 3)", "Only the last parameter can collect arguments, and it can't have a default.", ["E1310"])]
+        syntax.OP_MEMBER_SPREAD -> [("After a value or module name", "Picks several members at once.", "checks :: v.[length, charset]\nuse numeric.[clamp, abs]", "On a value you get a list of those members; after `use` each name comes into scope.", ["E0961"])]
+        syntax.OP_TRY_SUFFIX -> [
+            ("After a type", "`T?` is an optional value: it holds a `T` or nothing (`None`).", "fn find(id: Int) -> Entry? { … }\nentry :: find(7) ?? return", "Handle the missing case with `??`, `?.` or an `if` check before using the value.", ["E0308", "E0047"]),
+            ("After a call, followed by a note in parentheses", "Adds a note to any failure that passes through this call.", "raw :: read_raw()?(\"reading the config\")\nreturn Ok(raw)", "On success nothing changes; on failure the caller sees the failure with the note attached.", [])]
+        syntax.OP_RANGE -> [("Between two whole numbers", "A range from the first number to the last, both included.", "loop i in 1..3 { print(i) }", "The loop sees 1, 2 and 3. Use `..<` to leave out the last number.", ["E0364"])]
+        syntax.OP_RANGE_EXCLUSIVE -> [("Between two whole numbers", "A range that stops just before the last number.", "loop i in 0..<3 { print(i) }", "The loop sees 0, 1 and 2. The range is empty when the start is not less than the end.", [])]
+        syntax.OP_UNIFIED_ARROW -> [("After parameters, a pattern, or a loop head", "Points to the result: a function's return type, or the value or statement of a lambda, match arm, or loop body.", "fn twice(n: Int) -> Int { n * 2 }\nloop value in values -> print(value)", "Write `-[IO]>` instead of `->` to state which effects a function may use.", [])]
+        syntax.OP_PLUS -> [("Between two numbers", "Adds the numbers.", "total :: price + tax", "Both numbers are unchanged; the sum is a new value.", [])]
+        syntax.OP_MINUS -> [
+            ("Between two numbers", "Subtracts the right number from the left one.", "change :: paid - price", "Both numbers are unchanged.", []),
+            ("Before a number", "Negates the number.", "below :: -5\nflipped :: -below", "", [])]
+        syntax.OP_STAR -> [
+            ("Between two numbers", "Multiplies the numbers.", "area :: width * height", "Both numbers are unchanged.", []),
+            ("Alone in a parameter list", "Starts the label-only parameters: callers must name each argument after it.", "fn draw(size: Int, *, color: String) { … }\ndraw(3, color: \"red\")", "", [])]
+        syntax.OP_SLASH -> [
+            ("Between two numbers", "Divides the left number by the right one. Whole numbers drop the fraction (7 / 2 is 3); `/%` rounds down instead.", "half :: total / 2", "Both numbers are unchanged. `%%` gives the matching remainder.", []),
+            ("Alone in a parameter list", "Ends the position-only parameters: callers pass them without names.", "fn show(n: Int, /) { print(\"{n}\") }\nshow(5)", "", [])]
+        syntax.OP_SLASH_PERCENT -> [("Between two whole numbers", "Divides and rounds down, toward negative infinity.", "rows :: -7 /% 2", "Here `rows` is -4. `%` gives the matching remainder.", [])]
+        syntax.OP_PERCENT -> [("Between two whole numbers", "Modulo: the answer takes the divisor's sign, so -7 % 2 is 1.", "slot :: index % size", "It pairs with `/%`.", [])]
+        syntax.OP_PERCENT_PERCENT -> [("Between two whole numbers", "Remainder: the answer takes the dividend's sign, so -7 %% 2 is -1.", "left_over :: total %% 3", "It pairs with `/`.", [])]
+        syntax.OP_PIPE -> [
+            ("Between types or patterns", "Either alternative is accepted.", "fn load(path: String) -> Config (IOError | ParseError)! { … }", "Code that handles the result must cover every alternative.", []),
+            ("Between two whole numbers", "Bitwise OR: each result bit is 1 where either number has a 1.", "mode :: READ | WRITE", "Both numbers are unchanged.", [])]
+        syntax.OP_SHL -> [("Between two whole numbers", "Shifts the left number's bits left by the right number of places.", "eight :: 1 << 3", "", [])]
+        syntax.OP_SHR -> [("Between two whole numbers", "Shifts the left number's bits right by the right number of places.", "two :: 16 >> 3", "", [])]
+        syntax.OP_AND -> [("Between two conditions", "True when both are true. The right side runs only when the left is true.", "if ready && count > 0 { start() }", "", [])]
+        syntax.OP_OR -> [("Between two conditions", "True when either is true. The right side runs only when the left is false.", "if empty || closed { return }", "", [])]
+        syntax.OP_NOT -> [
+            ("Before a condition", "Flips true and false.", "if !done { keep_going() }", "", []),
+            ("After an error type in a signature", "`E!` marks the errors a function can fail with; `(A | B)!` lists several.", "fn parse(text: String) -> Int ParseError! { … }\nvalue :: parse(input) ?? 0", "A failure passes to the caller on its own; handle it where you want with `??`.", ["E0405"])]
+        syntax.OP_EQ -> [("Between two values", "True when the values are equal.", "if answer == 42 { print(\"found\") }", "`=` assigns; `==` only compares.", [])]
+        syntax.OP_NE -> [("Between two values", "True when the values differ.", "if value != None { use(value) }", "", [])]
+        syntax.OP_LT -> [
+            ("Between two values", "True when the left value is smaller.", "if age < 18 { print(\"minor\") }", "", []),
+            ("After a type or function name", "Opens a list of type arguments, closed by `>`.", "names :: List<String>.new()\n(sender, receiver) :: channel<Int>()", "", [])]
+        syntax.OP_GT -> [
+            ("Between two values", "True when the left value is larger.", "if score > best { best = score }", "", []),
+            ("After type arguments", "Closes a list of type arguments opened by `<`.", "cache :: Map<String, Int>.new()", "", [])]
+        syntax.OP_LE -> [("Between two values", "True when the left value is smaller or equal.", "if count <= limit { add() }", "", [])]
+        syntax.OP_GE -> [("Between two values", "True when the left value is larger or equal.", "if total >= 100 { print(\"free shipping\") }", "", [])]
+        syntax.OP_COMPARE -> [("Between two values", "Compares in one step and gives an `Ordering`: `.Less`, `.Equal` or `.Greater`.", "order :: left <=> right", "Match on the `Ordering` to handle each case.", [])]
+        syntax.OP_PLUS_EQ -> [("After a mutable name", "Adds to the name in place: `x += 1` is `x = x + 1`.", "count := 0\ncount += 1", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_MINUS_EQ -> [("After a mutable name", "Subtracts from the name in place: `x -= 1` is `x = x - 1`.", "lives := 3\nlives -= 1", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_STAR_EQ -> [("After a mutable name", "Multiplies the name in place: `x *= 2` is `x = x * 2`.", "size := 4\nsize *= 2", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_SLASH_EQ -> [("After a mutable name", "Divides the name in place: `x /= 2` is `x = x / 2`.", "size := 8\nsize /= 2", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_SLASH_PERCENT_EQ -> [("After a mutable name", "Divides the name in place, rounding down: `x /%= 2` is `x = x /% 2`.", "step := -7\nstep /%= 2", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_PERCENT_EQ -> [("After a mutable name", "Replaces the name with its modulo: `x %= 3` is `x = x % 3`.", "slot := 10\nslot %= 3", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_PERCENT_PERCENT_EQ -> [("After a mutable name", "Replaces the name with its remainder: `x %%= 3` is `x = x %% 3`.", "rest := -7\nrest %%= 3", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_AMP_EQ -> [("After a mutable name", "Bitwise AND in place: `x &= m` is `x = x & m`.", "flags := 7\nflags &= 3", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_PIPE_EQ -> [("After a mutable name", "Bitwise OR in place: `x |= m` is `x = x | m`.", "flags := 1\nflags |= 4", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_CARET_EQ -> [("After a mutable name", "Raises the name to a power in place: `x ^= 2` is `x = x ^ 2`.", "side := 3\nside ^= 2", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_TILDE_PIPE -> [("Between two whole numbers", "Bitwise exclusive OR: each result bit is 1 where exactly one number has a 1.", "toggled :: flags ~| 1", "Both numbers are unchanged. Prefix `~` alone still means copy.", [])]
+        syntax.OP_TILDE_PIPE_EQ -> [("After a mutable name", "Bitwise exclusive OR in place: `x ~|= m` is `x = x ~| m`.", "flags := 5\nflags ~|= 1", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_SHL_EQ -> [("After a mutable name", "Shifts the name's bits left in place: `x <<= 1` is `x = x << 1`.", "bits := 1\nbits <<= 3", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_SHR_EQ -> [("After a mutable name", "Shifts the name's bits right in place: `x >>= 1` is `x = x >> 1`.", "bits := 16\nbits >>= 3", COMPOUND_AFTER, ["E0111"])]
+        syntax.OP_FALLBACK -> [("After an optional or fallible value", "Supplies what to use when the left side is missing (`None`) or failed: a value, or a way out such as `return`, `break`, `next` or `panic(…)`.", "port :: env_port() ?? 8080\nuser :: load_user() ?? return", "The result is a plain value, no longer optional. Inside a fallback after a failure, `err` names the failure.", ["E0405", "E0408"])]
+        syntax.OP_OPTIONAL_CHAIN -> [("After an optional value", "Reads a field or calls a method only when the value is there; it stops at the first missing link.", "city :: user?.address?.city\nname :: user?.display_name()", "The result is optional (`T?`), so handle the missing case with `??`.", ["E0047"])]
+        syntax.OP_NAMED_CTOR -> [
+            ("After a type name", "Builds a value by naming its fields. Without a type name, the type comes from context.", "origin :: Point{x: 0, y: 0}\nmove_to({x: 3, y: 4})", "", []),
+            ("After a field or parameter type", "`T{value}` gives the field or parameter a default.", "fn greet(name: String{\"world\"}) { print(\"hello, {name}\") }\ngreet()", "Callers may leave that argument out.", ["E2414"])]
+        syntax.TYPE_FIXED_SIZE_SEP -> [
+            ("Before a name", "Applies a marker to what follows, such as `#Test`; `#[A, B]` applies several.", "#Test(\"adds\") {\n    assert_eq(1 + 1, 2)\n}", "Run `jet explain #Name` to read what a marker does.", []),
+            ("Inside a list type", "`[T#N]` is a list of exactly N items.", "fn mix(color: [Int#3]) -> Int { color[0] }", "The length is fixed: `push` and `pop` are errors, and a constant index past the end is caught before the program runs.", ["E0964", "E0965"]),
+            ("After a package name", "Pins an exact package version.", "json#1.2.0", "", [])]
+        else -> []
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:798
+fn meanings(token: String, row_kind: SyntaxDictionaryKind) -> [SyntaxMeaning] {
+    selected :: curated(token)
+    if !selected.is_empty() {
+        result := [SyntaxMeaning]{}
+        loop (position, text, example, afterwards, codes) in selected {
+            &result.push(SyntaxMeaning{position: position, text: text, example: example, afterwards: afterwards, related_codes: codes})
+        }
+        return result
+    }
+    (text, example) :: if token == syntax.MARKER_LIVE {
+        ("Marks a block that takes input directly from the terminal.", "#Live { input() }")
+    } else if row_kind == {
+        .Keyword -> ("The Jet keyword `" + token + "`.", token + " …")
+        .Marker -> ("The marker `#" + token + "`.", "#" + token + " …")
+        .Operator -> ("The operator `" + token + "`.", "left " + token + " right")
+        .Sigil -> ("The sigil `" + token + "`.", "name " + token + " value")
+        .Literal -> ("The literal `" + token + "`.", token)
+        .Type -> ("The built-in type `" + token + "`.", token)
+        .Builtin -> ("The built-in `" + token + "`.", token)
+    }
+    [SyntaxMeaning{position: "", text: text, example: example, afterwards: "", related_codes: []}]
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:846
+pub fn display(row: SyntaxDictionaryRow) -> String {
+    if row.kind == .Marker { "#" + row.token } else { row.token }
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:854
+fn source_decisions() -> [(String, (String, String))] {
+    SOURCES :: prep { [
+        include_str("crates/jet-foundation/src/Syntax.rs"),
+        include_str("crates/jet-foundation/src/Syntax/core_surface.rs"),
+        include_str("crates/jet-foundation/src/Syntax/effects_surface.rs"),
+        include_str("crates/jet-foundation/src/Syntax/math_layout.rs"),
+        include_str("crates/jet-foundation/src/Syntax/markers.rs"),
+        include_str("crates/jet-foundation/src/Syntax/package_files.rs"),
+        include_str("crates/jet-foundation/src/Syntax/jetpack_config.rs"),
+        include_str("crates/jet-foundation/src/Syntax/predicates.rs")
+    ] }
+    out := [(String, (String, String))]{}
+    loop source in SOURCES {
+        comments := ""
+        inherited_comments := ""
+        loop line in source.lines() {
+            trimmed := line.trim() // #4303
+            if trimmed.starts_with("//") { comments += trimmed + "\n"; next }
+            rest :: trimmed.strip_prefix("pub const ") ?? { comments = ""; inherited_comments = ""; next }
+            (name, rhs) :: rest.split_once(":") ?? { comments = ""; next }
+            (_, value_rest) :: rhs.split_once("= \"") ?? { comments = ""; next }
+            (value, _) :: value_rest.split_once("\"") ?? { comments = ""; next }
+            decision :: decision_id(trimmed) ?? comment_decision(comments) ?? decision_id(inherited_comments) ?? "Syntax.rs"
+            if !comments.is_empty() -> inherited_comments = comments
+            name := name.trim() // #4303
+            &out.push((value, (name, decision)))
+            comments = ""
+        }
+    }
+    out
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:907
+fn decision_id(text: String) -> String? {
+    loop word in text.split(|ch| !ch.is_ascii_alphanumeric() && ch != '-') {
+        if word.starts_with("D-") -> return Val(word)
+        if word.starts_with("S") || word.starts_with("M") || word.starts_with("U") {
+            digits := true
+            loop ch in word[1..].chars() { if !ch.is_ascii_digit() -> digits = false }
+            if digits -> return Val(word)
+        }
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:917
+fn comment_decision(text: String) -> String? {
+    latest := None as String?
+    loop line in text.lines() { if id :: decision_id(line) -> latest = Val(id) }
+    latest
+}
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:921
+fn levenshtein(left: String, right: String) -> Int {
+    right_chars :: right.chars().collect()
+    row := [Int]{}
+    loop index in 0..right_chars.len() { &row.push(index) }
+    loop (i, left_ch) in left.chars().enumerate() {
+        next_row := [Int]{i + 1}
+        loop (j, right_ch) in right_chars.enumerate() {
+            &next_row.push(if left_ch == right_ch { row[j] } else { 1 + row[j].min(row[j + 1]).min(next_row[j]) })
+        }
+        row = ^next_row
+    }
+    row[right_chars.len()]
+}

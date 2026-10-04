@@ -1,0 +1,1804 @@
+// PORT-PENDING 2003 crates-jet-codegen-src-codegen-mirrust-slice-3601: crates/jet-codegen/src/Codegen/MIRRust.rs:3601-5400
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS                     (source.id, (source, lines))
+//RS                 })
+//RS                 .collect(),
+//RS             function_positions: {
+//RS                 let mut positions = HashMap::with_capacity(program.functions.len());
+//RS                 for (position, function) in program.functions.iter().enumerate() {
+//RS                     positions.entry(function.id).or_insert(position);
+//RS                 }
+//RS                 positions
+//RS             },
+//RS             field_positions: {
+//RS                 let mut positions = HashMap::with_capacity(program.fields.len());
+//RS                 for (position, row) in program.fields.iter().enumerate() {
+//RS                     positions.entry(row.id).or_insert(position);
+//RS                 }
+//RS                 positions
+//RS             },
+//RS             function_indexes: std::cell::RefCell::new(HashMap::new()),
+//RS             closure_parents: std::cell::OnceCell::new(),
+//RS         };
+//RS         for function in &program.functions {
+//RS             let roots = emitter.plan_partial_moves(function);
+//RS             if !roots.is_empty() {
+//RS                 emitter.partial_moves.insert(function.id, roots);
+//RS             }
+//RS             let shared = emitter.plan_shared_capture_locals(function);
+//RS             if !shared.is_empty() {
+//RS                 emitter.shared_capture_locals.insert(function.id, shared);
+//RS             }
+//RS             let moves = emitter.plan_move_facts(function);
+//RS             if !moves.single_use.is_empty() || !moves.payload_groups.is_empty() {
+//RS                 emitter.move_facts.insert(function.id, moves);
+//RS             }
+//RS         }
+//RS         emitter
+//RS     }
+//RS 
+//RS     /// D-SHAPE-PLACE1=A: a list write parameter that receives a range window,
+//RS     /// directly (`fill(&values[1..3])`) or through a caller's own window
+//RS     /// parameter passed onward, is emitted as `&mut [T]` so the callee edits
+//RS     /// the owner's storage in place. Sema admits a range window only for a
+//RS     /// parameter proven length-preserving, so such a body never grows the
+//RS     /// list; whole-list callers still pass `&mut Vec<T>`, which coerces.
+//RS     fn collect_window_params(program: &MirProgram) -> BTreeSet<(MirFunctionId, usize)> {
+//RS         let mut function_positions = HashMap::with_capacity(program.functions.len());
+//RS         for (position, function) in program.functions.iter().enumerate() {
+//RS             function_positions.entry(function.id).or_insert(position);
+//RS         }
+//RS         let mut windows = BTreeSet::new();
+//RS         loop {
+//RS             let before = windows.len();
+//RS             for function in &program.functions {
+//RS                 // Built on the function's first write argument: place rows by
+//RS                 // ID and the parameter index each `Parameter` value reads.
+//RS                 let mut lookups: Option<(HashMap<MirPlaceId, &MirPlace>, HashMap<MirValueId, usize>)> =
+//RS                     None;
+//RS                 for instruction in function.blocks.iter().flat_map(|block| block.instructions.iter()) {
+//RS                     let MirOperation::Call { callee, args, .. } = &instruction.operation else {
+//RS                         continue;
+//RS                     };
+//RS                     let target = match callee {
+//RS                         MirCallee::User(id)
+//RS                         | MirCallee::Associated { function: id, .. }
+//RS                         | MirCallee::Method { function: id, .. } => *id,
+//RS                         _ => continue,
+//RS                     };
+//RS                     let Some(target_function) = function_positions
+//RS                         .get(&target)
+//RS                         .map(|position| &program.functions[*position])
+//RS                     else {
+//RS                         continue;
+//RS                     };
+//RS                     for (position, arg) in args.iter().enumerate() {
+//RS                         if arg.access != MirAccess::Write {
+//RS                             continue;
+//RS                         }
+//RS                         let (places, parameters) = lookups.get_or_insert_with(|| {
+//RS                             let mut places = HashMap::with_capacity(function.places.len());
+//RS                             for place in &function.places {
+//RS                                 places.entry(place.id).or_insert(place);
+//RS                             }
+//RS                             let mut parameters = HashMap::new();
+//RS                             for definition in
+//RS                                 function.blocks.iter().flat_map(|block| block.instructions.iter())
+//RS                             {
+//RS                                 if let (Some(result), MirOperation::Parameter { index, .. }) =
+//RS                                     (definition.result, &definition.operation)
+//RS                                 {
+//RS                                     parameters.entry(result).or_insert(*index);
+//RS                                 }
+//RS                             }
+//RS                             (places, parameters)
+//RS                         });
+//RS                         let Some(place) = arg.place.and_then(|id| places.get(&id).copied()) else {
+//RS                             continue;
+//RS                         };
+//RS                         let window = match (place.projections.last(), &place.base) {
+//RS                             (Some(MirProjection::Range { .. }), _) => true,
+//RS                             (None, MirPlaceBase::Parameter(value)) => parameters
+//RS                                 .get(value)
+//RS                                 .is_some_and(|index| windows.contains(&(function.id, *index))),
+//RS                             _ => false,
+//RS                         };
+//RS                         if let (true, Some(param)) = (window, target_function.params.get(position)) {
+//RS                             if matches!(param.ty.kind(), MirTypeKind::List(_)) {
+//RS                                 windows.insert((target, param.index));
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if windows.len() == before {
+//RS                 return windows;
+//RS             }
+//RS         }
+//RS     }
+//RS     fn type_identity_from_instances(
+//RS         instances: &BTreeMap<MirTypeId, &'a MirType>,
+//RS         ty: &MirType,
+//RS     ) -> MirTypeId {
+//RS         if let Some(id) = ty.identity {
+//RS             if instances.contains_key(&id) {
+//RS                 return id;
+//RS             }
+//RS             panic!("MIR type identity {:?} has no instance row", id);
+//RS         }
+//RS         instances
+//RS             .iter()
+//RS             .find(|(_, instance)| instance.same_checked_type(ty))
+//RS             .map(|(id, _)| *id)
+//RS             .unwrap_or_else(|| panic!("MIR structural type has no canonical instance"))
+//RS     }
+//RS 
+//RS     fn collect_type_fields(def: &MirTypeDef, fields: &mut BTreeMap<MirFieldId, String>) {
+//RS         let leaf = def
+//RS             .key
+//RS             .rsplit_once("::")
+//RS             .map(|(_, leaf)| leaf)
+//RS             .or_else(|| def.key.rsplit_once('.').map(|(_, leaf)| leaf))
+//RS             .unwrap_or(def.key.as_str());
+//RS         let native = has_native_type_projection(&def.key)
+//RS             || ((def.key.starts_with("<corelib>/")
+//RS                 || (!def.key.contains("::") && !def.key.contains('.')))
+//RS                 && matches!(
+//RS                     leaf,
+//RS                     "KeyRef"
+//RS                         | "KeyStatus"
+//RS                         | "MutationPlan"
+//RS                         | "Rotation"
+//RS                         | "VaultError"
+//RS                         | "VaultWrite"
+//RS                         | "WrappedImportPlan"
+//RS                 ));
+//RS         let field_name = |field: &MirField| {
+//RS             if native {
+//RS                 field.name.clone()
+//RS             } else {
+//RS                 mangle(&field.name)
+//RS             }
+//RS         };
+//RS         match &def.kind {
+//RS             MirTypeDefKind::Struct {
+//RS                 fields: declared, ..
+//RS             } => {
+//RS                 for field in declared {
+//RS                     fields.insert(field.id, field_name(field));
+//RS                 }
+//RS             }
+//RS             MirTypeDefKind::Enum { variants, .. } => {
+//RS                 for variant in variants {
+//RS                     if let MirVariantPayload::Named(declared) = &variant.payload {
+//RS                         for field in declared {
+//RS                             fields.insert(field.id, field_name(field));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             MirTypeDefKind::Distinct { .. }
+//RS             | MirTypeDefKind::Alias { .. }
+//RS             | MirTypeDefKind::UnitFamily { .. } => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn selected_for_target(&self, function: &MirFunction) -> bool {
+//RS         match self.config.target_kind {
+//RS             MirRustTarget::Native => function.target_applicability.rust_aot,
+//RS             MirRustTarget::WebWasm => {
+//RS                 function.target_applicability.web
+//RS                     && function.web_bucket == Some(jet_foundation::WebPartition::WebBucket::Wasm)
+//RS             }
+//RS         }
+//RS     }
+//RS     fn coverage_enabled(&self) -> bool {
+//RS         self.artifact.mode == MirArtifactBuildMode::Coverage
+//RS     }
+//RS     fn coverage_for(&self, function: &MirFunction) -> bool {
+//RS         self.coverage_enabled()
+//RS             && function.kind == MirFunctionKind::Jet
+//RS             && !self.test_functions.contains(&function.id)
+//RS     }
+//RS     fn impl_selected_for_target(&self, implementation: &MirImplDef) -> bool {
+//RS         self.target_applicable(implementation.target_applicability)
+//RS     }
+//RS     fn target_applicable(&self, applicability: MirTargetApplicability) -> bool {
+//RS         match self.config.target_kind {
+//RS             MirRustTarget::Native => {
+//RS                 if self.artifact.target != MirArtifactTarget::RustAot {
+//RS                     panic!("MIR Rust native adapter selected a non-Rust artifact target");
+//RS                 }
+//RS                 applicability.rust_aot
+//RS             }
+//RS             MirRustTarget::WebWasm => {
+//RS                 if self.artifact.target != MirArtifactTarget::Web {
+//RS                     panic!("MIR Rust web adapter selected a non-web artifact target");
+//RS                 }
+//RS                 applicability.web
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn module_selected(&self, module: MirModuleId) -> bool {
+//RS         self.artifact.modules.contains(&module)
+//RS     }
+//RS 
+//RS     fn function_name(&self, id: MirFunctionId) -> String {
+//RS         self.functions
+//RS             .get(&id)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| panic!("MIR function ID {:?} has no function row", id))
+//RS     }
+//RS 
+//RS     fn has_test_scope(&self, function: &MirFunction) -> bool {
+//RS         function
+//RS             .blocks
+//RS             .iter()
+//RS             .flat_map(|block| &block.instructions)
+//RS             .any(|instruction| {
+//RS                 matches!(
+//RS                     &instruction.operation,
+//RS                     MirOperation::ScopeEnter {
+//RS                         test_member: Some(_),
+//RS                         ..
+//RS                     }
+//RS                 )
+//RS             })
+//RS     }
+//RS 
+//RS     fn has_expected_test_scope(&self, function: &MirFunction) -> bool {
+//RS         function
+//RS             .blocks
+//RS             .iter()
+//RS             .flat_map(|block| &block.instructions)
+//RS             .any(|instruction| {
+//RS                 matches!(
+//RS                     &instruction.operation,
+//RS                     MirOperation::ScopeEnter {
+//RS                         test_member: Some(MirTestScopeMember::ExpectFail { .. }),
+//RS                         ..
+//RS                     }
+//RS                 )
+//RS             })
+//RS     }
+//RS 
+//RS     fn expected_scope_exit_blocks(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         states: &BTreeMap<MirBlockId, Vec<MirScopeId>>,
+//RS     ) -> BTreeMap<MirScopeId, MirBlockId> {
+//RS         let mut exits = BTreeMap::new();
+//RS         // A scope member can have early-return exits in addition to its
+//RS         // canonical join block. Runtime-stop recovery must resume at the
+//RS         // join, not at an early error return whose values are unavailable.
+//RS         for block in &function.blocks {
+//RS             if !matches!(&block.terminator, MirTerminator::Jump { .. }) {
+//RS                 continue;
+//RS             }
+//RS             for instruction in &block.instructions {
+//RS                 let MirOperation::ScopeExit { scope } = &instruction.operation else {
+//RS                     continue;
+//RS                 };
+//RS                 if matches!(
+//RS                     self.test_scope_member(function, *scope),
+//RS                     Some(MirTestScopeMember::ExpectFail { .. })
+//RS                 ) {
+//RS                     exits.entry(*scope).or_insert(block.id);
+//RS                 }
+//RS             }
+//RS         }
+//RS         for block in &function.blocks {
+//RS             for instruction in &block.instructions {
+//RS                 let MirOperation::ScopeExit { scope } = &instruction.operation else {
+//RS                     continue;
+//RS                 };
+//RS                 if matches!(
+//RS                     self.test_scope_member(function, *scope),
+//RS                     Some(MirTestScopeMember::ExpectFail { .. })
+//RS                 ) {
+//RS                     exits.entry(*scope).or_insert(block.id);
+//RS                 }
+//RS             }
+//RS         }
+//RS         for scope in &function.scopes {
+//RS             if !matches!(
+//RS                 self.test_scope_member(function, scope.id),
+//RS                 Some(MirTestScopeMember::ExpectFail { .. })
+//RS             ) || exits.contains_key(&scope.id)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             if let Some(block) = function.blocks.iter().find(|block| {
+//RS                 matches!(&block.terminator, MirTerminator::Return { .. })
+//RS                     && states
+//RS                         .get(&block.id)
+//RS                         .is_some_and(|active| active.contains(&scope.id))
+//RS             }) {
+//RS                 exits.insert(scope.id, block.id);
+//RS             }
+//RS         }
+//RS         exits
+//RS     }
+//RS 
+//RS     fn test_scope_block_states(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS     ) -> BTreeMap<MirBlockId, Vec<MirScopeId>> {
+//RS         let mut entry = BTreeMap::new();
+//RS         let mut exits = BTreeMap::new();
+//RS         entry.insert(function.entry, Vec::new());
+//RS         let mut pending = vec![function.entry];
+//RS         let positions = block_positions(function);
+//RS         while let Some(block_id) = pending.pop() {
+//RS             let Some(position) = positions.get(&block_id) else {
+//RS                 continue;
+//RS             };
+//RS             let block = &function.blocks[*position];
+//RS             let mut active = entry.get(&block_id).cloned().unwrap_or_default();
+//RS             for instruction in &block.instructions {
+//RS                 match &instruction.operation {
+//RS                     MirOperation::ScopeEnter { scope, .. }
+//RS                         if self.test_scope_member(function, *scope).is_some() =>
+//RS                     {
+//RS                         active.push(*scope);
+//RS                     }
+//RS                     MirOperation::ScopeExit { scope }
+//RS                         if self.test_scope_member(function, *scope).is_some() =>
+//RS                     {
+//RS                         if let Some(index) = active.iter().rposition(|active| active == scope) {
+//RS                             active.remove(index);
+//RS                         }
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             exits.insert(block_id, active.clone());
+//RS             for target in block.terminator.targets() {
+//RS                 match entry.get(&target).cloned() {
+//RS                     None => {
+//RS                         entry.insert(target, active.clone());
+//RS                         pending.push(target);
+//RS                     }
+//RS                     Some(previous) if previous == active => {}
+//RS                     Some(previous) => {
+//RS                         let merged = previous
+//RS                             .iter()
+//RS                             .zip(&active)
+//RS                             .take_while(|(left, right)| left == right)
+//RS                             .map(|(scope, _)| *scope)
+//RS                             .collect::<Vec<_>>();
+//RS                         if merged != previous {
+//RS                             entry.insert(target, merged);
+//RS                             pending.push(target);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         exits
+//RS     }
+//RS 
+//RS     fn is_sentry_scope(&self, function: &MirFunction, scope_id: MirScopeId) -> bool {
+//RS         self.scope_row(function, scope_id)
+//RS             .is_some_and(|scope| matches!(scope.kind, MirScopeKind::Unsafe | MirScopeKind::Policy))
+//RS     }
+//RS     fn is_deadline_scope(&self, function: &MirFunction, scope_id: MirScopeId) -> bool {
+//RS         self.scope_row(function, scope_id)
+//RS             .is_some_and(|scope| scope.kind == MirScopeKind::Context && scope.deadline.is_some())
+//RS     }
+//RS 
+//RS     fn scope_operation_expression(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         scope_id: MirScopeId,
+//RS         enter: bool,
+//RS     ) -> String {
+//RS         let root = &self.config.root_prefix;
+//RS         let scope = self.scope_row(function, scope_id);
+//RS         if let Some(scope) = scope {
+//RS             match scope.kind {
+//RS                 MirScopeKind::Shield if enter => {
+//RS                     return "jet_scheduler_shield_enter()".to_string();
+//RS                 }
+//RS                 MirScopeKind::Shield => {
+//RS                     return "jet_scheduler_shield_leave()".to_string();
+//RS                 }
+//RS                 MirScopeKind::Context if enter => {
+//RS                     if let Some(deadline) = scope.deadline {
+//RS                         // The deadline leaf takes milliseconds as a machine
+//RS                         // word: the checked `Int` narrows once, as every
+//RS                         // declared-`Int` native argument does.
+//RS                         let value = self.value_transfer(deadline);
+//RS                         let value = if matches!(self.value_type(function, deadline).kind(), MirTypeKind::Int) {
+//RS                             self.native_int_argument(value, None)
+//RS                         } else {
+//RS                             value
+//RS                         };
+//RS                         return format!("jet_ctx_push_deadline({value})");
+//RS                     }
+//RS                 }
+//RS                 MirScopeKind::Context => {
+//RS                     return format!("/* MIR context scope exit {} */", scope_id.0);
+//RS                 }
+//RS                 MirScopeKind::Unsafe if enter => {
+//RS                     let gate = function.unsafe_gate.as_ref();
+//RS                     let file = scope
+//RS                         .facts
+//RS                         .get("sentry_file")
+//RS                         .or_else(|| gate.map(|gate| &gate.file))
+//RS                         .map(String::as_str)
+//RS                         .unwrap_or("");
+//RS                     let line = scope
+//RS                         .facts
+//RS                         .get("sentry_line")
+//RS                         .and_then(|line| line.parse::<u32>().ok())
+//RS                         .or_else(|| gate.map(|gate| gate.line))
+//RS                         .unwrap_or(0);
+//RS                     let enabled = scope
+//RS                         .facts
+//RS                         .get("sentry_enabled")
+//RS                         .and_then(|value| value.parse::<bool>().ok())
+//RS                         .or_else(|| gate.map(|gate| gate.enabled))
+//RS                         .unwrap_or(true);
+//RS                     let fenced = scope
+//RS                         .facts
+//RS                         .get("sentry_fenced")
+//RS                         .and_then(|value| value.parse::<bool>().ok())
+//RS                         .or_else(|| gate.map(|gate| gate.fenced))
+//RS                         .unwrap_or(false);
+//RS                     let reason = scope
+//RS                         .name
+//RS                         .as_deref()
+//RS                         .or_else(|| gate.map(|gate| gate.reason.as_str()))
+//RS                         .unwrap_or("");
+//RS                     let constructor = if fenced {
+//RS                         "jet_sentry_fenced_scope"
+//RS                     } else {
+//RS                         "jet_sentry_scope"
+//RS                     };
+//RS                     return format!(
+//RS                         "jet_mem::{constructor}({enabled}, {file:?}, {line}, {reason:?})"
+//RS                     );
+//RS                 }
+//RS                 MirScopeKind::Policy if enter => {
+//RS                     let enabled = scope
+//RS                         .facts
+//RS                         .get("sentry_enabled")
+//RS                         .and_then(|value| value.parse::<bool>().ok())
+//RS                         .unwrap_or(false);
+//RS                     return format!("jet_mem::jet_sentry_policy_scope({enabled})");
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         let member = self.test_scope_member(function, scope_id);
+//RS         if enter {
+//RS             return match member {
+//RS                 Some(MirTestScopeMember::ExpectFail { expected_code }) => {
+//RS                     let expected = expected_code
+//RS                         .as_deref()
+//RS                         .map(|code| format!("Some({code:?})"))
+//RS                         .unwrap_or_else(|| "None".to_string());
+//RS                     format!(
+//RS                         "{root}jet_test_expect_fail_enter_scope({}, {expected})",
+//RS                         scope_id.0
+//RS                     )
+//RS                 }
+//RS                 Some(MirTestScopeMember::Timeout { duration }) => {
+//RS                     format!(
+//RS                         "{root}jet_test_timeout_enter({}, ({}).ns)",
+//RS                         scope_id.0,
+//RS                         self.value_owned(*duration)
+//RS                     )
+//RS                 }
+//RS                 _ => format!("/* MIR scope enter {} */", scope_id.0),
+//RS             };
+//RS         }
+//RS         match member {
+//RS             Some(MirTestScopeMember::ExpectFail { expected_code }) => {
+//RS                 let expected = expected_code
+//RS                     .as_deref()
+//RS                     .map(|code| format!("Some({code:?})"))
+//RS                     .unwrap_or_else(|| "None".to_string());
+//RS                 format!(
+//RS                     "if {root}jet_test_expect_fail_leave_scope({}).is_none() {{ {root}jet_test_expect_fail_unmet({expected}); }}",
+//RS                     scope_id.0
+//RS                 )
+//RS             }
+//RS             Some(MirTestScopeMember::Timeout { .. }) => format!(
+//RS                 "if let Some((__jet_elapsed, __jet_limit)) = {root}jet_test_timeout_leave({}) {{ if __jet_elapsed > __jet_limit {{ {root}jet_test_timeout_failure(__jet_elapsed, __jet_limit); }} }}",
+//RS                 scope_id.0
+//RS             ),
+//RS             Some(MirTestScopeMember::Skip { whole_test }) => {
+//RS                 format!("{root}jet_test_skip_scope({whole_test})")
+//RS             }
+//RS             _ => format!("/* MIR scope exit {} */", scope_id.0),
+//RS         }
+//RS     }
+//RS 
+//RS     fn emit_test_scope_exits(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         scopes: &[MirScopeId],
+//RS         out: &mut String,
+//RS         indent: usize,
+//RS     ) {
+//RS         for scope in scopes.iter().rev() {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}{};",
+//RS                 "",
+//RS                 self.scope_operation_expression(function, *scope, false),
+//RS                 indent = indent
+//RS             );
+//RS         }
+//RS     }
+//RS     /// Native fix-and-continue is deliberately a typed, debug-only callable
+//RS     /// boundary.  Release artifacts keep the ordinary direct Rust calls and
+//RS     /// do not carry a mutable dispatch table.
+//RS     fn native_dispatch_eligible(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         method_form: Option<&MirFunctionForm>,
+//RS         serde_codec: Option<MirSerdeCodec>,
+//RS         return_override: Option<&String>,
+//RS     ) -> bool {
+//RS         if self.config.target_kind != MirRustTarget::Native
+//RS             || self.is_no_os()
+//RS             || self.has_test_scope(function)
+//RS             || !self.config.execution.emit_debug_linemap
+//RS             || method_form.is_some()
+//RS             || serde_codec.is_some()
+//RS             || return_override.is_some()
+//RS             || !matches!(function.form, MirFunctionForm::TopLevel)
+//RS             || function.kind != MirFunctionKind::Jet
+//RS             || !function.generic_params.is_empty()
+//RS             || !function.capture_params.is_empty()
+//RS             || function.generator.is_some()
+//RS             || function.is_unsafe
+//RS             || function.params.iter().any(|param| {
+//RS                 param.access != MirAccess::Read || !self.native_dispatch_type_supported(&param.ty)
+//RS             })
+//RS             || !self.native_dispatch_type_supported(&function.return_type)
+//RS         {
+//RS             return false;
+//RS         }
+//RS         // A candidate shared object may not bring a second effect/resource
+//RS         // universe into the stopped process.  Leaf, effect-free callables are
+//RS         // the only ones whose code can be loaded without a state transfer.
+//RS         function.effects.direct.is_empty()
+//RS             && function.effects.solved.is_empty()
+//RS             && function.effects.call_edges.is_empty()
+//RS     }
+//RS 
+//RS     fn native_dispatch_type_supported(&self, ty: &MirType) -> bool {
+//RS         matches!(
+//RS             ty.kind(),
+//RS             MirTypeKind::Float
+//RS                 | MirTypeKind::Bool
+//RS                 | MirTypeKind::Char
+//RS                 | MirTypeKind::IntN { .. }
+//RS                 | MirTypeKind::Float32
+//RS         ) && matches!(ty.layout.abi, MirAbi::Scalar(_))
+//RS     }
+//RS     /// D-TEST1 / #2502: generated property inputs are admitted only for the
+//RS     /// same closed scalar/container family checked by sema. The emitter keeps
+//RS     /// this mirror deliberately structural: MIR has already erased source
+//RS     /// aliases, while unsupported nominal carriers remain an explicit E0613
+//RS     /// unavailable case rather than reaching a `<T as JetGen>` compile error.
+//RS     fn property_param_generator_supported(&self, ty: &MirType) -> bool {
+//RS         match ty.kind() {
+//RS             MirTypeKind::Int
+//RS             | MirTypeKind::Float
+//RS             | MirTypeKind::Bool
+//RS             | MirTypeKind::String
+//RS             | MirTypeKind::Char
+//RS             | MirTypeKind::Float32
+//RS             | MirTypeKind::IntN { .. }
+//RS             | MirTypeKind::InlineRange { .. } => true,
+//RS             MirTypeKind::List(inner)
+//RS             | MirTypeKind::Option(inner)
+//RS             | MirTypeKind::FixedList { elem: inner, .. } => {
+//RS                 self.property_param_generator_supported(inner)
+//RS             }
+//RS             MirTypeKind::Map { .. }
+//RS             | MirTypeKind::Shared(_)
+//RS             | MirTypeKind::Result { .. }
+//RS             | MirTypeKind::Fn(_)
+//RS             | MirTypeKind::SendFn { .. }
+//RS             | MirTypeKind::Apply { .. }
+//RS             | MirTypeKind::TraitObject(_)
+//RS             | MirTypeKind::Tuple(_)
+//RS             | MirTypeKind::Tagged { .. }
+//RS             | MirTypeKind::Quantity { .. }
+//RS             | MirTypeKind::Union(_)
+//RS             | MirTypeKind::Measure(_) => false,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Return the one unavailable reason that should be surfaced for a
+//RS     /// property case instead of emitting a runner that guesses at its inputs.
+//RS     fn property_generation_unavailable_reason(&self, function: &MirFunction) -> Option<String> {
+//RS         if !function.effects.direct.is_empty()
+//RS             || !function.effects.solved.is_empty()
+//RS             || !function.effects.call_edges.is_empty()
+//RS         {
+//RS             return Some(format!(
+//RS                 "E0613: property test `{}` requires an effect-free callable; \
+//RS                  generated inputs are unavailable for effectful code",
+//RS                 function.name
+//RS             ));
+//RS         }
+//RS         function
+//RS             .params
+//RS             .iter()
+//RS             .find(|param| !self.property_param_generator_supported(&param.ty))
+//RS             .map(|param| {
+//RS                 format!(
+//RS                     "E0613: property test `{}` parameter `{}` has no built-in generator \
+//RS                      for `{}`",
+//RS                     function.name,
+//RS                     param.name,
+//RS                     self.rust_type(&param.ty)
+//RS                 )
+//RS             })
+//RS     }
+//RS 
+//RS     fn native_dispatch_signature(&self, function: &MirFunction) -> (String, String, String) {
+//RS         let params = function
+//RS             .params
+//RS             .iter()
+//RS             .map(|param| format!("{}: {}", mangle(&param.name), self.parameter_type(param)))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let args = function
+//RS             .params
+//RS             .iter()
+//RS             .map(|param| mangle(&param.name))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         (params, args, self.rust_type(&function.return_type))
+//RS     }
+//RS 
+//RS     fn native_artifact_suffix(&self) -> String {
+//RS         self.artifact_identity
+//RS             .program_digest
+//RS             .iter()
+//RS             .map(|byte| format!("{byte:02x}"))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn native_entry_name(&self, function: &MirFunction) -> String {
+//RS         format!(
+//RS             "__jet_native_entry_{}_{}",
+//RS             self.native_artifact_suffix(),
+//RS             self.function_name(function.id)
+//RS         )
+//RS     }
+//RS 
+//RS     fn native_install_name(&self, function: &MirFunction) -> String {
+//RS         format!(
+//RS             "__jet_native_install_{}_{}",
+//RS             self.native_artifact_suffix(),
+//RS             self.function_name(function.id)
+//RS         )
+//RS     }
+//RS 
+//RS     fn native_signature_digest(&self, function: &MirFunction) -> String {
+//RS         let (params, _, ret) = self.native_dispatch_signature(function);
+//RS         jet_foundation::SHA256::sha256_hex(format!("{params}->{ret}").as_bytes())
+//RS     }
+//RS 
+//RS     fn native_body_digest(&self, function: &MirFunction) -> String {
+//RS         jet_foundation::SHA256::sha256_hex(format!("{:?}", function.blocks).as_bytes())
+//RS     }
+//RS 
+//RS     fn emit_native_dispatch(&self, function: &MirFunction, out: &mut String) {
+//RS         let (params, args, ret) = self.native_dispatch_signature(function);
+//RS         let implementation = format!("__jet_native_impl_{}", self.function_name(function.id));
+//RS         let entry = self.native_entry_name(function);
+//RS         let install = self.native_install_name(function);
+//RS         self.emit_callable_named(function, out, None, Some(&implementation), None, None);
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "// jet-native-callable: schema=1 artifact={} name={} jet={} entry={} install={} signature={} body={} state=none",
+//RS             self.native_artifact_suffix(),
+//RS             self.function_name(function.id),
+//RS             function.name,
+//RS             entry,
+//RS             install,
+//RS             self.native_signature_digest(function),
+//RS             self.native_body_digest(function),
+//RS         );
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "#[doc(hidden)]\nstatic __JET_NATIVE_SLOT_{}: ::std::sync::LazyLock<::std::sync::RwLock<extern \"C\" fn({params}) -> {ret}>> = ::std::sync::LazyLock::new(|| ::std::sync::RwLock::new({entry}));",
+//RS             self.function_name(function.id)
+//RS         );
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "#[inline(never)]\nfn {}({params}) -> {ret} {{\n    let __jet_call = *__JET_NATIVE_SLOT_{}.read().unwrap_or_else(|__jet_poison| __jet_poison.into_inner());\n    __jet_call({args})\n}}",
+//RS             self.function_name(function.id),
+//RS             self.function_name(function.id),
+//RS         );
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "#[no_mangle]\n#[inline(never)]\npub extern \"C\" fn {entry}({params}) -> {ret} {{ {implementation}({args}) }}\n"
+//RS         );
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "#[no_mangle]\n#[inline(never)]\npub extern \"C\" fn {install}(candidate: extern \"C\" fn({params}) -> {ret}) {{\n    *__JET_NATIVE_SLOT_{}.write().unwrap_or_else(|__jet_poison| __jet_poison.into_inner()) = candidate;\n}}\n",
+//RS             self.function_name(function.id),
+//RS         );
+//RS     }
+//RS     fn function_row(&self, id: MirFunctionId) -> &MirFunction {
+//RS         self.function_positions
+//RS             .get(&id)
+//RS             .map(|position| &self.program.functions[*position])
+//RS             .unwrap_or_else(|| panic!("MIR function ID {:?} has no function row", id))
+//RS     }
+//RS 
+//RS     /// The lookup tables of `function` (a `program.functions` row).
+//RS     fn function_index(&self, function: &MirFunction) -> std::rc::Rc<FunctionIndex> {
+//RS         if let Some(index) = self.function_indexes.borrow().get(&function.id) {
+//RS             return index.clone();
+//RS         }
+//RS         let index = std::rc::Rc::new(FunctionIndex::new(function));
+//RS         self.function_indexes
+//RS             .borrow_mut()
+//RS             .insert(function.id, index.clone());
+//RS         index
+//RS     }
+//RS 
+//RS     /// The `function.blocks` row of `block`.
+//RS     fn block_row<'f>(&self, function: &'f MirFunction, block: MirBlockId) -> Option<&'f MirBasicBlock> {
+//RS         let (position, _) = *self.function_index(function).blocks.get(&block)?;
+//RS         Some(&function.blocks[position])
+//RS     }
+//RS 
+//RS     /// The `function.scopes` row of `scope`.
+//RS     fn scope_row<'f>(&self, function: &'f MirFunction, scope: MirScopeId) -> Option<&'f MirScope> {
+//RS         let position = *self.function_index(function).scopes.get(&scope)?;
+//RS         Some(&function.scopes[position])
+//RS     }
+//RS 
+//RS     /// The `function.places` row of `place`.
+//RS     fn place_row<'f>(&self, function: &'f MirFunction, place: MirPlaceId) -> Option<&'f MirPlace> {
+//RS         let position = *self.function_index(function).places.get(&place)?;
+//RS         Some(&function.places[position])
+//RS     }
+//RS 
+//RS     /// The test member of the first `ScopeEnter` of `scope` that carries one
+//RS     /// (`MirFunction::test_scope_member`, through the function index).
+//RS     fn test_scope_member<'f>(
+//RS         &self,
+//RS         function: &'f MirFunction,
+//RS         scope: MirScopeId,
+//RS     ) -> Option<&'f MirTestScopeMember> {
+//RS         let (block, position) = *self.function_index(function).test_members.get(&scope)?;
+//RS         match &function.blocks[block].instructions[position].operation {
+//RS             MirOperation::ScopeEnter { test_member, .. } => test_member.as_ref(),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn coverage_branch_id(&self, function: &MirFunction, block: MirBlockId, arm: usize) -> String {
+//RS         let index = self.function_index(function);
+//RS         if let Some(&(position, base)) = index.blocks.get(&block) {
+//RS             if arm < terminator_branch_count(&function.blocks[position].terminator) {
+//RS                 return format!("{}#branch{}", function.key, base + arm + 1);
+//RS             }
+//RS         }
+//RS         panic!(
+//RS             "MIR coverage branch has no ordinal for function {:?}, block {:?}, arm {}",
+//RS             function.id, block, arm
+//RS         );
+//RS     }
+//RS 
+//RS     fn coverage_branch_rows(&self) -> Vec<(String, String)> {
+//RS         let mut rows = Vec::new();
+//RS         for function in &self.program.functions {
+//RS             if !self.coverage_for(function)
+//RS                 || !self.module_selected(function.module_id)
+//RS                 || !self.selected_for_target(function)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             let mut ordinal = 0;
+//RS             for block in &function.blocks {
+//RS                 let count = terminator_branch_count(&block.terminator);
+//RS                 for _ in 0..count {
+//RS                     ordinal += 1;
+//RS                     rows.push((
+//RS                         format!("{}#branch{ordinal}", function.key),
+//RS                         function.name.clone(),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         rows
+//RS     }
+//RS     fn foreign_name(&self, id: MirForeignId) -> String {
+//RS         self.foreigns
+//RS             .get(&id)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| panic!("MIR foreign ID {:?} has no foreign row", id))
+//RS     }
+//RS 
+//RS     fn type_name(&self, id: MirTypeId) -> String {
+//RS         if let Some(name) = self
+//RS             .history_type_def(id)
+//RS             .and_then(|def| self.history_native_type_name(&def.key))
+//RS         {
+//RS             return name;
+//RS         }
+//RS         if let Some(def) = self.program.types.iter().find(|def| def.id == id) {
+//RS             if has_native_type_projection(&def.key) {
+//RS                 return self.rust_apply_type(&MirNominalRef::from_name(&def.key), &[]);
+//RS             }
+//RS         }
+//RS 
+//RS         // Anonymous unions keep their structural MIR identity so their member
+//RS         // shape remains available to the adapters. Resolve that identity back
+//RS         // to the sema-generated enum declaration before rendering Rust.
+//RS         if let Some(instance) = self.type_instances.get(&id) {
+//RS             if let MirTypeKind::Union(members) = instance.kind() {
+//RS                 if let Some(definition) = self.program.types.iter().find(|def| def.id == id) {
+//RS                     return mangle_path(&definition.key);
+//RS                 }
+//RS                 let union_name = format!(
+//RS                     "__JetUnion_{}",
+//RS                     members
+//RS                         .iter()
+//RS                         .map(|member| {
+//RS                             let raw = member.name();
+//RS                             if !raw.is_empty()
+//RS                                 && raw.chars().all(|character| {
+//RS                                     character.is_ascii_alphanumeric() || character == '_'
+//RS                                 })
+//RS                             {
+//RS                                 return raw;
+//RS                             }
+//RS                             let mut tag = String::with_capacity(raw.len() + 2);
+//RS                             tag.push_str("M_");
+//RS                             for character in raw.chars() {
+//RS                                 if character.is_ascii_alphanumeric() {
+//RS                                     tag.push(character);
+//RS                                 } else {
+//RS                                     tag.push('_');
+//RS                                 }
+//RS                             }
+//RS                             tag
+//RS                         })
+//RS                         .collect::<Vec<_>>()
+//RS                         .join("_")
+//RS                 );
+//RS                 let union_def = self
+//RS                     .program
+//RS                     .types
+//RS                     .iter()
+//RS                     .find(|def| def.name == union_name || def.key == union_name)
+//RS                     .or_else(|| {
+//RS                         self.program.types.iter().find(|def| {
+//RS                             if !def.name.starts_with("__JetUnion_") {
+//RS                                 return false;
+//RS                             }
+//RS                             let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
+//RS                                 return false;
+//RS                             };
+//RS                             variants.len() == members.len()
+//RS                                 && variants.iter().zip(members).all(|(variant, member)| {
+//RS                                     variant.name == member.name()
+//RS                                         && matches!(
+//RS                                             &variant.payload,
+//RS                                             MirVariantPayload::Single(payload)
+//RS                                                 if payload.same_checked_type(member)
+//RS                                         )
+//RS                                 })
+//RS                         })
+//RS                     });
+//RS                 if let Some(def) = union_def {
+//RS                     return mangle_path(&def.key);
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.types
+//RS             .get(&id)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| panic!("MIR type ID {:?} has no type row", id))
+//RS     }
+//RS     /// D-UNIONTYPE1=A: every spelling of an anonymous union (the bare
+//RS     /// structural key or a module-qualified sema declaration) names the one
+//RS     /// carrier row MIR lowering keeps for it.
+//RS     fn anonymous_union_definition(&self, name: &str) -> Option<&'a MirTypeDef> {
+//RS         let leaf = name.rsplit("::").next()?;
+//RS         if !leaf.starts_with("__JetUnion_") {
+//RS             return None;
+//RS         }
+//RS         self.program
+//RS             .types
+//RS             .iter()
+//RS             .find(|definition| definition.key == leaf)
+//RS     }
+//RS 
+//RS     fn push_generic_scope(&self, params: &'a [MirGenericParam]) {
+//RS         self.generic_scopes.borrow_mut().push(params);
+//RS     }
+//RS 
+//RS     fn pop_generic_scope(&self) {
+//RS         self.generic_scopes
+//RS             .borrow_mut()
+//RS             .pop()
+//RS             .expect("MIR generic scope stack underflow");
+//RS     }
+//RS 
+//RS     fn generic_params_for_type(&self, ty: &MirType) -> &'a [MirGenericParam] {
+//RS         let Some(definition) = self.structural_type_def_for(ty) else {
+//RS             return &[];
+//RS         };
+//RS         let binds_definition_params = match ty.kind() {
+//RS             MirTypeKind::Apply { args, .. } if args.is_empty() => true,
+//RS             MirTypeKind::Apply { args, .. } if args.len() == definition.generic_params.len() => {
+//RS                 args.iter()
+//RS                     .zip(&definition.generic_params)
+//RS                     .all(|(arg, param)| {
+//RS                         matches!(
+//RS                             arg.kind(),
+//RS                             MirTypeKind::Apply { name, args }
+//RS                                 if args.is_empty() && name.name == param.name
+//RS                         )
+//RS                     })
+//RS             }
+//RS             _ => false,
+//RS         };
+//RS         if binds_definition_params {
+//RS             &definition.generic_params
+//RS         } else {
+//RS             &[]
+//RS         }
+//RS     }
+//RS 
+//RS     fn is_active_generic_param(&self, name: &str) -> bool {
+//RS         if self
+//RS             .generic_scopes
+//RS             .borrow()
+//RS             .iter()
+//RS             .rev()
+//RS             .any(|scope| scope.iter().any(|param| param.name == name))
+//RS         {
+//RS             return true;
+//RS         }
+//RS         self.history_current_function.get().is_some_and(|function| {
+//RS             self.function_row(function)
+//RS                 .generic_params
+//RS                 .iter()
+//RS                 .any(|param| param.name == name)
+//RS         })
+//RS     }
+//RS 
+//RS     fn nominal_name(&self, name: &str) -> String {
+//RS         if self.is_active_generic_param(name) {
+//RS             return mangle(name);
+//RS         }
+//RS         if let Some(rust) = crate::Codegen::core_crypto_rust_type_name(name) {
+//RS             let ffi = self
+//RS                 .config
+//RS                 .execution
+//RS                 .ffi
+//RS                 .map(|link| link.crate_name.as_str())
+//RS                 .unwrap_or("jet_ffi");
+//RS             return format!("{ffi}::{rust}");
+//RS         }
+//RS         if has_native_type_projection(name) {
+//RS             return self.rust_apply_type(&MirNominalRef::from_name(name), &[]);
+//RS         }
+//RS         if let Some(root_name) = crate::Codegen::file_handle_rust_type(name) {
+//RS             return format!("{}{}", self.config.root_prefix, root_name);
+//RS         }
+//RS         if name == "ScopeGuard" {
+//RS             return "_".to_string();
+//RS         }
+//RS         // The Shared wait condition is a Prelude handle, not a declared
+//RS         // nominal; keep the AOT spelling in lockstep with Context::rust_type.
+//RS         if name == jet_foundation::Syntax::TYPE_CONDITION && !self.types_by_name.contains_key(name) {
+//RS             return format!("{}jet_std::JetCondition", self.config.root_prefix);
+//RS         }
+//RS         // D-LAYOUT1: layout variables and constraints are runtime handles in
+//RS         // the root `jet_layout` module; a user type of that name still wins.
+//RS         if let Some(rust) = crate::Codegen::layout_handle_rust_type(name)
+//RS             .filter(|_| !self.types_by_name.contains_key(name))
+//RS         {
+//RS             return format!("{}{rust}", self.config.root_prefix);
+//RS         }
+//RS         if matches!(name, "KeyStatus" | "VaultError") {
+//RS             let ffi = self
+//RS                 .config
+//RS                 .execution
+//RS                 .ffi
+//RS                 .map(|link| link.crate_name.as_str())
+//RS                 .unwrap_or("jet_ffi");
+//RS             let rust = if name == "KeyStatus" {
+//RS                 "JetVaultKeyStatus"
+//RS             } else {
+//RS                 "JetVaultError"
+//RS             };
+//RS             return format!("{ffi}::{rust}");
+//RS         }
+//RS         self.types_by_name
+//RS             .get(name)
+//RS             .cloned()
+//RS             .or_else(|| {
+//RS                 crate::Codegen::core_crypto_rust_type_name(name).map(|name| {
+//RS                     let ffi = self
+//RS                         .config
+//RS                         .execution
+//RS                         .ffi
+//RS                         .map(|link| link.crate_name.as_str())
+//RS                         .unwrap_or("jet_ffi");
+//RS                     format!("{ffi}::{name}")
+//RS                 })
+//RS             })
+//RS             .unwrap_or_else(|| panic!("MIR nominal type {name:?} has no declaration row"))
+//RS     }
+//RS 
+//RS     fn canonical_type(&self, ty: &MirType) -> &MirType {
+//RS         let id = ty
+//RS             .identity
+//RS             .unwrap_or_else(|| panic!("MIR type has no canonical identity"));
+//RS         self.type_instances
+//RS             .get(&id)
+//RS             .copied()
+//RS             .unwrap_or_else(|| panic!("MIR type identity {:?} has no instance row", id))
+//RS     }
+//RS 
+//RS     fn trait_object_type(&self, id: MirTypeId) -> &MirType {
+//RS         let ty =
+//RS             self.type_instances.get(&id).copied().unwrap_or_else(|| {
+//RS                 panic!("MIR trait coercion target {:?} has no instance row", id)
+//RS             });
+//RS         if !matches!(ty.kind(), MirTypeKind::TraitObject(bounds) if bounds.len() == 1) {
+//RS             panic!("MIR trait coercion target {:?} is not a single-trait object", id);
+//RS         }
+//RS         ty
+//RS     }
+//RS 
+//RS     fn type_identity(&self, ty: &MirType) -> MirTypeId {
+//RS         if let Some(id) = ty.identity {
+//RS             if self.type_instances.contains_key(&id) {
+//RS                 return id;
+//RS             }
+//RS             panic!("MIR type identity {:?} has no instance row", id);
+//RS         }
+//RS         self.type_instances
+//RS             .iter()
+//RS             .find(|(_, instance)| instance.same_checked_type(ty))
+//RS             .map(|(id, _)| *id)
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "MIR structural type {:?} has no canonical instance",
+//RS                     ty.display_name()
+//RS                 )
+//RS             })
+//RS     }
+//RS     fn columnar_type_def(&self, ty: &MirType) -> Option<&MirTypeDef> {
+//RS         let ty = if ty.identity.is_some() {
+//RS             self.canonical_type(ty)
+//RS         } else {
+//RS             ty
+//RS         };
+//RS         let name = match ty.kind() {
+//RS             MirTypeKind::Apply { name, .. } => &name.name,
+//RS             MirTypeKind::Int
+//RS             | MirTypeKind::Float
+//RS             | MirTypeKind::Bool
+//RS             | MirTypeKind::String
+//RS             | MirTypeKind::Char
+//RS             | MirTypeKind::Map { .. }
+//RS             | MirTypeKind::List(_)
+//RS             | MirTypeKind::Shared(_)
+//RS             | MirTypeKind::Option(_)
+//RS             | MirTypeKind::Result { .. }
+//RS             | MirTypeKind::Fn(_)
+//RS             | MirTypeKind::SendFn { .. }
+//RS             | MirTypeKind::TraitObject(_)
+//RS             | MirTypeKind::Tuple(_)
+//RS             | MirTypeKind::FixedList { .. }
+//RS             | MirTypeKind::IntN { .. }
+//RS             | MirTypeKind::InlineRange { .. }
+//RS             | MirTypeKind::Float32
+//RS             | MirTypeKind::Tagged { .. }
+//RS             | MirTypeKind::Quantity { .. }
+//RS             | MirTypeKind::Union(_)
+//RS             | MirTypeKind::Measure(_) => return None,
+//RS         };
+//RS         self.program.types.iter().find(|definition| {
+//RS             definition.layout == Some(MirStructLayout::Columnar)
+//RS                 && (definition.key == name.as_str() || definition.name == name.as_str())
+//RS         })
+//RS     }
+//RS 
+//RS     fn is_columnar_list(&self, ty: &MirType) -> bool {
+//RS         match ty.kind() {
+//RS             MirTypeKind::List(inner) => self.columnar_type_def(inner).is_some(),
+//RS             MirTypeKind::Int
+//RS             | MirTypeKind::Float
+//RS             | MirTypeKind::Bool
+//RS             | MirTypeKind::String
+//RS             | MirTypeKind::Char
+//RS             | MirTypeKind::Map { .. }
+//RS             | MirTypeKind::Shared(_)
+//RS             | MirTypeKind::Option(_)
+//RS             | MirTypeKind::Result { .. }
+//RS             | MirTypeKind::Fn(_)
+//RS             | MirTypeKind::SendFn { .. }
+//RS             | MirTypeKind::Apply { .. }
+//RS             | MirTypeKind::TraitObject(_)
+//RS             | MirTypeKind::Tuple(_)
+//RS             | MirTypeKind::FixedList { .. }
+//RS             | MirTypeKind::IntN { .. }
+//RS             | MirTypeKind::InlineRange { .. }
+//RS             | MirTypeKind::Float32
+//RS             | MirTypeKind::Tagged { .. }
+//RS             | MirTypeKind::Quantity { .. }
+//RS             | MirTypeKind::Union(_)
+//RS             | MirTypeKind::Measure(_) => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn field_name(&self, id: MirFieldId) -> String {
+//RS         self.fields
+//RS             .get(&id)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| panic!("MIR field ID {:?} has no field row", id))
+//RS     }
+//RS     fn native_host_field_type(&self, id: MirFieldId) -> Option<&MirType> {
+//RS         let row = self
+//RS             .program
+//RS             .fields
+//RS             .iter()
+//RS             .find(|row| row.id == id)
+//RS             .unwrap_or_else(|| panic!("MIR field ID {:?} has no field row", id));
+//RS         let Some(definition) = self.program.types.iter().find(|def| def.id == row.owner) else {
+//RS             return None;
+//RS         };
+//RS         let native = has_native_type_projection(&definition.key);
+//RS         native.then_some(&row.field.ty)
+//RS     }
+//RS     fn native_email_field(&self, id: MirFieldId) -> Option<(&'static str, &MirField)> {
+//RS         let row = self.program.fields.iter().find(|row| row.id == id)?;
+//RS         let owner = self.program.types.iter().find(|def| def.id == row.owner)?;
+//RS         Some((canonical_core_email_rust_type_name(&owner.key)?, &row.field))
+//RS     }
+//RS 
+//RS     fn is_core_http_type(&self, type_id: MirTypeId, leaf: &str) -> bool {
+//RS         let key = &self.type_def(type_id).key;
+//RS         key.starts_with("<corelib>/Core/http::")
+//RS             && key.rsplit_once("::").is_some_and(|(_, name)| name == leaf)
+//RS     }
+//RS     fn is_structural_tuple_type(&self, type_id: MirTypeId) -> bool {
+//RS         self.type_instances
+//RS             .get(&type_id)
+//RS             .is_some_and(|owner| matches!(owner.kind(), MirTypeKind::Tuple(_)))
+//RS     }
+//RS 
+//RS     fn native_http_headers_fields_projection(
+//RS         &self,
+//RS         base: &str,
+//RS         field_id: MirFieldId,
+//RS     ) -> Option<String> {
+//RS         let row = self.program.fields.iter().find(|row| row.id == field_id)?;
+//RS         if self.is_structural_tuple_type(row.owner)
+//RS             || !self.is_core_http_type(row.owner, "Headers")
+//RS             || row.field.name != "fields"
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let MirTypeKind::List(header_type) = row.field.ty.kind() else {
+//RS             panic!("Core HTTP Headers.fields is not a checked list");
+//RS         };
+//RS         let header_type = self.rust_type(header_type);
+//RS         Some(format!(
+//RS             "({base}).source_fields().into_iter().map(|(name, value)| {header_type} {{ name, value }}).collect::<Vec<{header_type}>>()"
+//RS         ))
+//RS     }
+//RS 
+//RS     fn native_http_headers_literal(
+//RS         &self,
+//RS         type_id: MirTypeId,
+//RS         fields: &[(MirFieldId, MirValueId)],
+//RS     ) -> Option<String> {
+//RS         if !self.is_core_http_type(type_id, "Headers") {
+//RS             return None;
+//RS         }
+//RS         let fields = self
+//RS             .named_struct_field_value(type_id, fields, "fields")
+//RS             .unwrap_or_else(|| panic!("Core HTTP Headers literal is missing fields"));
+//RS         Some(format!(
+//RS             "{}::from_source_fields(({fields}).into_iter().map(|header| (header.name, header.value)).collect::<Vec<(String, String)>>())",
+//RS             self.type_name(type_id)
+//RS         ))
+//RS     }
+//RS 
+//RS     fn native_http_error_field_argument(
+//RS         &self,
+//RS         owner: MirTypeId,
+//RS         variant: &str,
+//RS         field: &MirField,
+//RS         value: &str,
+//RS         location: Option<&MirPanicLoc>,
+//RS     ) -> Option<String> {
+//RS         (self.is_core_http_type(owner, "HTTPError")
+//RS             && variant == "BodyTooLarge"
+//RS             && field.name == "limit"
+//RS             && matches!(field.ty.kind(), MirTypeKind::Int))
+//RS         .then(|| self.native_int_argument(value.to_string(), location))
+//RS     }
+//RS 
+//RS     fn native_http_error_field_result(
+//RS         &self,
+//RS         owner: MirTypeId,
+//RS         variant: &str,
+//RS         field: &MirField,
+//RS         value: &str,
+//RS     ) -> Option<String> {
+//RS         if !self.is_core_http_type(owner, "HTTPError")
+//RS             || variant != "BodyTooLarge"
+//RS             || field.name != "limit"
+//RS             || !matches!(field.ty.kind(), MirTypeKind::Int)
+//RS         {
+//RS             return None;
+//RS         }
+//RS         self.native_int_result(value, &field.ty)
+//RS     }
+//RS 
+//RS     fn native_email_struct_field_argument(&self, id: MirFieldId, value: &str) -> Option<String> {
+//RS         let (owner, field) = self.native_email_field(id)?;
+//RS         if owner == "Address"
+//RS             && field.name == "display"
+//RS             && matches!(
+//RS                 field.ty.kind(),
+//RS                 MirTypeKind::Option(inner) if matches!(inner.kind(), MirTypeKind::String)
+//RS             )
+//RS         {
+//RS             Some(format!("({value}).ok()"))
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS     fn native_email_struct_field_result(&self, id: MirFieldId, value: &str) -> Option<String> {
+//RS         let (owner, field) = self.native_email_field(id)?;
+//RS         if owner == "Address"
+//RS             && field.name == "display"
+//RS             && matches!(
+//RS                 field.ty.kind(),
+//RS                 MirTypeKind::Option(inner) if matches!(inner.kind(), MirTypeKind::String)
+//RS             )
+//RS         {
+//RS             Some(format!(
+//RS                 "({value}).ok_or({}JetAbsent)",
+//RS                 self.config.root_prefix
+//RS             ))
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     fn boxed_field(&self, id: MirFieldId) -> bool {
+//RS         let row = self
+//RS             .field_positions
+//RS             .get(&id)
+//RS             .map(|position| &self.program.fields[*position])
+//RS             .unwrap_or_else(|| panic!("MIR field ID {:?} has no field row", id));
+//RS         if self.is_structural_tuple_type(row.owner) {
+//RS             return false;
+//RS         }
+//RS         self.type_def(row.owner)
+//RS             .boxed_edges
+//RS             .iter()
+//RS             .any(|edge| edge == &row.field.name)
+//RS     }
+//RS 
+//RS     fn type_def(&self, id: MirTypeId) -> &MirTypeDef {
+//RS         self.try_type_def(id)
+//RS             .unwrap_or_else(|| panic!("MIR type ID {:?} has no type definition", id))
+//RS     }
+//RS 
+//RS     /// The program's definition row for `id`, or `None` for a type with no
+//RS     /// row (a builtin scalar such as `String`).
+//RS     fn try_type_def(&self, id: MirTypeId) -> Option<&MirTypeDef> {
+//RS         let (id, nominal_name) = match self.type_instances.get(&id).map(|instance| instance.kind())
+//RS         {
+//RS             Some(MirTypeKind::Apply { name, .. }) => (name.id, Some(name.name.as_str())),
+//RS             _ => (id, None),
+//RS         };
+//RS         self.first_type_def_matching([Some(id), None], None)
+//RS             .or_else(|| nominal_name.and_then(|name| self.first_type_def_matching([None, None], Some(name))))
+//RS     }
+//RS 
+//RS     /// The definition row of a nominal impl self type, if the program has one.
+//RS     fn impl_self_type_def(&self, implementation: &MirImplDef) -> Option<&'a MirTypeDef> {
+//RS         let MirTypeKind::Apply { name, .. } = implementation.self_type.kind() else {
+//RS             return None;
+//RS         };
+//RS         self.first_type_def_matching([Some(name.id), None], Some(name.name.as_str()))
+//RS     }
+//RS 
+//RS     /// The first `program.types` row (program order) whose ID is one of
+//RS     /// `ids`, or whose key or name is `label`.
+//RS     fn first_type_def_matching(
+//RS         &self,
+//RS         ids: [Option<MirTypeId>; 2],
+//RS         label: Option<&str>,
+//RS     ) -> Option<&'a MirTypeDef> {
+//RS         let by_id = ids
+//RS             .into_iter()
+//RS             .flatten()
+//RS             .filter_map(|id| self.type_def_by_id.get(&id).copied());
+//RS         let by_label = label
+//RS             .into_iter()
+//RS             .flat_map(|label| {
+//RS                 [
+//RS                     self.type_def_by_key.get(label).copied(),
+//RS                     self.type_def_by_name.get(label).copied(),
+//RS                 ]
+//RS             })
+//RS             .flatten();
+//RS         self.program.types.get(by_id.chain(by_label).min()?)
+//RS     }
+//RS     fn rust_decl_type(&self, definition: &MirTypeDef, edge: &str, ty: &MirType) -> String {
+//RS         let rendered = self.rust_type(ty);
+//RS         if definition
+//RS             .boxed_edges
+//RS             .iter()
+//RS             .any(|candidate| candidate == edge)
+//RS         {
+//RS             format!("Box<{rendered}>")
+//RS         } else {
+//RS             rendered
+//RS         }
+//RS     }
+//RS 
+//RS     fn is_default_err_type(&self, id: MirTypeId) -> bool {
+//RS         self.type_def(id).key == jet_foundation::Syntax::TYPE_ERR
+//RS     }
+//RS 
+//RS     fn named_struct_field_value(
+//RS         &self,
+//RS         type_id: MirTypeId,
+//RS         fields: &[(MirFieldId, MirValueId)],
+//RS         name: &str,
+//RS     ) -> Option<String> {
+//RS         let MirTypeDefKind::Struct {
+//RS             fields: declared, ..
+//RS         } = &self.type_def(type_id).kind
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         let field = declared.iter().find(|field| field.name == name)?;
+//RS         let (_, value) = fields.iter().find(|(id, _)| *id == field.id)?;
+//RS         Some(self.value_move(*value))
+//RS     }
+//RS 
+//RS     fn default_err_constructor(
+//RS         &self,
+//RS         type_id: MirTypeId,
+//RS         fields: &[(MirFieldId, MirValueId)],
+//RS     ) -> String {
+//RS         let root = &self.config.root_prefix;
+//RS         let absent = format!("{root}JetOutcome::Err({root}JetAbsent)");
+//RS         // A Core-layer program spells `String` as `&'static str`, while the
+//RS         // Prelude constructor owns its text; convert only the typed values.
+//RS         let core_text = self.is_core_layer();
+//RS         let message = self
+//RS             .named_struct_field_value(type_id, fields, "message")
+//RS             .map(|message| if core_text { format!("String::from({message})") } else { message })
+//RS             .unwrap_or_else(|| panic!("MIR default Err literal is missing message"));
+//RS         let code = self
+//RS             .named_struct_field_value(type_id, fields, "code")
+//RS             .map(|code| if core_text { format!("({code}).map(String::from)") } else { code })
+//RS             .unwrap_or_else(|| absent.clone());
+//RS         let cause = self
+//RS             .named_struct_field_value(type_id, fields, "cause")
+//RS             .unwrap_or_else(|| absent);
+//RS         // JetErr fields are private; every adapter constructs through this
+//RS         // Prelude function so cause boxing and identity stay in one place.
+//RS         format!("{root}jet_err({message}, {code}, {cause})")
+//RS     }
+//RS 
+//RS     fn rust_struct_literal(
+//RS         &self,
+//RS         type_id: MirTypeId,
+//RS         fields: &[(MirFieldId, MirValueId)],
+//RS         boxed_fields: &[MirFieldId],
+//RS         apply_history: bool,
+//RS     ) -> String {
+//RS         if self.is_default_err_type(type_id) {
+//RS             return self.default_err_constructor(type_id, fields);
+//RS         }
+//RS         if let Some(literal) = self.native_http_headers_literal(type_id, fields) {
+//RS             return literal;
+//RS         }
+//RS         let rust_type_name = self.type_name(type_id);
+//RS         let range_type = rust_type_name.ends_with("JetRange");
+//RS         let net_error_detail = rust_type_name == "JetNetErrorDetail";
+//RS         let form_field_spec = self.type_def(type_id).key == "WebFormFieldSpec";
+//RS         let async_policy = self.type_def(type_id).key == "AsyncPolicy";
+//RS         let data_error = rust_type_name.ends_with("jet_std::DataError");
+//RS         let bespoke_native_fields =
+//RS             range_type || net_error_detail || form_field_spec || async_policy || data_error;
+//RS         let fields = fields
+//RS             .iter()
+//RS             .map(|(field, value)| {
+//RS                 let field_name = self.field_name(*field);
+//RS                 let mut value = self.value_move(*value);
+//RS                 if let Some(converted) = self.native_email_struct_field_argument(*field, &value) {
+//RS                     value = converted;
+//RS                 } else if !bespoke_native_fields {
+//RS                     // A native host record stores Jet `Int` fields as `i64`;
+//RS                     // narrow at construction, mirroring the field-read widen.
+//RS                     if let Some(converted) = self
+//RS                         .native_host_field_type(*field)
+//RS                         .and_then(|ty| self.native_int_input(&value, ty, None))
+//RS                     {
+//RS                         value = converted;
+//RS                     }
+//RS                 }
+//RS                 if data_error && matches!(field_name.as_str(), "row" | "column" | "index") {
+//RS                     let narrowed = self.native_int_argument("__jet_data_index".to_string(), None);
+//RS                     value = format!("({value}).map(|__jet_data_index| {narrowed})");
+//RS                 }
+//RS                 if range_type && matches!(field_name.as_str(), "start" | "end") {
+//RS                     value = self.native_int_argument(value, None);
+//RS                 }
+//RS                 // `AsyncPolicy.capacity` is a public Jet `Int`, while the
+//RS                 // runtime policy stores the bounded host capacity as i64.
+//RS                 // Convert at this single prelude boundary so all tiers retain
+//RS                 // the same checked source carrier.
+//RS                 if async_policy && field_name == "capacity" {
+//RS                     value = self.native_int_argument(value, None);
+//RS                 }
+//RS                 // Prelude descriptors retain native Option at the ABI boundary.
+//RS                 if form_field_spec && matches!(field_name.as_str(), "default" | "group") {
+//RS                     value = format!("({value}).ok()");
+//RS                 }
+//RS                 if net_error_detail {
+//RS                     if let Some(projected) = native_net_error_detail_field(
+//RS                         &rust_type_name,
+//RS                         &field_name,
+//RS                         &value,
+//RS                         |value| self.native_int_argument(value, None),
+//RS                     ) {
+//RS                         value = projected;
+//RS                     }
+//RS                 }
+//RS                 if apply_history {
+//RS                     value = self.history_struct_field_value(type_id, *field, value);
+//RS                 }
+//RS                 // The declaration boxes every recursive edge (`rust_decl_type`), so
+//RS                 // a literal boxes it whether or not the operation lists it.
+//RS                 if boxed_fields.contains(field) || self.boxed_field(*field) {
+//RS                     format!("{field_name}: Box::new({value})")
+//RS                 } else {
+//RS                     format!("{field_name}: {value}")
+//RS                 }
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let private_fields = if form_field_spec {
+//RS             ", parser: None"
+//RS         } else {
+//RS             ""
+//RS         };
+//RS         format!("{} {{ {fields}{private_fields} }}", self.type_name(type_id))
+//RS     }
+//RS 
+//RS     fn prelude_row(&self, id: MirPreludeCallId) -> &MirPreludeCall {
+//RS         self.program
+//RS             .prelude_calls
+//RS             .iter()
+//RS             .find(|row| row.id == id)
+//RS             .unwrap_or_else(|| panic!("MIR Prelude call ID {:?} has no row", id))
+//RS     }
+//RS     fn history_scalar_spec(&self, ty: &MirType) -> Option<(HistoryScalarKind, Option<(i64, i64)>)> {
+//RS         match ty.kind() {
+//RS             MirTypeKind::Int => Some((HistoryScalarKind::Integer, None)),
+//RS             MirTypeKind::Bool => Some((HistoryScalarKind::Boolean, None)),
+//RS             MirTypeKind::String => Some((HistoryScalarKind::Text, None)),
+//RS             MirTypeKind::Char => Some((HistoryScalarKind::Char, None)),
+//RS             MirTypeKind::IntN { signed, .. } => Some((
+//RS                 if *signed {
+//RS                     HistoryScalarKind::SignedInteger
+//RS                 } else {
+//RS                     HistoryScalarKind::UnsignedInteger
+//RS                 },
+//RS                 None,
+//RS             )),
+//RS             MirTypeKind::InlineRange { base, lo, hi } if lo <= hi => self
+//RS                 .history_scalar_spec(base)
+//RS                 .map(|(kind, _)| (kind, Some((*lo, *hi)))),
+//RS             MirTypeKind::Tagged { inner, .. } | MirTypeKind::Quantity { base: inner, .. } => {
+//RS                 self.history_scalar_spec(inner)
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn history_command_type_ids(&self) -> Vec<MirTypeId> {
+//RS         let mut ids = BTreeSet::new();
+//RS         for function in &self.program.functions {
+//RS             for block in &function.blocks {
+//RS                 for instruction in &block.instructions {
+//RS                     let (call, type_args) = match &instruction.operation {
+//RS                         MirOperation::CoreCall {
+//RS                             call, type_args, ..
+//RS                         }
+//RS                         | MirOperation::Call {
+//RS                             callee: MirCallee::Core(call),
+//RS                             type_args,
+//RS                             ..
+//RS                         } => (*call, type_args),
+//RS                         _ => continue,
+//RS                     };
+//RS                     let Some(row) = self.program.core_calls.iter().find(|row| row.id == call)
+//RS                     else {
+//RS                         continue;
+//RS                     };
+//RS                     if row.module != "core.testing" || row.member != "histories" {
+//RS                         continue;
+//RS                     }
+//RS                     let Some(target) = type_args.first() else {
+//RS                         continue;
+//RS                     };
+//RS                     let Some(id) = target.identity.or_else(|| {
+//RS                         target.nominal_name().and_then(|name| {
+//RS                             self.program
+//RS                                 .types
+//RS                                 .iter()
+//RS                                 .find(|definition| {
+//RS                                     definition.name == name || definition.key == name
+//RS                                 })
+//RS                                 .map(|definition| definition.id)
+//RS                         })
+//RS                     }) else {
+//RS                         continue;
+//RS                     };
+//RS                     ids.insert(id);
+//RS                 }
+//RS             }
+//RS         }
+//RS         ids.into_iter().collect()
+//RS     }
+//RS 
+//RS     fn history_type_def(&self, id: MirTypeId) -> Option<&MirTypeDef> {
+//RS         self.program
+//RS             .types
+//RS             .iter()
+//RS             .find(|definition| definition.id == id)
+//RS     }
+//RS 
+//RS     fn resolve_ffi_symbol(&self, symbol: &str) -> String {
+//RS         let Some(symbol) = symbol.strip_prefix("jet_ffi::") else {
+//RS             return symbol.to_string();
+//RS         };
+//RS         let ffi = self
+//RS             .config
+//RS             .execution
+//RS             .ffi
+//RS             .map(|link| link.crate_name.as_str())
+//RS             .unwrap_or("jet_ffi");
+//RS         format!("{ffi}::{symbol}")
+//RS     }
+//RS 
+//RS     fn prelude_symbol(&self, id: MirPreludeCallId) -> String {
+//RS         match &self.prelude_row(id).symbol {
+//RS             MirSymbol::Prelude(symbol) => {
+//RS                 if symbol == "jet_plugin_call"
+//RS                     || symbol.starts_with("jet_crypto_")
+//RS                     || symbol.starts_with("jet_vault_")
+//RS                 {
+//RS                     if let Some(link) = self.config.execution.ffi {
+//RS                         return format!("{}::{}", link.crate_name, symbol);
+//RS                     }
+//RS                 }
+//RS                 self.resolve_ffi_symbol(&format!("{}{}", self.config.root_prefix, symbol))
+//RS             }
+//RS             MirSymbol::Runtime(symbol)
+//RS                 if symbol.starts_with("jet_vault_") || symbol.starts_with("jet_crypto_") =>
+//RS             {
+//RS                 self.resolve_ffi_symbol(&format!("jet_ffi::{symbol}"))
+//RS             }
+//RS             MirSymbol::Runtime(symbol) => self.resolve_ffi_symbol(symbol),
+//RS         }
+//RS     }
+//RS 
+//RS     fn core_symbol(&self, id: MirCoreCallId) -> String {
+//RS         let row = self
+//RS             .program
+//RS             .core_calls
+//RS             .iter()
+//RS             .find(|row| row.id == id)
+//RS             .unwrap_or_else(|| panic!("MIR Core call ID {:?} has no row", id));
+//RS         match row.symbol {
+//RS             CoreCallSymbol::Prelude(symbol) => format!("{}{}", self.config.root_prefix, symbol),
+//RS             CoreCallSymbol::Rust(symbol) if symbol.starts_with("jet_vault_") => {
+//RS                 self.resolve_ffi_symbol(&format!("jet_ffi::{symbol}"))
+//RS             }
+//RS             CoreCallSymbol::Rust(symbol) => self.resolve_ffi_symbol(symbol),
+//RS         }
+//RS     }
+//RS     fn core_row(&self, id: MirCoreCallId) -> &MirCoreCall {
+//RS         self.program
+//RS             .core_calls
+//RS             .iter()
+//RS             .find(|row| row.id == id)
+//RS             .unwrap_or_else(|| panic!("MIR Core call ID {:?} has no row", id))
+//RS     }
+//RS 
+//RS     fn validate_core_arity(&self, row: &MirCoreCall, args: &[MirCallArg]) {
+//RS         if args.len() < row.arity || args.len() > row.max_arity {
+//RS             panic!(
+//RS                 "MIR Core call {:?} has {} arguments, expected {}..={}",
+//RS                 row.id,
+//RS                 args.len(),
+//RS                 row.arity,
+//RS                 row.max_arity
+//RS             );
+//RS         }
+//RS         if row.borrow_mask.len() < row.arity {
+//RS             panic!(
+//RS                 "MIR Core call {:?} borrow mask has {} entries for its minimum {} arguments",
+//RS                 row.id,
+//RS                 row.borrow_mask.len(),
+//RS                 row.arity
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     fn core_direct_call(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         id: MirCoreCallId,
+//RS         args: &[MirCallArg],
+//RS         type_args: &[MirType],
+//RS     ) -> String {
+//RS         let row = self.core_row(id);
+//RS         self.validate_core_arity(row, args);
+//RS         if row.module == "core.testing" && row.member == "histories" {
+//RS             return self.history_call_expression(function, args, type_args, &row.borrow_mask);
+//RS         }
+//RS         self.call_symbol_for_function(
+//RS             function,
+//RS             self.core_symbol(id),
+//RS             args,
+//RS             type_args,
+//RS             Some(&row.borrow_mask),
+//RS         )
+//RS     }
+//RS     fn validate_prelude_count(&self, row: &MirPreludeCall, count: usize) {
+//RS         if count < row.signature.arity || count > row.signature.max_arity {
+//RS             panic!(
+//RS                 "MIR Prelude call {:?} ({}.{} -> {}) has {} arguments, expected {}..={}",
+//RS                 row.id,
+//RS                 row.module,
+//RS                 row.member,
+//RS                 row.symbol.name(),
+//RS                 count,
+//RS                 row.signature.arity,
+//RS                 row.signature.max_arity
+//RS             );
+//RS         }
+//RS         if row.signature.borrow_mask.len() != count {
+//RS             panic!(
+//RS                 "MIR Prelude call {:?} borrow mask has {} entries for {} arguments",
+//RS                 row.id,
+//RS                 row.signature.borrow_mask.len(),
+//RS                 count
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate_prelude_arity(&self, row: &MirPreludeCall, args: &[MirCallArg]) {
+//RS         self.validate_prelude_count(row, args.len());
+//RS     }
+//RS     fn append_prelude_context(
+//RS         &self,
+//RS         call: MirPreludeCallId,
+//RS         args: &mut Vec<String>,
+//RS         extras: &[String],
+//RS     ) {
+//RS         let route = self.prelude_row(call);
+//RS         let additional = route
+//RS             .signature
+//RS             .arity
+//RS             .checked_sub(args.len())
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "MIR Prelude call {:?} has fewer arguments than its emitted prefix",
+//RS                     call
+//RS                 )
+//RS             });
+//RS         if additional > extras.len() {
+//RS             panic!(
+//RS                 "MIR Prelude call {:?} requires {} context arguments but MIR supplied {}",
+//RS                 call,
+//RS                 additional,
+//RS                 extras.len()
+//RS             );
+//RS         }
+//RS         args.extend(extras.iter().take(additional).cloned());
+//RS     }
+//RS 
+//RS     fn rust_local_type(&self, ty: &MirType) -> String {
+//RS         if let MirTypeKind::Result { ok, err } = ty.kind() {
+//RS             if let Some(inner) = allocator_view_inner(ok) {
+//RS                 if err.name().starts_with("AllocError") {
+//RS                     return format!(
+//RS                         "{}JetOutcome<{}, {}>",
+//RS                         self.config.root_prefix,
+//RS                         self.rust_type(inner),
+//RS                         self.rust_type(err)
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         let previous = self.history_callback_lifetime.replace("'_");
+//RS         let rendered = self.rust_type(ty);
+//RS         self.history_callback_lifetime.set(previous);
+//RS         rendered
+//RS     }
+//RS 
+//RS     fn rust_parameter_type(&self, ty: &MirType) -> String {
+//RS         if self.history_callback_lifetime.get() == "'__jet_callback" {
+//RS             self.rust_type(ty)
+//RS         } else {
+//RS             self.rust_local_type(ty)
+//RS         }
+//RS     }
+//RS 
+//RS     fn rust_type(&self, ty: &MirType) -> String {
+//RS         let ty = if ty.identity.is_some() {
+//RS             self.canonical_type(ty)
+//RS         } else {
+//RS             ty
+//RS         };
+//RS         match ty.kind() {
+//RS             MirTypeKind::Int => "jet_foundation::Numeric::JetInt".to_string(),
+//RS             MirTypeKind::Float => "f64".to_string(),
+//RS             MirTypeKind::Bool => "bool".to_string(),
+//RS             MirTypeKind::String => {
+//RS                 if self.is_core_layer() {
+//RS                     "&'static str".to_string()
+//RS                 } else {
+//RS                     "String".to_string()
+//RS                 }
+//RS             }
+//RS             MirTypeKind::Char => "char".to_string(),
+//RS             MirTypeKind::List(inner) => {
+//RS                 if self.columnar_type_def(inner).is_some() {
+//RS                     format!(
+//RS                         "{}JetColumnList<{}>",
+//RS                         self.config.root_prefix,
+//RS                         self.rust_type(inner)
+//RS                     )
+//RS                 } else {
+//RS                     format!("Vec<{}>", self.rust_type(inner))
+//RS                 }
+//RS             }
+//RS             MirTypeKind::Map { key, value } => format!(
+//RS                 "{}JetMap<{}, {}>",
+//RS                 self.config.root_prefix,
+//RS                 self.rust_type(key),
+//RS                 self.rust_type(value)
+//RS             ),
+//RS             MirTypeKind::Shared(inner) => format!(
+//RS                 "{}jet_std::JetShared<{}>",
+//RS                 self.config.root_prefix,
+//RS                 self.rust_type(inner)
+//RS             ),
+//RS             MirTypeKind::Option(inner) => format!(
+//RS                 "{}JetOutcome<{}, {}JetAbsent>",
+// END-PORT-PENDING 2003 crates/jet-codegen/src/Codegen/MIRRust.rs:3601-5400
+

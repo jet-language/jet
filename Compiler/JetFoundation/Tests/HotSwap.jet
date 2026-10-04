@@ -1,0 +1,17 @@
+use JetFoundation.HotSwap.[HotSwapCompatibility, StateRetentionFact, HotSwapDecision]
+// Rust: crates/jet-foundation/src/HotSwap.rs:20,25,52,60,70,102,107,112
+// No original inline tests; semantic facts are consumed without reinterpretation.
+#Test("hot swap verdict retention and deterministic recheck facts") {
+    assert(HotSwapCompatibility.Compatible.is_compatible())
+    assert(HotSwapCompatibility.Compatible.reason() == None)
+    bad :: HotSwapCompatibility.Incompatible("layout changed")
+    assert(!bad.is_compatible() && bad.reason() == Val("layout changed"))
+    assert(StateRetentionFact.preserve("main::x").is_preserved())
+    assert(!StateRetentionFact.fresh("main::x", "type changed").is_preserved())
+    decision :: HotSwapDecision{module: "main", compatibility: bad, changed: [String]{"x"},
+        changed_functions: [], state: [], schema_migrations: [], rechecked_items: [], change_facts: []}
+        .with_rechecked_items([String]{"z", "a", "a"})
+    assert(decision.requires_restart() && !decision.is_compatible())
+    assert(decision.rechecked().collect() == [String]{"a", "z"})
+    assert(decision.schema_migrations().is_empty() && decision.change_facts().is_empty() && decision.state_facts().is_empty())
+}

@@ -1,0 +1,1804 @@
+// PORT-PENDING 2008 crates-jet-codegen-src-codegen-mirrust-slice-12601: crates/jet-codegen/src/Codegen/MIRRust.rs:12601-14400
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS                 };
+//RS                 payload
+//RS                     .nominal_name()
+//RS                     .map(|name| format!("Some({name:?})"))
+//RS                     .unwrap_or_else(|| "None".to_string())
+//RS             } else {
+//RS                 "None".to_string()
+//RS             };
+//RS             let queue_invoke = if queue_enabled {
+//RS                 format!("Some(__jet_job_queue_{})", job.id.0)
+//RS             } else {
+//RS                 "None".to_string()
+//RS             };
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "        {root}JetJobSpec {{ entry: {root}JetJobEntry {{ name: {:?}, scope: {scope}, schedule: {schedule}, invoke: __jet_job_{} }}, payload_type: {payload_type}, queue_invoke: {queue_invoke}, dispatch: {dispatch}, packages: {packages}, working_directory: {working_directory}, input_paths: {input_paths}, output_paths: {output_paths}, skip: {skip}, cache: {cache}, limits: {limits}, after: {after}, parallel: {}, validate: Some(__jet_job_validate_{}) }},",
+//RS                 job.name,
+//RS                 job.id.0,
+//RS                 job.parallel.max(1),
+//RS                 job.id.0
+//RS             );
+//RS         }
+//RS         let _ = writeln!(out, "];");
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "fn __jet_job_dispatch(__argv: &[String], __service: bool) -> bool {{"
+//RS         );
+//RS         let _ = writeln!(out, "    let __jobs = __JET_JOB_SPECS;");
+//RS         if self
+//RS             .artifact
+//RS             .runtime_parts
+//RS             .contains(&MirRuntimePartId::Services)
+//RS         {
+//RS             out.push_str(&format!(
+//RS                 r#"    let __job_service_endpoint = match {root}jet_services_active_execution_endpoint_if_present() {{
+//RS         Ok(__endpoint) => Ok(__endpoint),
+//RS         Err(__error) => Err(format!("{{__error:?}}")),
+//RS     }};
+//RS     let __job_scope = move || -> Result<Option<{root}JetServiceExecutionScope>, String> {{
+//RS         match &__job_service_endpoint {{
+//RS             Ok(Some(__endpoint)) => {root}jet_services_execution_scope(__endpoint)
+//RS                 .map(Some)
+//RS                 .map_err(|__error| format!("{{__error:?}}")),
+//RS             Ok(None) => Ok(None),
+//RS             Err(__reason) => Err(__reason.clone()),
+//RS         }}
+//RS     }};
+//RS     if {root}jet_job_dispatch_specs(__argv, __jobs, __job_scope.clone()) {{ return true; }}
+//RS     if __service {{
+//RS         {root}jet_job_service_tick_specs_retained(
+//RS             __jobs,
+//RS             __argv.first().map(String::as_str).unwrap_or("program"),
+//RS             __job_scope,
+//RS         );
+//RS     }}
+//RS     false
+//RS }}
+//RS "#,
+//RS                 root = root,
+//RS             ));
+//RS         } else {
+//RS             out.push_str(&format!(
+//RS                 r#"    if {root}jet_job_dispatch_specs(__argv, __jobs, {root}jet_job_no_scope) {{ return true; }}
+//RS     if __service {{
+//RS         {root}jet_job_service_tick_specs_retained(
+//RS             __jobs,
+//RS             __argv.first().map(String::as_str).unwrap_or("program"),
+//RS             {root}jet_job_no_scope,
+//RS         );
+//RS     }}
+//RS     false
+//RS }}
+//RS "#,
+//RS                 root = root,
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     fn emit_harness(&self, out: &mut String) {
+//RS         let Some(harness_id) = self.artifact.harness else {
+//RS             if !self.artifact.jobs.is_empty() {
+//RS                 self.emit_jobs(out);
+//RS             }
+//RS             return;
+//RS         };
+//RS         let harness = self
+//RS             .program
+//RS             .harnesses
+//RS             .iter()
+//RS             .find(|harness| harness.id == harness_id)
+//RS             .unwrap_or_else(|| panic!("MIR harness ID {:?} has no row", harness_id));
+//RS         let root = &self.config.root_prefix;
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "// jet-mir-harness: id={} kind={:?} selected_test={:?} command_override={}",
+//RS             harness.id.0, harness.kind, harness.selected_test, harness.command_override
+//RS         );
+//RS         let mut selected_tests = harness
+//RS             .tests
+//RS             .iter()
+//RS             .copied()
+//RS             .filter(|id| harness.selected_test.is_none_or(|selected| selected == *id))
+//RS             .collect::<Vec<_>>();
+//RS         selected_tests.sort_by_key(|id| {
+//RS             let test = self
+//RS                 .program
+//RS                 .tests
+//RS                 .iter()
+//RS                 .find(|test| test.id == *id)
+//RS                 .unwrap_or_else(|| panic!("MIR test ID {:?} has no row", id));
+//RS             let function = self.function_row(test.function);
+//RS             (&function.module, test.span.start, &test.name)
+//RS         });
+//RS         for test_id in &selected_tests {
+//RS             let test = self
+//RS                 .program
+//RS                 .tests
+//RS                 .iter()
+//RS                 .find(|test| test.id == *test_id)
+//RS                 .unwrap_or_else(|| panic!("MIR test ID {:?} has no row", test_id));
+//RS             let function = self.function_row(test.function);
+//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
+//RS                 panic!("MIR test {:?} targets an unselected function", test.name);
+//RS             }
+//RS             if !matches!(function.form, MirFunctionForm::TopLevel)
+//RS                 || !function.capture_params.is_empty()
+//RS             {
+//RS                 panic!("MIR test {:?} is not a top-level callable", test.name);
+//RS             }
+//RS             if matches!(test.kind, MirTestKind::Unit) && !function.params.is_empty() {
+//RS                 panic!("MIR unit test {:?} has checked parameters", test.name);
+//RS             }
+//RS             if matches!(test.kind, MirTestKind::Property)
+//RS                 && test.generation_unavailable_reason.is_none()
+//RS                 && (function.params.is_empty() || function.params.len() != test.parameters.len())
+//RS             {
+//RS                 panic!(
+//RS                     "MIR property test {:?} has inconsistent checked parameters",
+//RS                     test.name
+//RS                 );
+//RS             }
+//RS             let wrapper = format!("__jet_test_{}", test.id.0);
+//RS             let name_literal = format!("{:?}", test.name);
+//RS             let expected_failure = test.expected_failure;
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "// jet-mir-test: id={} name={} kind={:?} expected_failure={} faults={:?}",
+//RS                 test.id.0, test.name, test.kind, test.expected_failure, test.faults
+//RS             );
+//RS             if matches!(test.kind, MirTestKind::Property) {
+//RS                 if let Some(reason) = test.generation_unavailable_reason.as_deref() {
+//RS                     let reason = format!("E0613: {reason}");
+//RS                     let _ = writeln!(
+//RS                         out,
+//RS                         "fn {wrapper}() -> JetTestOutcome {{ JetTestOutcome {{ name: {name_literal}.to_string(), ok: false, expected_failure: {expected_failure}, skipped: false, stdout: String::new(), stderr: {reason:?}.to_string(), property_cases: Some(0) }} }}"
+//RS                     );
+//RS                     continue;
+//RS                 }
+//RS                 if let Some(reason) = self.property_generation_unavailable_reason(function) {
+//RS                     let _ = writeln!(
+//RS                         out,
+//RS                         "fn {wrapper}() -> JetTestOutcome {{ JetTestOutcome {{ name: {name_literal}.to_string(), ok: false, expected_failure: {expected_failure}, skipped: false, stdout: String::new(), stderr: {reason:?}.to_string(), property_cases: Some(0) }} }}"
+//RS                     );
+//RS                     continue;
+//RS                 }
+//RS                 let types = function
+//RS                     .params
+//RS                     .iter()
+//RS                     .map(|param| self.rust_type(&param.ty))
+//RS                     .collect::<Vec<_>>();
+//RS 
+//RS                 let arg_names = (0..function.params.len())
+//RS                     .map(|index| format!("__jet_arg{index}"))
+//RS                     .collect::<Vec<_>>();
+//RS                 let declarations = function
+//RS                     .params
+//RS                     .iter()
+//RS                     .zip(&arg_names)
+//RS                     .map(|(param, name)| {
+//RS                         format!(
+//RS                             "        let {name}: {} = <{} as JetGen>::generate(&mut __jet_rng);",
+//RS                             self.rust_type(&param.ty),
+//RS                             self.rust_type(&param.ty)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\n");
+//RS                 let input_parts = function
+//RS                     .params
+//RS                     .iter()
+//RS                     .zip(&arg_names)
+//RS                     .map(|(param, name)| {
+//RS                         format!("<{} as JetGen>::render(&{name})", self.rust_type(&param.ty))
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 let input = if input_parts.len() == 1 {
+//RS                     input_parts[0].clone()
+//RS                 } else {
+//RS                     let format_string = function
+//RS                         .params
+//RS                         .iter()
+//RS                         .map(|param| format!("{}={{}}", param.name))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ");
+//RS                     format!("format!({format_string:?}, {})", input_parts.join(", "))
+//RS                 };
+//RS                 let failure_input = if input_parts.len() == 1 {
+//RS                     format!(
+//RS                         "format!({:?}, {})",
+//RS                         format!("{} = {{}}", function.params[0].name),
+//RS                         input_parts[0]
+//RS                     )
+//RS                 } else {
+//RS                     input.clone()
+//RS                 };
+//RS                 let mut minimized_input = failure_input;
+//RS                 for (index, arg_name) in arg_names.iter().enumerate().rev() {
+//RS                     minimized_input =
+//RS                         minimized_input.replace(arg_name, &format!("__jet_minimized.{index}"));
+//RS                 }
+//RS                 let tuple_type = format!("({},)", types.join(", "));
+//RS                 let input_tuple = format!(
+//RS                     "({},)",
+//RS                     arg_names
+//RS                         .iter()
+//RS                         .map(|name| format!("{name}.clone()"))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ")
+//RS                 );
+//RS                 let runner_declarations = function
+//RS                     .params
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, param)| {
+//RS                         let mutability = matches!(param.access, MirAccess::Write).then_some("mut ");
+//RS                         format!(
+//RS                             "        let {}__jet_arg{index}: {} = __jet_input.{index}.clone();",
+//RS                             mutability.unwrap_or(""),
+//RS                             types[index]
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\n");
+//RS                 let shrink_blocks = types
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, ty)| {
+//RS                         format!(
+//RS                             "                                let __jet_candidates_{index} = <{ty} as JetGen>::shrink(&__jet_minimized.{index});\n\
+//RS                                 for __jet_candidate in __jet_candidates_{index} {{\n\
+//RS                                     let mut __jet_try = __jet_minimized.clone();\n\
+//RS                                     __jet_try.{index} = __jet_candidate;\n\
+//RS                                     let (__jet_try_result, _) = __jet_run(&__jet_try);\n\
+//RS                                     if __jet_try_result.is_err() {{\n\
+//RS                                         __jet_minimized = __jet_try;\n\
+//RS                                         __jet_changed = true;\n\
+//RS                                         break;\n\
+//RS                                     }}\n\
+//RS                                 }}"
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\n");
+//RS                 let call_args = function
+//RS                     .params
+//RS                     .iter()
+//RS                     .zip(&arg_names)
+//RS                     .map(|(param, name)| match param.access {
+//RS                         MirAccess::Write => format!("&mut {name}"),
+//RS                         MirAccess::Read if self.is_scalar(&param.ty) => name.clone(),
+//RS                         MirAccess::Read => format!("&{name}"),
+//RS                         MirAccess::Move => name.clone(),
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 let call = format!("{}({call_args})", self.function_name(function.id));
+//RS                 let body = match &function.failure {
+//RS                     MirFailureCarrier::Diverges { .. } => format!("{call}; Ok(())"),
+//RS                     MirFailureCarrier::Infallible => format!("let _ = {call}; Ok(())"),
+//RS                     MirFailureCarrier::Result { .. } | MirFailureCarrier::Optional { .. } => {
+//RS                         format!(
+//RS                             "match {call} {{ Ok(_) => Ok(()), Err(__e) => Err(format!(\"{{:?}}\", __e)) }}"
+//RS                         )
+//RS                     }
+//RS                 };
+//RS                 // #2502: a sampled contract row classifies each generated
+//RS                 // input BEFORE the callable runs, by calling the typed
+//RS                 // eligibility predicate synthesized from the candidate's own
+//RS                 // checked `#Pre` conditions. A rejected input never executes
+//RS                 // the callable; an accepted input runs under ordinary
+//RS                 // semantics, so a nested callee's `#Pre` failure inside the
+//RS                 // body stays real failure evidence.
+//RS                 let test_runner = if test.contract_generated {
+//RS                     let eligibility = test.eligibility.unwrap_or_else(|| {
+//RS                         panic!(
+//RS                             "MIR contract test {:?} has no eligibility predicate",
+//RS                             test.name
+//RS                         )
+//RS                     });
+//RS                     let predicate = self.function_row(eligibility);
+//RS                     if !self.module_selected(predicate.module_id)
+//RS                         || !self.selected_for_target(predicate)
+//RS                     {
+//RS                         panic!(
+//RS                             "MIR contract test {:?} eligibility predicate is unselected",
+//RS                             test.name
+//RS                         );
+//RS                     }
+//RS                     if predicate.params.len() != function.params.len() {
+//RS                         panic!(
+//RS                             "MIR contract test {:?} eligibility predicate arity mismatch",
+//RS                             test.name
+//RS                         );
+//RS                     }
+//RS                     let predicate_args = predicate
+//RS                         .params
+//RS                         .iter()
+//RS                         .zip(&arg_names)
+//RS                         .map(|(param, name)| match param.access {
+//RS                             MirAccess::Read if self.is_scalar(&param.ty) => name.clone(),
+//RS                             MirAccess::Read => format!("&{name}"),
+//RS                             MirAccess::Write | MirAccess::Move => panic!(
+//RS                                 "MIR contract test {:?} eligibility predicate must borrow its parameters",
+//RS                                 test.name
+//RS                             ),
+//RS                         })
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ");
+//RS                     format!(
+//RS                         "{{ let __jet_eligible = jet_test_contract_eligibility(|| {}({predicate_args})); \
+//RS                          match __jet_eligible {{ \
+//RS                          Ok(false) => Ok(JetPropertyCaseResult::Rejected), \
+//RS                          Ok(true) => jet_test_run_property({expected_failure}, || {{ {body} }}), \
+//RS                          Err(__jet_pre_error) => Err(__jet_pre_error) }} }}",
+//RS                         self.function_name(predicate.id)
+//RS                     )
+//RS                 } else {
+//RS                     format!("jet_test_run_property({expected_failure}, || {{ {body} }})")
+//RS                 };
+//RS                 let ordinary_runner = format!(
+//RS                     "    let __jet_run = |__jet_input: &{tuple_type}| -> (Result<JetPropertyCaseResult, String>, String) {{\n\
+//RS {runner_declarations}\n\
+//RS                         let __jet_result = {test_runner};\n\
+//RS                         let __jet_case_stdout = jet_test_take_output();\n\
+//RS                         (__jet_result, __jet_case_stdout)\n\
+//RS                     }};"
+//RS                 );
+//RS                 if matches!(harness.kind, MirHarnessKind::Fuzz) {
+//RS                     let params = function
+//RS                         .params
+//RS                         .iter()
+//RS                         .zip(&arg_names)
+//RS                         .map(|(param, name)| {
+//RS                             let mutability =
+//RS                                 matches!(param.access, MirAccess::Write).then_some("mut ");
+//RS                             format!(
+//RS                                 "{}{}: {}",
+//RS                                 mutability.unwrap_or(""),
+//RS                                 name,
+//RS                                 self.rust_type(&param.ty)
+//RS                             )
+//RS                         })
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ");
+//RS                     let _ = writeln!(
+//RS                         out,
+//RS                         "fn __jet_fuzz_case_{}({params}) -> Result<(), String> {{",
+//RS                         test.id.0
+//RS                     );
+//RS                     let _ = writeln!(out, "    let __jet_result = {test_runner};");
+//RS                     let _ = writeln!(out, "    let _ = jet_test_take_output();");
+//RS                     let _ = writeln!(
+//RS                         out,
+//RS                         "    match __jet_result {{ Ok(JetPropertyCaseResult::Accepted) | Ok(JetPropertyCaseResult::Rejected) => Ok(()), Err(__jet_error) => Err(__jet_error) }}"
+//RS                     );
+//RS                     let _ = writeln!(out, "}}");
+//RS                     continue;
+//RS                 }
+//RS                 let property_ok = if test.contract_generated {
+//RS                     format!("{} && __jet_accepted_cases > 0", !test.expected_failure)
+//RS                 } else {
+//RS                     format!("{}", !test.expected_failure)
+//RS                 };
+//RS                 let property_stderr = if test.contract_generated {
+//RS                     "if __jet_accepted_cases == 0 { \"E0613: no accepted contract examples\".to_string() } else { String::new() }"
+//RS                 } else {
+//RS                     "String::new()"
+//RS                 };
+//RS                 let replay_declarations = declarations.replace("__jet_rng", "__jet_replay_rng");
+//RS                 let source = format!(
+//RS                     "fn {wrapper}() -> JetTestOutcome {{\n\
+//RS                          let __jet_seed = jet_prop_seed();\n\
+//RS                          let __jet_replay_seed = jet_prop_replay_seed();\n\
+//RS                          let __jet_replay_case = jet_prop_replay_case();\n\
+//RS                          let mut __jet_stdout = String::new();\n\
+//RS                          let mut __jet_accepted_cases: u64 = 0;\n\
+//RS {ordinary_runner}\n\
+//RS                          if let (Some(__jet_replay_seed), Some(__jet_replay_case)) = (__jet_replay_seed, __jet_replay_case) {{\n\
+//RS                          if __jet_replay_seed == __jet_seed && __jet_replay_case < jet_prop_cases() {{\n\
+//RS                          let mut __jet_replay_driver_rng = JetRng::new(__jet_replay_seed);\n\
+//RS                          for __jet_replay_index in 0..=__jet_replay_case {{\n\
+//RS                          let __jet_case_seed = __jet_replay_driver_rng.next_u64();\n\
+//RS                          let mut __jet_replay_rng = JetRng::new(__jet_case_seed);\n\
+//RS                          {replay_declarations}\n\
+//RS                          if __jet_replay_index != __jet_replay_case {{ continue; }}\n\
+//RS                          let __jet_input = {input_tuple};\n\
+//RS                          jet_prop_trace_sample(\"jet_test\", __jet_replay_index, __jet_case_seed, &{input});\n\
+//RS                          let (__jet_result, __jet_case_stdout) = __jet_run(&__jet_input);\n\
+//RS                          __jet_stdout.push_str(&__jet_case_stdout);\n\
+//RS                          match __jet_result {{\n\
+//RS                          Ok(JetPropertyCaseResult::Accepted) => {{\n\
+//RS                          __jet_accepted_cases += 1;\n\
+//RS                          }}\n\
+//RS                          Ok(JetPropertyCaseResult::Rejected) => {{}},\n\
+//RS                          Err(__jet_error) => {{\n\
+//RS                          __jet_accepted_cases += 1;\n\
+//RS                          let mut __jet_minimized = __jet_input.clone();\n\
+//RS                          for _ in 0..2000 {{\n\
+//RS                          let mut __jet_changed = false;\n\
+//RS {shrink_blocks}\n\
+//RS                          if !__jet_changed {{ break; }}\n\
+//RS                          }}\n\
+//RS                          let __jet_minimized_display = {minimized_input};\n\
+//RS                          return JetTestOutcome {{ name: {name_literal}.to_string(), ok: {}, expected_failure: {expected_failure}, skipped: false, stdout: __jet_stdout, stderr: format!(\"seed {{}} case {{}}: {{}} (input {{}})\", __jet_replay_seed, __jet_replay_case, __jet_error, __jet_minimized_display), property_cases: Some(__jet_accepted_cases) }};\n\
+//RS                          }}\n\
+//RS                          }}\n\
+//RS                          }}\n\
+//RS                          }}\n\
+//RS                          }}\n\
+//RS                          let mut __jet_driver_rng = JetRng::new(__jet_seed);\n\
+//RS                          for __jet_case_index in 0..jet_prop_cases() {{\n\
+//RS                          let __jet_case_seed = __jet_driver_rng.next_u64();\n\
+//RS                          let mut __jet_rng = JetRng::new(__jet_case_seed);\n\
+//RS                          if __jet_replay_seed == Some(__jet_seed) && __jet_replay_case == Some(__jet_case_index) {{ continue; }}\n\
+//RS                          {declarations}\n\
+//RS                          let __jet_input = {input_tuple};\n\
+//RS                          jet_prop_trace_sample(\"jet_test\", __jet_case_index, __jet_case_seed, &{input});\n\
+//RS                          let (__jet_result, __jet_case_stdout) = __jet_run(&__jet_input);\n\
+//RS                          __jet_stdout.push_str(&__jet_case_stdout);\n\
+//RS                          match __jet_result {{\n\
+//RS                          Ok(JetPropertyCaseResult::Accepted) => {{ __jet_accepted_cases += 1; }}\n\
+//RS                          Ok(JetPropertyCaseResult::Rejected) => {{}},\n\
+//RS                          Err(__jet_error) => {{\n\
+//RS                          __jet_accepted_cases += 1;\n\
+//RS                          let mut __jet_minimized = __jet_input.clone();\n\
+//RS                          for _ in 0..2000 {{\n\
+//RS                          let mut __jet_changed = false;\n\
+//RS {shrink_blocks}\n\
+//RS                          if !__jet_changed {{ break; }}\n\
+//RS                          }}\n\
+//RS                          let __jet_minimized_display = {minimized_input};\n\
+//RS                          return JetTestOutcome {{ name: {name_literal}.to_string(), ok: {}, expected_failure: {expected_failure}, skipped: false, stdout: __jet_stdout, stderr: format!(\"seed {{}} case {{}}: {{}} (input {{}})\", __jet_seed, __jet_case_index, __jet_error, __jet_minimized_display), property_cases: Some(__jet_accepted_cases) }};\n\
+//RS                          }}\n\
+//RS                          }}\n\
+//RS                          }}\n\
+//RS                          JetTestOutcome {{ name: {name_literal}.to_string(), ok: {property_ok}, expected_failure: {expected_failure}, skipped: false, stdout: __jet_stdout, stderr: {property_stderr}, property_cases: Some(__jet_accepted_cases) }}\n\
+//RS                      }}\n",
+//RS                     test.expected_failure,
+//RS                     test.expected_failure,
+//RS                 );
+//RS                 out.push_str(&source);
+//RS             } else {
+//RS                 let call = format!("{}()", self.function_name(function.id));
+//RS                 let body = match &function.failure {
+//RS                     MirFailureCarrier::Diverges { .. } => format!("{call}; Ok(())"),
+//RS                     MirFailureCarrier::Infallible => format!("let _ = {call}; Ok(())"),
+//RS                     MirFailureCarrier::Result { .. } | MirFailureCarrier::Optional { .. } => {
+//RS                         format!(
+//RS                             "match {call} {{ Ok(_) => Ok(()), Err(__e) => Err(format!(\"{{:?}}\", __e)) }}"
+//RS                         )
+//RS                     }
+//RS                 };
+//RS                 let source = format!(
+//RS                     "fn {wrapper}() -> JetTestOutcome {{\n\
+//RS                          let __jet_result = jet_test_run({expected_failure}, || {{ {body} }});\n\
+//RS                          let __jet_stdout = jet_test_take_output();\n\
+//RS                          let (__jet_failed, __jet_stderr) = match __jet_result {{ Ok(()) => (false, String::new()), Err(__jet_error) => (true, __jet_error) }};\n\
+//RS                          let __jet_skipped = jet_test_take_whole_skip();\n\
+//RS                          JetTestOutcome {{ name: {name_literal}.to_string(), ok: __jet_skipped || (__jet_failed == {}), expected_failure: {expected_failure}, skipped: __jet_skipped, stdout: __jet_stdout, stderr: __jet_stderr, property_cases: None }}\n\
+//RS                      }}\n",
+//RS                     test.expected_failure,
+//RS                 );
+//RS                 out.push_str(&source);
+//RS             }
+//RS         }
+//RS         if matches!(harness.kind, MirHarnessKind::Fuzz) {
+//RS             self.emit_fuzz_harness(out, selected_tests.first().copied());
+//RS             return;
+//RS         }
+//RS         if selected_tests.is_empty() && harness.output_checks.is_empty() {
+//RS             if !self.artifact.jobs.is_empty() {
+//RS                 self.emit_jobs(out);
+//RS             }
+//RS             return;
+//RS         }
+//RS         for check in &harness.output_checks {
+//RS             let function = self.function_row(check.function);
+//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
+//RS                 panic!(
+//RS                     "MIR output check {:?} targets an unselected function",
+//RS                     check.name
+//RS                 );
+//RS             }
+//RS             if !matches!(function.form, MirFunctionForm::TopLevel)
+//RS                 || !function.capture_params.is_empty()
+//RS                 || !function.params.is_empty()
+//RS             {
+//RS                 panic!(
+//RS                     "MIR output check {:?} has no checked zero-argument invocation",
+//RS                     check.name
+//RS                 );
+//RS             }
+//RS             let call = format!("{}()", self.function_name(check.function));
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "// jet-mir-output-check: id={} name={} function={}",
+//RS                 check.id.0,
+//RS                 check.name,
+//RS                 self.function_name(check.function)
+//RS             );
+//RS             match function.return_type.kind() {
+//RS                 MirTypeKind::Bool => {
+//RS                     let _ = writeln!(
+//RS                         out,
+//RS                         "fn __jet_output_check_{}() {{ assert!({call}, \"MIR output check {:?}\"); }}",
+//RS                         check.id.0, check.name
+//RS                     );
+//RS                 }
+//RS                 MirTypeKind::Int
+//RS                 | MirTypeKind::Float
+//RS                 | MirTypeKind::String
+//RS                 | MirTypeKind::Char
+//RS                 | MirTypeKind::List(_)
+//RS                 | MirTypeKind::Map { .. }
+//RS                 | MirTypeKind::Shared(_)
+//RS                 | MirTypeKind::Option(_)
+//RS                 | MirTypeKind::Result { .. }
+//RS                 | MirTypeKind::Fn(_)
+//RS                 | MirTypeKind::SendFn { .. }
+//RS                 | MirTypeKind::Apply { .. }
+//RS                 | MirTypeKind::TraitObject(_)
+//RS                 | MirTypeKind::Tuple(_)
+//RS                 | MirTypeKind::FixedList { .. }
+//RS                 | MirTypeKind::IntN { .. }
+//RS                 | MirTypeKind::InlineRange { .. }
+//RS                 | MirTypeKind::Float32
+//RS                 | MirTypeKind::Tagged { .. }
+//RS                 | MirTypeKind::Quantity { .. }
+//RS                 | MirTypeKind::Union(_)
+//RS                 | MirTypeKind::Measure(_) => {
+//RS                     let _ = writeln!(
+//RS                         out,
+//RS                         "fn __jet_output_check_{}() {{ let _ = {call}; }}",
+//RS                         check.id.0
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         for point in &harness.coverage_points {
+//RS             let function = self.function_row(point.function);
+//RS             if !self.module_selected(function.module_id) {
+//RS                 panic!(
+//RS                     "MIR coverage point {:?} targets an unselected module",
+//RS                     point.id
+//RS                 );
+//RS             }
+//RS             if !self.selected_for_target(function) {
+//RS                 if matches!(self.config.target_kind, MirRustTarget::WebWasm) {
+//RS                     continue;
+//RS                 }
+//RS                 panic!(
+//RS                     "MIR coverage point {:?} targets an unselected function",
+//RS                     point.id
+//RS                 );
+//RS             }
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "// jet-mir-coverage-point: id={} function={} block={} span={}..{}",
+//RS                 point.id.0,
+//RS                 self.function_name(point.function),
+//RS                 point.block.0,
+//RS                 point.span.start,
+//RS                 point.span.end
+//RS             );
+//RS         }
+//RS         if selected_tests.is_empty() && harness.output_checks.is_empty() {
+//RS             if !self.artifact.jobs.is_empty() {
+//RS                 self.emit_jobs(out);
+//RS             }
+//RS             return;
+//RS         }
+//RS         let _ = writeln!(out, "fn __jet_harness_run() -> bool {{");
+//RS         let _ = writeln!(out, "    jet_test_install_panic_hook();");
+//RS         let _ = writeln!(out, "    jet_test_trace_tier();");
+//RS         if self.coverage_enabled() {
+//RS             for (id, function) in self.coverage_branch_rows() {
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "    {}jet_cov_register_branch({}, {});",
+//RS                     root,
+//RS                     quote_rust_string(&id),
+//RS                     quote_rust_string(&function),
+//RS                 );
+//RS             }
+//RS         }
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "    let mut __jet_cases: Vec<(&'static str, fn() -> JetTestOutcome)> = vec!["
+//RS         );
+//RS         for test_id in &selected_tests {
+//RS             let test = self
+//RS                 .program
+//RS                 .tests
+//RS                 .iter()
+//RS                 .find(|test| test.id == *test_id)
+//RS                 .unwrap_or_else(|| panic!("MIR test ID {:?} has no row", test_id));
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "        ({:?}, || jet_evidence_with_expectation({}, __jet_test_{})),",
+//RS                 test.name, test.expected_failure, test.id.0
+//RS             );
+//RS         }
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "    ];\n    if let Some(__jet_filter) = jet_test_filter() {{ __jet_cases.retain(|(__jet_name, _)| __jet_name.contains(&__jet_filter)); }}\n    let mut __jet_order: Vec<usize> = (0..__jet_cases.len()).collect();\n    if let Some(__jet_seed) = jet_test_shuffle_seed() {{ __jet_order = jet_test_shuffle_order(__jet_cases.len(), __jet_seed); }}\n    let __jet_serial = jet_test_serial();\n    let mut __jet_results = Vec::with_capacity(__jet_order.len());\n    if __jet_serial {{\n        for __jet_index in __jet_order {{ __jet_results.push((__jet_cases[__jet_index].1)()); }}\n    }} else {{\n        std::thread::scope(|__jet_scope| {{\n            let mut __jet_handles = Vec::new();\n            for __jet_index in __jet_order {{\n                let __jet_run = __jet_cases[__jet_index].1;\n                __jet_handles.push(__jet_scope.spawn(move || __jet_run()));\n            }}\n            for __jet_handle in __jet_handles {{ __jet_results.push(__jet_handle.join().unwrap()); }}\n        }});\n    }}"
+//RS         );
+//RS         for check in &harness.output_checks {
+//RS             let _ = writeln!(out, "    __jet_output_check_{}();", check.id.0);
+//RS         }
+//RS         if self.coverage_enabled() {
+//RS             let _ = writeln!(out, "    {}jet_cov_flush();", root);
+//RS         }
+//RS         let _ = writeln!(out, "    jet_test_finish(__jet_results)\n}}\n");
+//RS         if self.artifact.entry.is_none()
+//RS             && self.artifact.kind != MirArtifactKind::NativeLibrary
+//RS             && self.artifact.kind != MirArtifactKind::SandboxPlugin
+//RS         {
+//RS             let _ = writeln!(out, "fn main() {{");
+//RS             let _ = writeln!(out, "    {root}jet_std_env_init();");
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());"
+//RS             );
+//RS             if !self.artifact.jobs.is_empty() {
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "    let __argv = {root}jet_std_io_args();\n    if __jet_job_dispatch(&__argv, false) {{ return; }}"
+//RS                 );
+//RS             }
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    {root}jet_runtime_boundary(|| {{ if !__jet_harness_run() {{ std::process::exit(1); }} }});"
+//RS             );
+//RS             let _ = writeln!(out, "}}\n");
+//RS         }
+//RS         if !self.artifact.jobs.is_empty() {
+//RS             self.emit_jobs(out);
+//RS         }
+//RS     }
+//RS     fn emit_fuzz_harness(&self, out: &mut String, selected_test: Option<MirTestId>) {
+//RS         let root = &self.config.root_prefix;
+//RS         let test_id = selected_test
+//RS             .unwrap_or_else(|| panic!("MIR fuzz harness has no selected property test"));
+//RS         let test = self
+//RS             .program
+//RS             .tests
+//RS             .iter()
+//RS             .find(|test| test.id == test_id)
+//RS             .unwrap_or_else(|| panic!("MIR fuzz test ID {:?} has no row", test_id));
+//RS         if !matches!(test.kind, MirTestKind::Property) {
+//RS             panic!("MIR fuzz test {:?} is not a property test", test.name);
+//RS         }
+//RS         let function = self.function_row(test.function);
+//RS         if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
+//RS             panic!(
+//RS                 "MIR fuzz test {:?} targets an unselected function",
+//RS                 test.name
+//RS             );
+//RS         }
+//RS         if let Some(reason) = test.generation_unavailable_reason.as_deref() {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "fn __jet_fuzz_run() {{ eprintln!(\"E0613: {}\"); std::process::exit(1); }}",
+//RS                 reason.replace('"', "\\\"")
+//RS             );
+//RS         } else if let Some(reason) = self.property_generation_unavailable_reason(function) {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "fn __jet_fuzz_run() {{ eprintln!(\"{}\"); std::process::exit(1); }}",
+//RS                 reason.replace('"', "\\\"")
+//RS             );
+//RS         } else {
+//RS             let name_literal = format!("{:?}", test.name);
+//RS             let types = function
+//RS                 .params
+//RS                 .iter()
+//RS                 .map(|param| self.rust_type(&param.ty))
+//RS                 .collect::<Vec<_>>();
+//RS             let tuple_type = format!("({},)", types.join(", "));
+//RS             let generated_fields = types
+//RS                 .iter()
+//RS                 .map(|ty| format!("<{ty} as JetGen>::generate(&mut __jet_rng)"))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             let run_args = (0..types.len())
+//RS                 .map(|index| format!("__jet_input.{index}.clone()"))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             let rendered_input = if types.len() == 1 {
+//RS                 format!(
+//RS                     "format!({:?}, <{} as JetGen>::render(&__jet_input.0))",
+//RS                     format!("{} = {{}}", function.params[0].name),
+//RS                     types[0]
+//RS                 )
+//RS             } else {
+//RS                 let format_string = function
+//RS                     .params
+//RS                     .iter()
+//RS                     .map(|param| format!("{}={{}}", param.name))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 let rendered_fields = types
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, ty)| format!("<{ty} as JetGen>::render(&__jet_input.{index})"))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 format!("format!({format_string:?}, {rendered_fields})")
+//RS             };
+//RS             let trace_input = if types.len() == 1 {
+//RS                 format!("<{} as JetGen>::render(&__jet_input.0)", types[0])
+//RS             } else {
+//RS                 rendered_input.clone()
+//RS             };
+//RS             let minimized_input = rendered_input.replace("__jet_input", "__jet_minimized");
+//RS             let shrink_blocks = types
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, ty)| {
+//RS                     format!(
+//RS                         "        let __jet_candidates_{index} = <{ty} as JetGen>::shrink(&__jet_minimized.{index});\n\
+//RS                                 for __jet_candidate in __jet_candidates_{index} {{\n\
+//RS                                     let mut __jet_try = __jet_minimized.clone();\n\
+//RS                                     __jet_try.{index} = __jet_candidate;\n\
+//RS                                     if __jet_run(&__jet_try).is_err() {{\n\
+//RS                                         __jet_minimized = __jet_try;\n\
+//RS                                         __jet_changed = true;\n\
+//RS                                         break;\n\
+//RS                                     }}\n\
+//RS                                 }}"
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("\n");
+//RS             out.push_str(
+//RS                 "fn __jet_fuzz_sanitize_name(name: &str) -> String {\n\
+//RS                     let mut safe = String::new();\n\
+//RS                     for ch in name.chars() {\n\
+//RS                         safe.push(if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' });\n\
+//RS                     }\n\
+//RS                     if safe.is_empty() { \"case\".to_string() } else { safe }\n\
+//RS                 }\n",
+//RS             );
+//RS             let _ = writeln!(out, "fn __jet_fuzz_run() {{");
+//RS             let _ = writeln!(out, "    jet_test_install_panic_hook();");
+//RS             let _ = writeln!(out, "    jet_test_trace_tier();");
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    let __jet_name = {name_literal};\n\
+//RS                     let __jet_corpus = std::env::var(\"JET_FUZZ_CORPUS\")\n\
+//RS                         .unwrap_or_else(|_| format!(\".jet/fuzz/{{}}\", __jet_fuzz_sanitize_name(__jet_name)));\n\
+//RS                     let _ = std::fs::create_dir_all(&__jet_corpus);\n\
+//RS                     let __jet_iterations = std::env::var(\"JET_FUZZ_ITERATIONS\")\n\
+//RS                         .ok().and_then(|value| value.parse::<u64>().ok()).unwrap_or(1000);\n\
+//RS                     let __jet_time_ms = std::env::var(\"JET_FUZZ_TIME_MS\")\n\
+//RS                         .ok().and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);\n\
+//RS                     let __jet_seed = std::env::var(\"JET_FUZZ_SEED\")\n\
+//RS                         .ok().and_then(|value| value.parse::<u64>().ok())\n\
+//RS                         .unwrap_or(0x5EED_1234_ABCD_0001u64);"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    let __jet_generate = |__jet_base_seed: u64, __jet_case_index: u64| -> (u64, {tuple_type}) {{"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "        let mut __jet_driver_rng = JetRng::new(__jet_base_seed);\n\
+//RS                         let mut __jet_case_seed = 0u64;\n\
+//RS                         for _ in 0..=__jet_case_index {{ __jet_case_seed = __jet_driver_rng.next_u64(); }}\n\
+//RS                         let mut __jet_rng = JetRng::new(__jet_case_seed);\n\
+//RS                         let __jet_input = ({generated_fields},);\n\
+//RS                         (__jet_case_seed, __jet_input)\n\
+//RS                     }};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    let __jet_run = |__jet_input: &{tuple_type}| -> Result<(), String> {{\n\
+//RS                         __jet_fuzz_case_{}({run_args})\n\
+//RS                     }};",
+//RS                 test.id.0
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    let mut __jet_corpus_cases: Vec<(u64, u64)> = Vec::new();"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    if let Ok(__jet_entries) = std::fs::read_dir(&__jet_corpus) {{\n\
+//RS                         let mut __jet_paths = __jet_entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect::<Vec<_>>();\n\
+//RS                         __jet_paths.sort();\n\
+//RS                         for __jet_path in __jet_paths {{\n\
+//RS                             if !__jet_path.is_file() {{ continue; }}\n\
+//RS                             let Ok(__jet_text) = std::fs::read_to_string(&__jet_path) else {{ continue; }};\n\
+//RS                             let __jet_values = __jet_text.split_whitespace().filter_map(|value| value.parse::<u64>().ok()).collect::<Vec<_>>();\n\
+//RS                             let Some(__jet_base_seed) = __jet_values.first().copied() else {{ continue; }};\n\
+//RS                             __jet_corpus_cases.push((__jet_base_seed, __jet_values.get(1).copied().unwrap_or(0)));\n\
+//RS                         }}\n\
+//RS                     }}"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    let __jet_corpus_count = __jet_corpus_cases.len();"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    for (__jet_base_seed, __jet_case_index) in __jet_corpus_cases.iter().copied() {{\n\
+//RS                         let (__jet_case_seed, __jet_input) = __jet_generate(__jet_base_seed, __jet_case_index);\n\
+//RS                         let __jet_display = {rendered_input};\n\
+//RS                         let __jet_trace_input = {trace_input};\n\
+//RS                         jet_prop_trace_sample(\"jet_fuzz\", __jet_case_index, __jet_case_seed, &__jet_trace_input);\n\
+//RS                         if let Err(__jet_error) = __jet_run(&__jet_input) {{\n\
+//RS                             println!(\"{{}}: FAIL (corpus replay, seed={{}})\", __jet_name, __jet_case_seed);\n\
+//RS                             eprintln!(\"  input: {{}}\", __jet_display);\n\
+//RS                             eprintln!(\"  error: {{}}\", __jet_error);\n\
+//RS                             std::process::exit(1);\n\
+//RS                         }}\n\
+//RS                     }}\n\
+//RS                     println!(\"corpus: {{}} case(s) replayed clean\", __jet_corpus_count);"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    let __jet_started = std::time::Instant::now();\n\
+//RS                     let mut __jet_driver_rng = JetRng::new(__jet_seed);\n\
+//RS                     for __jet_case_index in 0..__jet_iterations {{\n\
+//RS                         if __jet_time_ms > 0 && __jet_started.elapsed() >= std::time::Duration::from_millis(__jet_time_ms) {{ break; }}\n\
+//RS                         let __jet_case_seed = __jet_driver_rng.next_u64();\n\
+//RS                         let mut __jet_rng = JetRng::new(__jet_case_seed);\n\
+//RS                         let __jet_input = ({generated_fields},);\n\
+//RS                         let __jet_display = {rendered_input};\n\
+//RS                         let __jet_trace_input = {trace_input};\n\
+//RS                         jet_prop_trace_sample(\"jet_fuzz\", __jet_case_index, __jet_case_seed, &__jet_trace_input);\n\
+//RS                         if let Err(__jet_error) = __jet_run(&__jet_input) {{\n\
+//RS                             let mut __jet_minimized = __jet_input.clone();\n\
+//RS                             for _ in 0..2000 {{\n\
+//RS                                 let mut __jet_changed = false;\n\
+//RS {shrink_blocks}\n\
+//RS                                 if !__jet_changed {{ break; }}\n\
+//RS                             }}\n\
+//RS                             let __jet_minimized_display = {minimized_input};\n\
+//RS                             let __jet_saved = std::path::Path::new(&__jet_corpus).join(format!(\"seed_{{}}.txt\", __jet_case_seed));\n\
+//RS                             let _ = std::fs::write(&__jet_saved, format!(\"{{}} {{}}\\n\", __jet_seed, __jet_case_index));\n\
+//RS                             println!(\"{{}}: FAIL (after {{}} iteration(s))\", __jet_name, __jet_case_index + 1);\n\
+//RS                             println!(\"  minimized input: {{}}\", __jet_minimized_display);\n\
+//RS                             println!(\"  seed: {{}}\", __jet_case_seed);\n\
+//RS                             println!(\"  saved: {{}}\", __jet_saved.display());\n\
+//RS                             eprintln!(\"  error: {{}}\", __jet_error);\n\
+//RS                             println!(\"repro: JET_PROP_SEED={{}} JET_PROP_REPLAY_CASE={{}} jet test --grade=generated\", __jet_seed, __jet_case_index);\n\
+//RS                             std::process::exit(1);\n\
+//RS                         }}\n\
+//RS                     }}\n\
+//RS                     println!(\"{{}}: {{}} iteration(s), no failure found\", __jet_name, __jet_iterations);"
+//RS             );
+//RS             let _ = writeln!(out, "}}\n");
+//RS         }
+//RS         if self.artifact.entry.is_none()
+//RS             && self.artifact.kind != MirArtifactKind::NativeLibrary
+//RS             && self.artifact.kind != MirArtifactKind::SandboxPlugin
+//RS         {
+//RS             let _ = writeln!(out, "fn main() {{");
+//RS             let _ = writeln!(out, "    {root}jet_std_env_init();");
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    {root}jet_runtime_boundary(|| {{ __jet_fuzz_run(); }});"
+//RS             );
+//RS             let _ = writeln!(out, "}}\n");
+//RS         }
+//RS     }
+//RS 
+//RS     fn emit_function(&self, function: &MirFunction, out: &mut String) {
+//RS         self.emit_callable(function, out, None);
+//RS     }
+//RS 
+//RS     fn emit_method(&self, function: &MirFunction, out: &mut String) {
+//RS         if !matches!(&function.form, MirFunctionForm::Method { .. }) {
+//RS             panic!(
+//RS                 "MIR method emitter received non-inherent function {:?}",
+//RS                 function.id
+//RS             );
+//RS         }
+//RS         self.emit_callable(function, out, Some(&function.form));
+//RS     }
+//RS 
+//RS     fn emit_callable(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         out: &mut String,
+//RS         method_form: Option<&MirFunctionForm>,
+//RS     ) {
+//RS         if self.native_dispatch_eligible(function, method_form, None, None) {
+//RS             self.emit_native_dispatch(function, out);
+//RS         } else {
+//RS             self.emit_callable_named(function, out, method_form, None, None, None);
+//RS         }
+//RS     }
+//RS 
+//RS     fn emit_callable_named(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         out: &mut String,
+//RS         method_form: Option<&MirFunctionForm>,
+//RS         name_override: Option<&str>,
+//RS         serde_codec: Option<MirSerdeCodec>,
+//RS         return_override: Option<String>,
+//RS     ) {
+//RS         let previous_function = self.history_current_function.replace(Some(function.id));
+//RS         let owner_generic_params = match method_form {
+//RS             Some(MirFunctionForm::Method { owner, .. })
+//RS             | Some(MirFunctionForm::TraitMethod { owner, .. }) => {
+//RS                 self.generic_params_for_type(owner)
+//RS             }
+//RS             _ => &[],
+//RS         };
+//RS         self.push_generic_scope(owner_generic_params);
+//RS         if function.is_inline_always {
+//RS             let _ = writeln!(out, "#[inline(always)]");
+//RS         } else if function.is_inline {
+//RS             let _ = writeln!(out, "#[inline]");
+//RS         }
+//RS         let visibility = if method_form.is_some() {
+//RS             ""
+//RS         } else {
+//RS             self.visibility(function.visibility)
+//RS         };
+//RS         let unsafe_prefix = if function.is_unsafe { "unsafe " } else { "" };
+//RS         let generics = self.generic_params(function);
+//RS         let previous_lifetime = self.history_callback_lifetime.replace("'__jet_callback");
+//RS         let mut params = Vec::new();
+//RS         if let Some(form) = method_form {
+//RS             match form {
+//RS                 MirFunctionForm::Method { self_access, .. }
+//RS                 | MirFunctionForm::TraitMethod { self_access, .. } => {
+//RS                     if let Some(access) = self_access {
+//RS                         params.push(match access {
+//RS                             MirAccess::Read => "&self".to_string(),
+//RS                             MirAccess::Write => "&mut self".to_string(),
+//RS                             MirAccess::Move => "mut self".to_string(),
+//RS                         });
+//RS                     }
+//RS                 }
+//RS                 MirFunctionForm::TopLevel => {
+//RS                     panic!(
+//RS                         "MIR callable method context has a top-level function {:?}",
+//RS                         function.id
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         params.extend(
+//RS             function
+//RS                 .capture_params
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(slot, capture)| {
+//RS                     if capture.slot != slot {
+//RS                         panic!("MIR capture slots are not ordered");
+//RS                     }
+//RS                     format!(
+//RS                         "{}{}: {}",
+//RS                         if capture.access == MirAccess::Move {
+//RS                             "mut "
+//RS                         } else {
+//RS                             ""
+//RS                         },
+//RS                         self.capture_param_name(capture.slot),
+//RS                         self.capture_parameter_type(function, capture)
+//RS                     )
+//RS                 }),
+//RS         );
+//RS         let declared = self.declared_params(function);
+//RS         if serde_codec == Some(MirSerdeCodec::Decode) && declared.len() != 1 {
+//RS             panic!(
+//RS                 "MIR Decode method {:?} has {} parameters; expected one DataTree parameter",
+//RS                 function.id,
+//RS                 declared.len()
+//RS             );
+//RS         }
+//RS         params.extend(declared.iter().map(|param| {
+//RS             let name = mangle(&param.name);
+//RS             if serde_codec == Some(MirSerdeCodec::Decode) {
+//RS                 format!("{name}: &{}jet_std::DataTree", self.config.root_prefix)
+//RS             } else if self.arithmetic_trait_method(function) && self.is_scalar(&param.ty) {
+//RS                 format!("{name}: &{}", self.rust_parameter_type(&param.ty))
+//RS             } else {
+//RS                 format!(
+//RS                     "{}{name}: {}",
+//RS                     if param.access == MirAccess::Move {
+//RS                         "mut "
+//RS                     } else {
+//RS                         ""
+//RS                     },
+//RS                     self.function_parameter_type(function, param)
+//RS                 )
+//RS             }
+//RS         }));
+//RS         let params = params.join(", ");
+//RS         let ret = return_override.unwrap_or_else(|| self.rust_type(&function.return_type));
+//RS         self.history_callback_lifetime.set(previous_lifetime);
+//RS         // Forwarding or returning a callable preserves its capture lifetime.
+//RS         // Owned factories can instantiate this lifetime without borrowing.
+//RS         let generics = if params.contains("'__jet_callback") || ret.contains("'__jet_callback") {
+//RS             if generics.is_empty() {
+//RS                 "<'__jet_callback>".to_string()
+//RS             } else {
+//RS                 format!("<'__jet_callback, {}", &generics[1..])
+//RS             }
+//RS         } else {
+//RS             generics
+//RS         };
+//RS         let name = name_override.map(str::to_string).unwrap_or_else(|| {
+//RS             if method_form.is_some() {
+//RS                 self.rust_method_symbol(function)
+//RS             } else {
+//RS                 self.function_name(function.id)
+//RS             }
+//RS         });
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "{visibility}{unsafe_prefix}fn {name}{generics}({params}) -> {ret} {{"
+//RS         );
+//RS         if self.arithmetic_trait_method(function) {
+//RS             for param in declared.iter().filter(|param| self.is_scalar(&param.ty)) {
+//RS                 let name = mangle(&param.name);
+//RS                 let _ = writeln!(out, "    let {name} = *{name};");
+//RS             }
+//RS         }
+//RS         if self.config.execution.emit_metadata {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    // pure={} reactive={} scalar={} gc_return={}",
+//RS                 function.is_pure, function.is_reactive, function.is_scalar, function.gc_return
+//RS             );
+//RS             if let Some(gate) = &function.unsafe_gate {
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "    // unsafe gate {}:{} enabled={} fenced={}",
+//RS                     gate.file, gate.line, gate.enabled, gate.fenced
+//RS                 );
+//RS             }
+//RS         }
+//RS         if self.history_runtime_metadata_enabled() {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    let __jet_history_types = {}jet_history_current_types();",
+//RS                 self.config.root_prefix
+//RS             );
+//RS         }
+//RS         let slots_start = out.len();
+//RS         self.emit_slots(function, out);
+//RS         let slots_end = out.len();
+//RS         let generator = function.generator.is_some();
+//RS         if generator {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "    {}jet_std::jet_stream_task(move |__jet_yield_tx| {{",
+//RS                 self.config.root_prefix
+//RS             );
+//RS         }
+//RS         let body_indent = if generator { 8 } else { 4 };
+//RS         let (stack_file, stack_line, stack_source) = self.function_stack_context(function);
+//RS         let retain_stack_frame = !matches!(function.failure, MirFailureCarrier::Infallible)
+//RS             || function.is_unsafe
+//RS             || function
+//RS                 .scopes
+//RS                 .iter()
+//RS                 .any(|scope| matches!(scope.kind, MirScopeKind::Unsafe | MirScopeKind::Policy));
+//RS         if retain_stack_frame {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}let _jet_stack_frame = jet_stack_enter({:?}, {}u32, {:?}, {:?});",
+//RS                 "",
+//RS                 stack_file,
+//RS                 stack_line,
+//RS                 function.name,
+//RS                 stack_source,
+//RS                 indent = body_indent
+//RS             );
+//RS         } else {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}#[cfg(not(jet_release))]",
+//RS                 "",
+//RS                 indent = body_indent
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}let _jet_stack_frame = jet_stack_enter({:?}, {}u32, {:?}, {:?});",
+//RS                 "",
+//RS                 stack_file,
+//RS                 stack_line,
+//RS                 function.name,
+//RS                 stack_source,
+//RS                 indent = body_indent
+//RS             );
+//RS         }
+//RS         let has_sentry_frame = function
+//RS             .scopes
+//RS             .iter()
+//RS             .any(|scope| scope.kind == MirScopeKind::Unsafe);
+//RS         let has_sentry_scope = function
+//RS             .scopes
+//RS             .iter()
+//RS             .any(|scope| matches!(scope.kind, MirScopeKind::Unsafe | MirScopeKind::Policy));
+//RS         let has_deadline_scope = function
+//RS             .scopes
+//RS             .iter()
+//RS             .any(|scope| scope.kind == MirScopeKind::Context && scope.deadline.is_some());
+//RS         if has_sentry_frame {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}let __jet_sentry_frame = jet_mem::jet_sentry_frame();",
+//RS                 "",
+//RS                 indent = body_indent
+//RS             );
+//RS         }
+//RS         if has_sentry_scope {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}let mut __jet_sentry_scopes: Vec<jet_mem::JetSentryGuard> = Vec::new();",
+//RS                 "",
+//RS                 indent = body_indent
+//RS             );
+//RS         }
+//RS         if has_deadline_scope {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}let mut __jet_deadline_scopes: Vec<JetDeadlineGuard> = Vec::new();",
+//RS                 "",
+//RS                 indent = body_indent
+//RS             );
+//RS         }
+//RS         if self.coverage_for(function) {
+//RS             let line = self.coverage_function_line(function);
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}{}jet_cov_function({line});",
+//RS                 "",
+//RS                 self.config.root_prefix,
+//RS                 indent = body_indent
+//RS             );
+//RS         }
+//RS         let debug_only_states = debug_only_block_states(function);
+//RS         let has_debug_only = function_has_debug_only(function);
+//RS         let has_test_scope =
+//RS             self.has_test_scope(function) && self.config.target_kind == MirRustTarget::Native;
+//RS         let has_expected_test_scope = self.has_expected_test_scope(function)
+//RS             && self.config.target_kind == MirRustTarget::Native;
+//RS         let phi_targets = phi_target_blocks(function);
+//RS         if !phi_targets.is_empty() {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}let mut {}: u64 = 0;",
+//RS                 "",
+//RS                 mangle_generated("mir_dispatch_prev"),
+//RS                 indent = body_indent
+//RS             );
+//RS         }
+//RS         // Test scopes and vector/acceleration blocks own whole dispatch arms,
+//RS         // and a test scope's `catch_unwind` closure is not indented.
+//RS         let custom_arms = has_test_scope
+//RS             || has_expected_test_scope
+//RS             || function
+//RS                 .optimization
+//RS                 .vector_facts
+//RS                 .iter()
+//RS                 .any(|fact| fact.decision.is_eligible());
+//RS         let plan = if custom_arms {
+//RS             None
+//RS         } else {
+//RS             mir_cfg_plan(function)
+//RS         };
+//RS         let previous_cfg = self.cfg_state.replace(Some(MirCfgState {
+//RS             plan: None,
+//RS             phi_targets,
+//RS             inline_edges: Vec::new(),
+//RS         }));
+//RS         let body_start = out.len();
+//RS         let structured = plan.is_some_and(|plan| {
+//RS             self.emit_structured_body(function, plan, &debug_only_states, out, body_indent)
+//RS         });
+//RS         if !structured {
+//RS             out.truncate(body_start);
+//RS             if let Some(state) = self.cfg_state.borrow_mut().as_mut() {
+//RS                 state.plan = None;
+//RS                 state.inline_edges.clear();
+//RS             }
+//RS             self.emit_dispatch_body(
+//RS                 function,
+//RS                 &debug_only_states,
+//RS                 has_debug_only,
+//RS                 has_test_scope,
+//RS                 has_expected_test_scope,
+//RS                 out,
+//RS                 body_indent,
+//RS             );
+//RS         }
+//RS         *self.cfg_state.borrow_mut() = previous_cfg;
+//RS         if !custom_arms {
+//RS             let localizable = self.localizable_value_slots(function);
+//RS             let declarations_end = localize_value_slots(out, slots_start, slots_end, &localizable);
+//RS             fold_value_slots(out, slots_start, declarations_end);
+//RS             unwrap_value_slots(out, slots_start);
+//RS         }
+//RS         compact_function_text(out, slots_start);
+//RS         if generator {
+//RS             let _ = writeln!(out, "    }})");
+//RS         }
+//RS         let _ = writeln!(out, "}}\n");
+//RS         self.pop_generic_scope();
+//RS         self.history_current_function.set(previous_function);
+//RS     }
+//RS 
+//RS     /// Prints a function body as the `'mir_dispatch` loop: one match arm per
+//RS     /// MIR block, every edge a `continue` with the next block id.
+//RS     #[allow(clippy::too_many_arguments)]
+//RS     fn emit_dispatch_body(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         debug_only_states: &BTreeMap<MirBlockId, bool>,
+//RS         has_debug_only: bool,
+//RS         has_test_scope: bool,
+//RS         has_expected_test_scope: bool,
+//RS         out: &mut String,
+//RS         body_indent: usize,
+//RS     ) {
+//RS         let dispatch_pc = mangle_generated("mir_dispatch_pc");
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "{:indent$}let mut {}: u64 = {};",
+//RS             "",
+//RS             dispatch_pc,
+//RS             function.entry.0,
+//RS             indent = body_indent
+//RS         );
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "{:indent$}'mir_dispatch: loop {{",
+//RS             "",
+//RS             indent = body_indent
+//RS         );
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "{:indent$}match {} {{",
+//RS             "",
+//RS             dispatch_pc,
+//RS             indent = body_indent + 4
+//RS         );
+//RS         let test_scope_states = if has_test_scope {
+//RS             self.test_scope_block_states(function)
+//RS         } else {
+//RS             BTreeMap::new()
+//RS         };
+//RS         let expected_scope_exit_blocks = if has_expected_test_scope {
+//RS             self.expected_scope_exit_blocks(function, &test_scope_states)
+//RS         } else {
+//RS             BTreeMap::new()
+//RS         };
+//RS         for block in &function.blocks {
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{:indent$}{} => {{",
+//RS                 "",
+//RS                 block.id.0,
+//RS                 indent = body_indent + 8
+//RS             );
+//RS             let block_debug_active = debug_only_states.get(&block.id).copied().unwrap_or(false);
+//RS             self.emit_hardware_poll(block_debug_active, out, body_indent + 12);
+//RS             if !has_debug_only
+//RS                 && !has_test_scope
+//RS                 && self.emit_acceleration_block(function, block, out, body_indent + 12)
+//RS             {
+//RS                 let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent + 8);
+//RS                 continue;
+//RS             }
+//RS             if !has_debug_only
+//RS                 && !has_test_scope
+//RS                 && self.emit_vector_block(function, block, out, body_indent + 12)
+//RS             {
+//RS                 let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent + 8);
+//RS                 continue;
+//RS             }
+//RS             if has_expected_test_scope {
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}let __jet_scope_step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{",
+//RS                     "",
+//RS                     indent = body_indent + 12
+//RS                 );
+//RS             }
+//RS             self.emit_block_instructions(function, block, block_debug_active, out, body_indent + 12);
+//RS             let cleanup_return_in_catch = has_expected_test_scope
+//RS                 && matches!(&block.terminator, MirTerminator::Return { .. });
+//RS             if cleanup_return_in_catch {
+//RS                 if let Some(scopes) = test_scope_states.get(&block.id) {
+//RS                     self.emit_test_scope_exits(function, scopes, out, body_indent + 12);
+//RS                 }
+//RS             }
+//RS             if has_expected_test_scope {
+//RS                 let _ = writeln!(out, "{:indent$}}}));", "", indent = body_indent + 12);
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}match __jet_scope_step {{",
+//RS                     "",
+//RS                     indent = body_indent + 12
+//RS                 );
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}Ok(()) => {{}},",
+//RS                     "",
+//RS                     indent = body_indent + 16
+//RS                 );
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}Err(__jet_payload) => {{",
+//RS                     "",
+//RS                     indent = body_indent + 16
+//RS                 );
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}if __jet_payload.is::<JetRenderedRuntimeStop>() {{",
+//RS                     "",
+//RS                     indent = body_indent + 20
+//RS                 );
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}if let Some(__jet_scope) = {}jet_test_expect_fail_matching_scope() {{",
+//RS                     "",
+//RS                     self.config.root_prefix,
+//RS                     indent = body_indent + 24
+//RS                 );
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}match __jet_scope {{",
+//RS                     "",
+//RS                     indent = body_indent + 28
+//RS                 );
+//RS                 for (scope, exit) in &expected_scope_exit_blocks {
+//RS                     let _ = writeln!(
+//RS                         out,
+//RS                         "{:indent$}{} => {{ {}jet_test_expect_fail_catch_scope(); {} = {}; continue 'mir_dispatch; }},",
+//RS                         "",
+//RS                         scope.0,
+//RS                         self.config.root_prefix,
+//RS                         dispatch_pc,
+//RS                         exit.0,
+//RS                         indent = body_indent + 32
+//RS                     );
+//RS                 }
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}_ => std::panic::resume_unwind(__jet_payload),",
+//RS                     "",
+//RS                     indent = body_indent + 32
+//RS                 );
+//RS                 let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent + 28);
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}}} else {{ std::panic::resume_unwind(__jet_payload); }}",
+//RS                     "",
+//RS                     indent = body_indent + 24
+//RS                 );
+//RS                 let _ = writeln!(
+//RS                     out,
+//RS                     "{:indent$}}} else {{ std::panic::resume_unwind(__jet_payload); }}",
+//RS                     "",
+//RS                     indent = body_indent + 20
+//RS                 );
+//RS                 let _ = writeln!(out, "{:indent$}}},", "", indent = body_indent + 16);
+//RS                 let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent + 12);
+//RS             }
+//RS             let active_test_scopes = if cleanup_return_in_catch {
+//RS                 None
+//RS             } else {
+//RS                 test_scope_states.get(&block.id).map(Vec::as_slice)
+//RS             };
+//RS             self.emit_terminator(function, block, out, body_indent + 12, active_test_scopes);
+//RS             let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent + 8);
+//RS         }
+//RS         let _ = writeln!(
+//RS             out,
+//RS             "{:indent$}_ => unreachable!(\"invalid MIR block\"),",
+//RS             "",
+//RS             indent = body_indent + 8
+//RS         );
+//RS         let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent + 4);
+//RS         let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent);
+//RS     }
+//RS 
+//RS     fn emit_hardware_poll(&self, debug_active: bool, out: &mut String, indent: usize) {
+//RS         if self.has_hardware_interrupts() {
+//RS             let start = out.len();
+//RS             let _ = writeln!(out, "{:indent$}__jet_hardware_poll();", "", indent = indent);
+//RS             if debug_active {
+//RS                 wrap_cfg_not_release(out, start, indent);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Prints a block's instructions; debug-only scopes wrap theirs in
+//RS     /// `#[cfg(not(jet_release))]`.
+//RS     fn emit_block_instructions(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         block: &MirBasicBlock,
+//RS         debug_active: bool,
+//RS         out: &mut String,
+//RS         indent: usize,
+//RS     ) {
+//RS         let mut debug_active = debug_active;
+//RS         for instruction in &block.instructions {
+//RS             let is_debug_scope = match &instruction.operation {
+//RS                 MirOperation::ScopeEnter { scope, .. } | MirOperation::ScopeExit { scope } => {
+//RS                     function.scopes.iter().any(|candidate| {
+//RS                         candidate.id == *scope && candidate.kind == MirScopeKind::DebugOnly
+//RS                     })
+//RS                 }
+//RS                 _ => false,
+//RS             };
+//RS             match &instruction.operation {
+//RS                 MirOperation::ScopeEnter { .. } if is_debug_scope => {
+//RS                     debug_active = true;
+//RS                     continue;
+//RS                 }
+//RS                 MirOperation::ScopeExit { .. } if is_debug_scope => {
+//RS                     debug_active = false;
+//RS                     continue;
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             self.emit_instruction(function, instruction, out, indent, debug_active);
+//RS         }
+//RS     }
+//RS 
+//RS     /// Prints a reducible body as structured Rust (the Jet emitter's
+//RS     /// `jet_rust_emit_cfg_run`): a dominator subtree is printed in place, a
+//RS     /// loop header wraps its subtree in `'jet_loop_N: loop`, and a merge block
+//RS     /// follows the labeled block `'jet_block_N` its predecessors break out of.
+//RS     /// Items expand on an explicit stack so deep bodies never deepen the
+//RS     /// emitter's call stack. Returns false when the nesting would exceed
+//RS     /// `MAX_STRUCTURED_INDENT`; the caller then prints the dispatch loop.
+//RS     fn emit_structured_body(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         plan: MirCfgPlan,
+//RS         debug_only_states: &BTreeMap<MirBlockId, bool>,
+//RS         out: &mut String,
+//RS         body_indent: usize,
+//RS     ) -> bool {
+//RS         enum Item {
+//RS             Text(String),
+//RS             Tree(usize, usize),
+//RS             Within(usize, usize, usize),
+//RS             Block(usize, usize),
+//RS         }
+//RS         let plan = std::rc::Rc::new(plan);
+//RS         if let Some(state) = self.cfg_state.borrow_mut().as_mut() {
+//RS             state.plan = Some(plan.clone());
+//RS         }
+//RS         let mut pending = vec![Item::Tree(plan.entry, body_indent)];
+//RS         while let Some(item) = pending.pop() {
+//RS             match item {
+//RS                 Item::Text(text) => out.push_str(&text),
+//RS                 Item::Tree(position, indent) => {
+//RS                     if indent > MAX_STRUCTURED_INDENT {
+//RS                         return false;
+//RS                     }
+//RS                     if plan.headers[position] {
+//RS                         let id = function.blocks[position].id.0;
+//RS                         pending.push(Item::Text(format!("{:indent$}}}\n", "", indent = indent)));
+//RS                         pending.push(Item::Within(position, 0, indent + 4));
+//RS                         pending.push(Item::Text(format!(
+//RS                             "{:indent$}'jet_loop_{id}: loop {{\n",
+//RS                             "",
+//RS                             indent = indent
+//RS                         )));
+//RS                     } else {
+//RS                         pending.push(Item::Within(position, 0, indent));
+//RS                     }
+//RS                 }
+//RS                 Item::Within(position, follow, indent) => match plan.follows[position].get(follow) {
+//RS                     None => pending.push(Item::Block(position, indent)),
+//RS                     Some(&merge) => {
+//RS                         let id = function.blocks[merge].id.0;
+//RS                         pending.push(Item::Tree(merge, indent));
+//RS                         pending.push(Item::Text(format!("{:indent$}}}\n", "", indent = indent)));
+//RS                         pending.push(Item::Within(position, follow + 1, indent + 4));
+//RS                         pending.push(Item::Text(format!(
+//RS                             "{:indent$}'jet_block_{id}: {{\n",
+//RS                             "",
+//RS                             indent = indent
+//RS                         )));
+//RS                     }
+//RS                 },
+//RS                 Item::Block(position, indent) => {
+//RS                     let block = &function.blocks[position];
+//RS                     let debug_active = debug_only_states.get(&block.id).copied().unwrap_or(false);
+//RS                     let mut text = String::new();
+//RS                     self.emit_hardware_poll(debug_active, &mut text, indent);
+//RS                     self.emit_block_instructions(function, block, debug_active, &mut text, indent);
+//RS                     self.emit_terminator(function, block, &mut text, indent, None);
+//RS                     let edges = self
+//RS                         .cfg_state
+//RS                         .borrow_mut()
+//RS                         .as_mut()
+//RS                         .map(|state| std::mem::take(&mut state.inline_edges))
+//RS                         .unwrap_or_default();
+//RS                     let mut end = text.len();
+//RS                     for (offset, target, edge_indent) in edges.into_iter().rev() {
+//RS                         pending.push(Item::Text(text[offset..end].to_string()));
+//RS                         pending.push(Item::Tree(target, edge_indent));
+//RS                         end = offset;
+//RS                     }
+//RS                     text.truncate(end);
+//RS                     pending.push(Item::Text(text));
+//RS                 }
+//RS             }
+//RS         }
+//RS         true
+//RS     }
+//RS 
+//RS     /// Whether the edge prints its target subtree in place (structured bodies
+//RS     /// only): neither a loop back edge nor a break to a merge block.
+//RS     fn edge_inlines(&self, block: MirBlockId, target: MirBlockId) -> bool {
+//RS         let state = self.cfg_state.borrow();
+//RS         let Some(plan) = state.as_ref().and_then(|state| state.plan.as_ref()) else {
+//RS             return false;
+//RS         };
+//RS         match (plan.positions.get(&block), plan.positions.get(&target)) {
+//RS             (Some(&source), Some(&target)) => {
+//RS                 plan.order[target] > plan.order[source] && !plan.merges[target]
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_cursor_read_place(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS     ) -> Option<MirPlaceId> {
+//RS         match &self.value_instruction(function, value)?.operation {
+//RS             MirOperation::ReadPlace(place) => Some(*place),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_cursor_value_matches(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS         cursor: MirValueId,
+//RS     ) -> bool {
+//RS         fn matches(
+//RS             emitter: &RustEmitter,
+//RS             function: &MirFunction,
+//RS             value: MirValueId,
+//RS             cursor: MirValueId,
+//RS             cursor_place: Option<MirPlaceId>,
+//RS             seen: &mut BTreeSet<MirValueId>,
+//RS         ) -> bool {
+//RS             if value == cursor {
+//RS                 return true;
+//RS             }
+//RS             if !seen.insert(value) {
+//RS                 return false;
+//RS             }
+//RS             let Some(instruction) = emitter.value_instruction(function, value) else {
+//RS                 return false;
+//RS             };
+//RS             match &instruction.operation {
+//RS                 MirOperation::ReadPlace(place) => cursor_place == Some(*place),
+//RS                 MirOperation::LoopRangeValue { cursor: source, .. }
+//RS                 | MirOperation::LoopIterValue { cursor: source, .. } => *source == cursor,
+//RS                 MirOperation::Copy { value, fact } => {
+//RS                     if *fact == MirCopyFact::ViewMaterialize {
+//RS                         false
+//RS                     } else {
+//RS                         matches(emitter, function, *value, cursor, cursor_place, seen)
+//RS                     }
+//RS                 }
+//RS                 MirOperation::Move { value }
+//RS                 | MirOperation::TraitBox { value, .. }
+//RS                 | MirOperation::AttachTag { value, .. }
+//RS                 | MirOperation::Convert { value, .. } => {
+//RS                     matches(emitter, function, *value, cursor, cursor_place, seen)
+//RS                 }
+//RS                 _ => false,
+//RS             }
+//RS         }
+//RS 
+//RS         matches(
+//RS             self,
+//RS             function,
+//RS             value,
+//RS             cursor,
+//RS             self.canonical_cursor_read_place(function, cursor),
+//RS             &mut BTreeSet::new(),
+//RS         )
+//RS     }
+//RS 
+//RS     /// Return the checked, canonical counted-loop bounds consumed by the
+//RS     /// vector emitters.  Most loops retain an explicit `LoopRangeInit`; the
+//RS     /// canonical scalar counted-loop form instead carries the same cursor
+//RS     /// identity through a preheader write and an exclusive header comparison.
+//RS     /// This deliberately reads only derived MIR facts and post-reconciliation
+//RS     /// CFG shape, never raw TIR proof rows.
+//RS     fn canonical_counted_bounds(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         vector: &MirVectorFact,
+//RS     ) -> Option<(MirValueId, MirValueId)> {
+//RS         let cursor = vector.cursor?;
+//RS         let row = function
+//RS             .optimization
+//RS             .loop_facts
+//RS             .iter()
+//RS             .find(|row| row.header == vector.loop_header && row.canonical)?;
+//RS         if row.form != MirLoopForm::Counted {
+//RS             return None;
+//RS         }
+//RS         if let Some(MirOperation::LoopRangeInit {
+//RS             start,
+//RS             end,
+//RS             exclusive: true,
+//RS             ..
+//RS         }) = self.value_definition(function, cursor)
+//RS         {
+//RS             return Some((*start, *end));
+//RS         }
+//RS 
+//RS         let cursor_place = self.canonical_cursor_read_place(function, cursor)?;
+//RS         let place = self.place_row(function, cursor_place)?;
+//RS         if !place.projections.is_empty() {
+//RS             return None;
+//RS         }
+//RS         let header = self.block_row(function, row.header)?;
+//RS         let MirTerminator::Branch { condition, .. } = header.terminator else {
+//RS             return None;
+//RS         };
+//RS         let (end, comparison_cursor) = header.instructions.iter().find_map(|instruction| {
+//RS             let MirOperation::Binary {
+//RS                 op: MirBinaryOp::Lt,
+//RS                 left,
+//RS                 right,
+//RS                 ..
+//RS             } = &instruction.operation
+//RS             else {
+//RS                 return None;
+//RS             };
+//RS             (instruction.result == Some(condition)).then_some((*right, *left))
+//RS         })?;
+//RS         if self.canonical_cursor_read_place(function, comparison_cursor) != Some(cursor_place)
+//RS             || end == comparison_cursor
+//RS         {
+//RS             return None;
+//RS         }
+//RS 
+//RS         let mut starts = Vec::new();
+//RS         let index = self.function_index(function);
+//RS         for &position in index.jump_sources.get(&row.header).into_iter().flatten() {
+//RS             let block = &function.blocks[position];
+//RS             if block.id == row.header
+//RS                 || vector.body_blocks.contains(&block.id)
+//RS                 || vector.advance_block == Some(block.id)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             for instruction in &block.instructions {
+//RS                 if let MirOperation::WritePlace { place, value } = &instruction.operation {
+//RS                     if *place == cursor_place {
+//RS                         starts.push(*value);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         let [start] = starts.as_slice() else {
+//RS             return None;
+//RS         };
+//RS         let end_definition = index.definitions.get(&end).copied();
+//RS         let (end_position, end_instruction) = end_definition?;
+//RS         let end_block = &function.blocks[end_position];
+//RS         if vector.body_blocks.contains(&end_block.id)
+//RS             || vector.advance_block == Some(end_block.id)
+//RS             || (end_block.id == row.header
+//RS                 && !matches!(
+//RS                     &end_block.instructions[end_instruction].operation,
+//RS                     MirOperation::Constant(_)
+//RS                 ))
+//RS         {
+//RS             return None;
+//RS         }
+//RS         Some((*start, end))
+//RS     }
+//RS 
+//RS     fn emit_acceleration_block(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         block: &MirBasicBlock,
+//RS         out: &mut String,
+//RS         indent: usize,
+//RS     ) -> bool {
+//RS         if self.coverage_enabled()
+//RS             || self.config.target_kind != MirRustTarget::Native
+//RS             || self.is_no_os()
+//RS             || function.is_scalar
+//RS             || function.is_reactive
+//RS             || !function.reactive_upgrades.is_empty()
+//RS         {
+//RS             return false;
+//RS         }
+//RS         let Some(vector) = function.optimization.vector_facts.iter().find(|fact| {
+//RS             fact.loop_header == block.id
+//RS                 && fact.decision.is_eligible()
+//RS                 && matches!(
+//RS                     fact.rule,
+//RS                     MirVectorRule::Elementwise | MirVectorRule::FieldAccess
+//RS                 )
+//RS         }) else {
+//RS             return false;
+//RS         };
+//RS         if block.instructions.iter().any(|instruction| {
+//RS             matches!(
+//RS                 &instruction.operation,
+//RS                 MirOperation::InitializeUninit { .. }
+//RS             )
+//RS         }) || vector
+//RS             .body_blocks
+//RS             .iter()
+//RS             .filter_map(|block_id| {
+//RS                 function
+//RS                     .blocks
+//RS                     .iter()
+//RS                     .find(|candidate| candidate.id == *block_id)
+//RS             })
+//RS             .flat_map(|block| block.instructions.iter())
+//RS             .any(|instruction| {
+//RS                 matches!(
+//RS                     &instruction.operation,
+//RS                     MirOperation::InitializeUninit { .. }
+//RS                 )
+//RS             })
+//RS         {
+//RS             return false;
+//RS         }
+//RS         let Some(parallel) = function
+//RS             .optimization
+//RS             .acceleration_facts
+//RS             .iter()
+//RS             .find(|fact| {
+//RS                 fact.loop_header == block.id
+//RS                     && fact.transform == AccelerationTransform::PooledParallelChunks
+//RS                     && fact
+//RS                         .proof
+//RS                         .proves(AccelerationTransform::PooledParallelChunks)
+//RS             })
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let Some(column) = function
+//RS             .optimization
+//RS             .acceleration_facts
+//RS             .iter()
+//RS             .find(|fact| {
+//RS                 fact.loop_header == block.id
+//RS                     && fact.transform == AccelerationTransform::TransientColumnCopy
+//RS                     && fact
+//RS                         .proof
+//RS                         .proves(AccelerationTransform::TransientColumnCopy)
+//RS             })
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let Some(row) = function
+//RS             .optimization
+//RS             .loop_facts
+//RS             .iter()
+//RS             .find(|candidate| candidate.header == block.id && candidate.canonical)
+// END-PORT-PENDING 2008 crates/jet-codegen/src/Codegen/MIRRust.rs:12601-14400
+

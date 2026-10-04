@@ -1,0 +1,1804 @@
+// PORT-PENDING 2017 crates-jet-codegen-src-codegen-mirrust-slice-28801: crates/jet-codegen/src/Codegen/MIRRust.rs:28801-30600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         field: MirFieldId,
+//RS     ) -> String {
+//RS         format!(
+//RS             "{}(&({}), |__jet_report| __jet_report.{}.clone())",
+//RS             self.prelude_symbol(call),
+//RS             format!("*{}", self.value_borrow(receiver)),
+//RS             self.field_name(field)
+//RS         )
+//RS     }
+//RS 
+//RS     fn typed_sql_binding(&self, function: &MirFunction, value: MirValueId) -> String {
+//RS         let db_value = format!("{}jet_std::DBValue", self.config.root_prefix);
+//RS         let ty = self.value_type(function, value);
+//RS         if ty.nominal_name() == Some(jet_foundation::Syntax::TYPE_DB_VALUE) {
+//RS             return self.value_owned(value);
+//RS         }
+//RS         match ty.kind() {
+//RS             MirTypeKind::Int => format!(
+//RS                 "{db_value}::Int({}jet_std::jet_int_owned_to_i64(&({})).expect(\"SQL Int exceeds i64 wire range\"))",
+//RS                 self.config.root_prefix,
+//RS                 format!("*{}", self.value_borrow(value))
+//RS             ),
+//RS             MirTypeKind::IntN { .. } => {
+//RS                 format!("{db_value}::Int(({}) as i64)", self.value_owned(value))
+//RS             }
+//RS             MirTypeKind::Float | MirTypeKind::Float32 => {
+//RS                 format!("{db_value}::Float(({}) as f64)", self.value_owned(value))
+//RS             }
+//RS             MirTypeKind::Bool => format!("{db_value}::Bool({})", self.value_owned(value)),
+//RS             MirTypeKind::String => {
+//RS                 format!("{db_value}::Text({})", self.value_owned(value))
+//RS             }
+//RS             MirTypeKind::List(inner)
+//RS                 if matches!(
+//RS                     inner.kind(),
+//RS                     MirTypeKind::IntN {
+//RS                         signed: false,
+//RS                         bits: 8
+//RS                     }
+//RS                 ) =>
+//RS             {
+//RS                 format!("{db_value}::Blob({})", self.value_owned(value))
+//RS             }
+//RS             MirTypeKind::Char
+//RS             | MirTypeKind::List(_)
+//RS             | MirTypeKind::Map { .. }
+//RS             | MirTypeKind::Shared(_)
+//RS             | MirTypeKind::Option(_)
+//RS             | MirTypeKind::Result { .. }
+//RS             | MirTypeKind::Fn(_)
+//RS             | MirTypeKind::SendFn { .. }
+//RS             | MirTypeKind::Apply { .. }
+//RS             | MirTypeKind::TraitObject(_)
+//RS             | MirTypeKind::Tuple(_)
+//RS             | MirTypeKind::FixedList { .. }
+//RS             | MirTypeKind::InlineRange { .. }
+//RS             | MirTypeKind::Tagged { .. }
+//RS             | MirTypeKind::Quantity { .. }
+//RS             | MirTypeKind::Union(_)
+//RS             | MirTypeKind::Measure(_) => {
+//RS                 format!("{db_value}::Text(({}).jet_show())", self.value_borrow(value))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn typed_text_interp(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         kind: jet_foundation::Syntax::TypedHeadKind,
+//RS         literals: &[String],
+//RS         holes: &[MirValueId],
+//RS         trusted_html: &[bool],
+//RS     ) -> String {
+//RS         debug_assert_eq!(trusted_html.len(), holes.len());
+//RS         if !matches!(kind, jet_foundation::Syntax::TypedHeadKind::HTML) {
+//RS             debug_assert!(trusted_html.iter().all(|trusted| !*trusted));
+//RS         }
+//RS         let literal_array = format!(
+//RS             "&[{}]",
+//RS             literals
+//RS                 .iter()
+//RS                 .map(|literal| format!("{literal:?}"))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         );
+//RS         let hole_array = match kind {
+//RS             jet_foundation::Syntax::TypedHeadKind::SQL => holes
+//RS                 .iter()
+//RS                 .map(|value| self.typed_sql_binding(function, *value))
+//RS                 .collect::<Vec<_>>(),
+//RS             jet_foundation::Syntax::TypedHeadKind::HTML => holes
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, value)| {
+//RS                     if trusted_html.get(index).copied().unwrap_or(false) {
+//RS                         format!("({})", self.value_owned(*value))
+//RS                     } else {
+//RS                         format!("({}).jet_show()", self.value_borrow(*value))
+//RS                     }
+//RS                 })
+//RS                 .collect::<Vec<_>>(),
+//RS             jet_foundation::Syntax::TypedHeadKind::Sh
+//RS             | jet_foundation::Syntax::TypedHeadKind::URL
+//RS             | jet_foundation::Syntax::TypedHeadKind::Path
+//RS             | jet_foundation::Syntax::TypedHeadKind::DateTime => holes
+//RS                 .iter()
+//RS                 .map(|value| format!("({}).jet_show()", self.value_borrow(*value)))
+//RS                 .collect::<Vec<_>>(),
+//RS         };
+//RS         let hole_expr = format!("vec![{}]", hole_array.join(", "));
+//RS         let args = match kind {
+//RS             jet_foundation::Syntax::TypedHeadKind::HTML => {
+//RS                 let trusted = trusted_html
+//RS                     .iter()
+//RS                     .map(|trusted| trusted.to_string())
+//RS                     .collect::<Vec<_>>();
+//RS                 vec![
+//RS                     literal_array,
+//RS                     hole_expr,
+//RS                     format!("&[{}]", trusted.join(", ")),
+//RS                 ]
+//RS             }
+//RS             jet_foundation::Syntax::TypedHeadKind::SQL
+//RS             | jet_foundation::Syntax::TypedHeadKind::Sh
+//RS             | jet_foundation::Syntax::TypedHeadKind::URL
+//RS             | jet_foundation::Syntax::TypedHeadKind::Path
+//RS             | jet_foundation::Syntax::TypedHeadKind::DateTime => {
+//RS                 vec![literal_array, hole_expr]
+//RS             }
+//RS         };
+//RS         self.validate_prelude_count(self.prelude_row(call), args.len());
+//RS         let args = args.join(", ");
+//RS         let symbol = if matches!(kind, jet_foundation::Syntax::TypedHeadKind::SQL) {
+//RS             format!(
+//RS                 "{}::<{}jet_std::DBValue>",
+//RS                 self.prelude_symbol(call),
+//RS                 self.config.root_prefix
+//RS             )
+//RS         } else {
+//RS             self.prelude_symbol(call)
+//RS         };
+//RS         format!("{symbol}({args})")
+//RS     }
+//RS     fn gc_edit(
+//RS         &self,
+//RS         call: MirPreludeCallId,
+//RS         root: MirValueId,
+//RS         edges: &[MirValueId],
+//RS         edit: MirValueId,
+//RS         index: Option<MirValueId>,
+//RS         kind: MirGcEditKind,
+//RS         site: jet_foundation::MIR::MirGcEditSiteId,
+//RS     ) -> String {
+//RS         let root = self.value_borrow(root);
+//RS         let edge_values = format!(
+//RS             "&[{}]",
+//RS             edges
+//RS                 .iter()
+//RS                 .map(|value| self.value_owned(*value))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         );
+//RS         let edit = self.value_move(edit);
+//RS         let args = match kind {
+//RS             MirGcEditKind::Clear | MirGcEditKind::Pop | MirGcEditKind::Plain => {
+//RS                 if index.is_some() || !edges.is_empty() {
+//RS                     panic!("MIR GC edit carries unused index or edge operands");
+//RS                 }
+//RS                 vec![root, edit]
+//RS             }
+//RS             MirGcEditKind::RemoveIndex => {
+//RS                 if !edges.is_empty() {
+//RS                     panic!("MIR GC remove edit carries edge operands");
+//RS                 }
+//RS                 let index = index.unwrap_or_else(|| panic!("MIR GC remove edit has no index"));
+//RS                 vec![root, self.value_owned(index), edit]
+//RS             }
+//RS             MirGcEditKind::InsertIndex => {
+//RS                 let index = index.unwrap_or_else(|| panic!("MIR GC insert edit has no index"));
+//RS                 vec![root, self.value_owned(index), edge_values, edit]
+//RS             }
+//RS             MirGcEditKind::Prepend | MirGcEditKind::Additive => {
+//RS                 if index.is_some() {
+//RS                     panic!("MIR GC edge edit carries an unused index");
+//RS                 }
+//RS                 vec![root, edge_values, edit]
+//RS             }
+//RS             MirGcEditKind::EdgeSlot => {
+//RS                 if index.is_some() {
+//RS                     panic!("MIR GC edge-slot edit carries an unused index");
+//RS                 }
+//RS                 vec![root, edge_values, edit, format!("{}u64", site.0)]
+//RS             }
+//RS         };
+//RS         self.prelude_call_args_exact(call, &args)
+//RS     }
+//RS 
+//RS     fn native_callback_adapter(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         closure: MirValueId,
+//RS         params: usize,
+//RS     ) -> String {
+//RS         let send_fn = matches!(
+//RS             self.value_type(function, closure).kind(),
+//RS             MirTypeKind::SendFn { .. }
+//RS         );
+//RS         let callback = self.value_move(closure);
+//RS         match params {
+//RS             0 => {
+//RS                 let invocation = if send_fn || self.history_runtime_metadata_enabled() {
+//RS                     "(__jet_host_callback)()".to_string()
+//RS                 } else {
+//RS                     self.fn_value_call("__jet_host_callback.clone()".to_string(), &[])
+//RS                 };
+//RS                 format!("{{ let __jet_host_callback = {callback}; move || {invocation} }}")
+//RS             }
+//RS             1 => {
+//RS                 let argument = if self
+//RS                     .callable_borrow_mask(self.value_type(function, closure))
+//RS                     .first()
+//RS                     .copied()
+//RS                     .unwrap_or(false)
+//RS                 {
+//RS                     "&__jet_host_arg"
+//RS                 } else {
+//RS                     "__jet_host_arg"
+//RS                 };
+//RS                 let invocation = if send_fn || self.history_runtime_metadata_enabled() {
+//RS                     format!("(__jet_host_callback)({argument})")
+//RS                 } else {
+//RS                     self.fn_value_call(
+//RS                         "__jet_host_callback.clone()".to_string(),
+//RS                         &[argument.to_string()],
+//RS                     )
+//RS                 };
+//RS                 format!(
+//RS                     "{{ let __jet_host_callback = {callback}; move |__jet_host_arg| {invocation} }}"
+//RS                 )
+//RS             }
+//RS             _ => panic!("native callback adapter supports at most one parameter"),
+//RS         }
+//RS     }
+//RS 
+//RS     fn core_closure_call(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         kind: MirCoreClosureKind,
+//RS         values: &[MirValueId],
+//RS         closure: Option<MirValueId>,
+//RS         _site: jet_foundation::MIR::MirSiteId,
+//RS         _label: &str,
+//RS     ) -> String {
+//RS         let preview_source = match &kind {
+//RS             MirCoreClosureKind::UiPreview {
+//RS                 source_file,
+//RS                 source_start_line,
+//RS                 source_start_column,
+//RS                 source_end_line,
+//RS                 source_end_column,
+//RS                 build_id,
+//RS                 revision,
+//RS                 ..
+//RS             } => Some((
+//RS                 source_file.clone(),
+//RS                 *source_start_line,
+//RS                 *source_start_column,
+//RS                 *source_end_line,
+//RS                 *source_end_column,
+//RS                 build_id.clone(),
+//RS                 revision.clone(),
+//RS             )),
+//RS             _ => None,
+//RS         };
+//RS         let mut args = Vec::new();
+//RS         match kind {
+//RS             MirCoreClosureKind::Spawn => match values {
+//RS                 [site, label] => {
+//RS                     let closure = closure.unwrap_or_else(|| {
+//RS                         panic!("MIR CoreClosureCall Spawn has no checked closure value")
+//RS                     });
+//RS                     let site = format!(
+//RS                         "usize::try_from({}).unwrap_or_else(|_| {}jet_arithmetic_stop(\"<mir>\", 0, \"spawn site is negative or exceeds usize range\"))",
+//RS                         self.native_int_argument(self.value_move(*site), None),
+//RS                         self.config.root_prefix,
+//RS                     );
+//RS                     args.push(site);
+//RS                     args.push(format!("&({})", self.value_move(*label)));
+//RS                     args.push(format!(
+//RS                         "{{ let __jet_callback = {}; move || (__jet_callback)() }}",
+//RS                         self.value_move(closure),
+//RS                     ));
+//RS                 }
+//RS                 [group, site, label] => {
+//RS                     let closure = closure.unwrap_or_else(|| {
+//RS                         panic!("MIR CoreClosureCall Spawn has no checked closure value")
+//RS                     });
+//RS                     let site = format!(
+//RS                         "usize::try_from({}).unwrap_or_else(|_| {}jet_arithmetic_stop(\"<mir>\", 0, \"spawn site is negative or exceeds usize range\"))",
+//RS                         self.native_int_argument(self.value_move(*site), None),
+//RS                         self.config.root_prefix,
+//RS                     );
+//RS                     args.push(self.borrowed_value_reference(function, *group, MirAccess::Read));
+//RS                     args.push(site);
+//RS                     args.push(format!("&({})", self.value_move(*label)));
+//RS                     args.push(format!(
+//RS                         "{{ let __jet_callback = {}; move || (__jet_callback)() }}",
+//RS                         self.value_move(closure),
+//RS                     ));
+//RS                 }
+//RS                 _ => panic!(
+//RS                     "MIR CoreClosureCall Spawn has {} value operands; expected two or three",
+//RS                     values.len()
+//RS                 ),
+//RS             },
+//RS             MirCoreClosureKind::Realtime => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall Realtime has no checked closure value")
+//RS                 });
+//RS                 if values.len() != 2 {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall Realtime has {} value operands; expected rate and frames",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.value_move(values[0]));
+//RS                 args.push(self.value_move(values[1]));
+//RS                 args.push(self.value_move(closure));
+//RS             }
+//RS             MirCoreClosureKind::Serve => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall Serve has no checked closure value")
+//RS                 });
+//RS                 if values.len() != 1 {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall Serve has {} value operands; expected one address",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.value_borrow(values[0]));
+//RS                 args.push(self.value_move(closure));
+//RS             }
+//RS             MirCoreClosureKind::OnInterrupt => {
+//RS                 if closure.is_some() || values.len() != 1 {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall OnInterrupt requires one callback value and no closure field"
+//RS                     );
+//RS                 }
+//RS                 args.push(self.value_move(values[0]));
+//RS             }
+//RS             MirCoreClosureKind::Guard => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall Guard has no checked closure value")
+//RS                 });
+//RS                 if !values.is_empty() {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall Guard has {} value operands; expected none",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 // `jet_scope_guard<F: FnOnce()>` calls a host closure, not
+//RS                 // the Rc callable carrier.
+//RS                 args.push(self.native_callback_adapter(function, closure, 0));
+//RS             }
+//RS             MirCoreClosureKind::OnCommit => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall OnCommit has no checked closure value")
+//RS                 });
+//RS                 if values.len() != 1 {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall OnCommit has {} value operands; expected one handle",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.mutable_receiver_reference(function, values[0]));
+//RS                 args.push(format!(
+//RS                     "Box::new({})",
+//RS                     self.native_callback_adapter(function, closure, 0)
+//RS                 ));
+//RS             }
+//RS             MirCoreClosureKind::OnRollback => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall OnRollback has no checked closure value")
+//RS                 });
+//RS                 if values.len() != 1 {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall OnRollback has {} value operands; expected one handle",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.mutable_receiver_reference(function, values[0]));
+//RS                 args.push(format!(
+//RS                     "Box::new({})",
+//RS                     self.native_callback_adapter(function, closure, 0)
+//RS                 ));
+//RS             }
+//RS             MirCoreClosureKind::ReactiveDerived => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall ReactiveDerived has no checked closure value")
+//RS                 });
+//RS                 if !values.is_empty() {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall ReactiveDerived has {} value operands; expected none",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.native_callback_adapter(function, closure, 0));
+//RS             }
+//RS             MirCoreClosureKind::ReactiveEffect => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall ReactiveEffect has no checked closure value")
+//RS                 });
+//RS                 if !values.is_empty() {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall ReactiveEffect has {} value operands; expected none",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.native_callback_adapter(function, closure, 0));
+//RS             }
+//RS             MirCoreClosureKind::UiMount => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall UiMount has no checked closure value")
+//RS                 });
+//RS                 if !values.is_empty() {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall UiMount has {} value operands; expected none",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.native_callback_adapter(function, closure, 0));
+//RS             }
+//RS             MirCoreClosureKind::UiPreview { .. } => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall UIPreview has no checked closure value")
+//RS                 });
+//RS                 if values.len() != 2 {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall UIPreview has {} value operands; expected name and viewport",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.value_borrow(values[0]));
+//RS                 args.push(self.value_move(values[1]));
+//RS                 args.push(self.native_callback_adapter(function, closure, 0));
+//RS             }
+//RS             MirCoreClosureKind::UiAction => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall UiAction has no checked closure value")
+//RS                 });
+//RS                 if values.len() != 3 {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall UiAction has {} value operands; expected display, shortcut, accessible label",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.value_borrow(values[0]));
+//RS                 args.push(self.value_move(values[1]));
+//RS                 args.push(self.value_move(values[2]));
+//RS                 args.push(self.native_callback_adapter(function, closure, 0));
+//RS             }
+//RS             MirCoreClosureKind::UiTextInputOnDrop => {
+//RS                 let closure = closure.unwrap_or_else(|| {
+//RS                     panic!("MIR CoreClosureCall UiTextInputOnDrop has no checked closure value")
+//RS                 });
+//RS                 if values.len() != 2 {
+//RS                     panic!(
+//RS                         "MIR CoreClosureCall UiTextInputOnDrop has {} value operands; expected state and IME mode",
+//RS                         values.len()
+//RS                     );
+//RS                 }
+//RS                 args.push(self.value_borrow(values[0]));
+//RS                 args.push(self.value_move(values[1]));
+//RS                 args.push(self.native_callback_adapter(function, closure, 1));
+//RS             }
+//RS         }
+//RS         let emitted = self.prelude_call_args_exact(call, &args);
+//RS         if let Some((
+//RS             source_file,
+//RS             source_start_line,
+//RS             source_start_column,
+//RS             source_end_line,
+//RS             source_end_column,
+//RS             build_id,
+//RS             revision,
+//RS         )) = preview_source
+//RS         {
+//RS             let source_id = source_file.clone();
+//RS             format!(
+//RS                 "{}jet_ui_preview_attach_compiler_source({emitted}, {source_id:?}, {source_file:?}, {build_id:?}, {revision:?}, {source_start_line}u32, {source_start_column}u32, {source_end_line}u32, {source_end_column}u32)",
+//RS                 self.config.root_prefix,
+//RS             )
+//RS         } else {
+//RS             emitted
+//RS         }
+//RS     }
+//RS 
+//RS     fn prelude_values(&self, call: MirPreludeCallId, values: &[MirValueId]) -> String {
+//RS         let row = self.prelude_row(call);
+//RS         self.validate_prelude_count(row, values.len());
+//RS         let symbol = self.prelude_symbol(call);
+//RS         let adapter = self.exact_prelude_adapter(&symbol);
+//RS         let args = values
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(index, value)| {
+//RS                 if row.signature.borrow_mask[index]
+//RS                     || adapter.is_some_and(|(_, positions)| positions.contains(&index))
+//RS                     || Self::canonical_math_borrow(&symbol, index)
+//RS                 {
+//RS                     self.value_slot_reference(*value, false)
+//RS                 } else {
+//RS                     self.value_owned(*value)
+//RS                 }
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let symbol = adapter
+//RS             .map(|(name, _)| format!("{}{name}", self.config.root_prefix))
+//RS             .unwrap_or(symbol);
+//RS         format!("{symbol}({args})")
+//RS     }
+//RS 
+//RS     fn prelude_call_args(&self, call: MirPreludeCallId, args: &[String]) -> String {
+//RS         let row = self.prelude_row(call);
+//RS         self.validate_prelude_count(row, args.len());
+//RS         format!("{}({})", self.prelude_symbol(call), args.join(", "))
+//RS     }
+//RS 
+//RS     fn list_aggregate_builder(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         receiver: MirValueId,
+//RS         result: Option<MirValueId>,
+//RS     ) -> String {
+//RS         if self.value_type(function, receiver).list_element().is_none() {
+//RS             panic!("MIR list aggregate route has a non-list receiver");
+//RS         }
+//RS         let result = result.unwrap_or_else(|| panic!("MIR list aggregate route has no result"));
+//RS         let result_type = self.value_type(function, result);
+//RS         let result_type = result_type
+//RS             .option_inner()
+//RS             .or_else(|| result_type.result_parts().map(|(ok, _)| ok))
+//RS             .unwrap_or(result_type);
+//RS         match result_type.kind() {
+//RS             MirTypeKind::Tuple(fields) => {
+//RS                 if fields.len() != 2 || fields[0].0 != "min" || fields[1].0 != "max" {
+//RS                     panic!("MIR list aggregate result is not the checked min/max shape");
+//RS                 }
+//RS                 "|min, max| (min, max)".to_string()
+//RS             }
+//RS             MirTypeKind::Apply { .. } => {
+//RS                 let type_id = result_type
+//RS                     .nominal_id()
+//RS                     .unwrap_or_else(|| panic!("MIR list aggregate result has no nominal type"));
+//RS                 let definition = self.type_def(type_id);
+//RS                 let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+//RS                     panic!("MIR list aggregate result is not a record");
+//RS                 };
+//RS                 if fields.len() != 2
+//RS                     || !fields.iter().any(|field| field.name == "min")
+//RS                     || !fields.iter().any(|field| field.name == "max")
+//RS                 {
+//RS                     panic!("MIR list aggregate result is not the checked min/max shape");
+//RS                 }
+//RS                 let min = fields
+//RS                     .iter()
+//RS                     .find(|field| field.name == "min")
+//RS                     .expect("checked min field");
+//RS                 let max = fields
+//RS                     .iter()
+//RS                     .find(|field| field.name == "max")
+//RS                     .expect("checked max field");
+//RS                 format!(
+//RS                     "|min, max| {} {{ {}: min, {}: max }}",
+//RS                     self.rust_type(result_type),
+//RS                     self.field_name(min.id),
+//RS                     self.field_name(max.id),
+//RS                 )
+//RS             }
+//RS             _ => panic!("MIR list aggregate result is not the checked min/max shape"),
+//RS         }
+//RS     }
+//RS     fn map_aggregate_builder(&self, function: &MirFunction, result: Option<MirValueId>) -> String {
+//RS         let result = result.unwrap_or_else(|| panic!("MIR map aggregate route has no result"));
+//RS         let element = self
+//RS             .value_type(function, result)
+//RS             .list_element()
+//RS             .unwrap_or_else(|| panic!("MIR map aggregate route has a non-list result"));
+//RS         let MirTypeKind::Tuple(fields) = element.kind() else {
+//RS             panic!("MIR map aggregate result is not a named tuple");
+//RS         };
+//RS         if fields.len() != 2 || fields[0].0 != "key" || fields[1].0 != "value" {
+//RS             panic!("MIR map aggregate result is not the checked key/value shape");
+//RS         }
+//RS         "|key, value| (key, value)".to_string()
+//RS     }
+//RS 
+//RS     fn canonical_builtin_optional_result(&self, call: MirPreludeCallId, value: String) -> String {
+//RS         let route = self.prelude_row(call);
+//RS         if route.family == MirPreludeFamily::BuiltinMethod
+//RS             && route.module == "core.builtin"
+//RS             && matches!(
+//RS                 route.symbol.name(),
+//RS                 "jet_unicode_index_of" | "jet_unicode_last_index_of"
+//RS             )
+//RS             && matches!(
+//RS                 route.fallibility,
+//RS                 MirCallFallibility::Failure(MirFailureCarrier::Optional { .. })
+//RS             )
+//RS         {
+//RS             format!("({value}).ok_or({}JetAbsent)", self.config.root_prefix)
+//RS         } else {
+//RS             value
+//RS         }
+//RS     }
+//RS 
+//RS     fn prelude_values_with_receiver(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         receiver: MirValueId,
+//RS         receiver_place: Option<MirPlaceId>,
+//RS         args: &[MirValueId],
+//RS         result: Option<MirValueId>,
+//RS     ) -> String {
+//RS         let row = self.prelude_row(call);
+//RS         let view_new = row.family == MirPreludeFamily::BuiltinMethod
+//RS             && row.module == "core.builtin"
+//RS             && matches!(row.member.as_str(), "view_new" | "view_mut_new");
+//RS         if !view_new {
+//RS             self.validate_prelude_count(row, args.len() + 1);
+//RS             if row.signature.borrow_mask.len() != args.len() + 1 {
+//RS                 panic!(
+//RS                     "MIR builtin route {:?} has inconsistent receiver/argument borrow metadata",
+//RS                     call
+//RS                 );
+//RS             }
+//RS         }
+//RS         // `String.bytes()` on an owned rvalue consumes the String, matching
+//RS         // the checked ownership fact instead of cloning it through the
+//RS         // generic Prelude call path.
+//RS         if row.family == MirPreludeFamily::BuiltinMethod
+//RS             && row.module == "core.builtin"
+//RS             && row.member == "bytes"
+//RS             && receiver_place.is_none()
+//RS             && row.signature.borrow_mask.first() == Some(&false)
+//RS         {
+//RS             return format!("({}).into_bytes()", self.value_move(receiver));
+//RS         }
+//RS         let receiver_value = receiver;
+//RS         let literal_string_iter_route = matches!(
+//RS             row.symbol.name(),
+//RS             "jet_iter_string_split" | "jet_iter_string_rsplit"
+//RS         );
+//RS         let receiver = if literal_string_iter_route
+//RS             && receiver_place.is_none()
+//RS             && row.signature.borrow_mask.first().copied() == Some(true)
+//RS         {
+//RS             self.literal_string_value(function, receiver_value)
+//RS                 .map(|value| format!("{value:?}"))
+//RS                 .unwrap_or_else(|| {
+//RS                     self.borrowed_value_reference(function, receiver_value, MirAccess::Read)
+//RS                 })
+//RS         } else if let Some(place) = receiver_place {
+//RS             if !row.signature.borrow_mask[0] {
+//RS                 panic!(
+//RS                     "MIR builtin mutating receiver route {:?} is not borrowed",
+//RS                     call
+//RS                 );
+//RS             }
+//RS             self.place_reference(function, place, MirAccess::Write)
+//RS         } else if row.signature.borrow_mask[0] {
+//RS             self.borrowed_value_reference(function, receiver, MirAccess::Read)
+//RS         } else {
+//RS             self.value_move(receiver)
+//RS         };
+//RS         if view_new {
+//RS             let (file, line, _) = self.function_stack_context(function);
+//RS             let file = format!("{file:?}");
+//RS             let line = format!("{line}u32");
+//RS             let (symbol, arguments) = match args {
+//RS                 [range] => {
+//RS                     let range = self.value_owned(*range);
+//RS                     let symbol = if row.member == "view_mut_new" {
+//RS                         self.prelude_symbol(call)
+//RS                             .replace("jet_view_mut_new", "jet_view_mut_new_range")
+//RS                     } else {
+//RS                         self.prelude_symbol(call)
+//RS                             .replace("jet_view_new", "jet_view_new_range")
+//RS                     };
+//RS                     (symbol, format!("{receiver}, &({range}), {file}, {line}"))
+//RS                 }
+//RS                 [start, end] => {
+//RS                     let start = self.value_owned(*start);
+//RS                     let end = self.value_owned(*end);
+//RS                     (
+//RS                         self.prelude_symbol(call),
+//RS                         format!("{receiver}, {start}, {end}, {file}, {line}"),
+//RS                     )
+//RS                 }
+//RS                 _ => panic!("MIR {} route expects one range or two bounds", row.member),
+//RS             };
+//RS             return format!("{symbol}({arguments})");
+//RS         }
+//RS         if row.abi == MirPreludeAbi::Aggregate
+//RS             && row.module == "core.list"
+//RS             && row.member == "min_max"
+//RS         {
+//RS             assert!(
+//RS                 args.is_empty(),
+//RS                 "MIR List.min_max route has unexpected arguments"
+//RS             );
+//RS             let symbol = if self
+//RS                 .value_type(function, receiver_value)
+//RS                 .list_element()
+//RS                 .is_some_and(|element| matches!(element.kind(), MirTypeKind::Float))
+//RS             {
+//RS                 format!("{}jet_list_min_max_float", self.config.root_prefix)
+//RS             } else {
+//RS                 self.prelude_symbol(call)
+//RS             };
+//RS             return format!(
+//RS                 "{}({receiver}, {})",
+//RS                 symbol,
+//RS                 self.list_aggregate_builder(function, receiver_value, result),
+//RS             );
+//RS         }
+//RS         if row.abi == MirPreludeAbi::Aggregate
+//RS             && row.module == "core.map"
+//RS             && row.member == "to_list"
+//RS         {
+//RS             assert!(
+//RS                 args.is_empty(),
+//RS                 "MIR Map.to_list route has unexpected arguments"
+//RS             );
+//RS             return format!(
+//RS                 "{}({receiver}, {})",
+//RS                 self.prelude_symbol(call),
+//RS                 self.map_aggregate_builder(function, result),
+//RS             );
+//RS         }
+//RS         // `Int.to_radix(base)` is checked `String`: the exact Int kernel
+//RS         // takes both owned Ints by reference and its invalid-radix failure
+//RS         // stops the program like any other Int fault (the builtin route
+//RS         // carries no source location, as for `native_int_argument`).
+//RS         if row.module == "core.builtin" && row.member == "int_to_radix" {
+//RS             let [radix] = args else {
+//RS                 panic!("MIR Int.to_radix route expects one radix argument");
+//RS             };
+//RS             let root = &self.config.root_prefix;
+//RS             return format!(
+//RS                 "{root}jet_std::jet_int_owned_to_radix({}, {}).unwrap_or_else(|error| {root}jet_arithmetic_stop(\"<mir>\", 0u32, &error))",
+//RS                 self.borrowed_value_reference(function, receiver_value, MirAccess::Read),
+//RS                 self.borrowed_value_reference(function, *radix, MirAccess::Read),
+//RS             );
+//RS         }
+//RS         let mut values = vec![receiver];
+//RS         values.extend(args.iter().enumerate().map(|(index, value_id)| {
+//RS             let borrowed = row.signature.borrow_mask[index + 1];
+//RS             let value = if borrowed {
+//RS                 if literal_string_iter_route {
+//RS                     self.literal_string_value(function, *value_id)
+//RS                         .map(|value| format!("{value:?}"))
+//RS                         .unwrap_or_else(|| {
+//RS                             self.borrowed_value_reference(function, *value_id, MirAccess::Read)
+//RS                         })
+//RS                 } else {
+//RS                     self.borrowed_value_reference(function, *value_id, MirAccess::Read)
+//RS                 }
+//RS             } else {
+//RS                 self.value_consume(function, *value_id)
+//RS             };
+//RS             let atomic_wire = row.family == MirPreludeFamily::BuiltinMethod
+//RS                 && row.module == "core.mem"
+//RS                 && !borrowed
+//RS                 && matches!(
+//RS                     self.value_type(function, *value_id).kind(),
+//RS                     MirTypeKind::Int
+//RS                 );
+//RS             if atomic_wire
+//RS                 || (row.module == "core.builtin"
+//RS                     && matches!(row.member.as_str(), "string_slice" | "list_slice")
+//RS                     && index < 2
+//RS                     && matches!(
+//RS                         self.value_type(function, *value_id).kind(),
+//RS                         MirTypeKind::Int
+//RS                     ))
+//RS                 || ((row.module == "core.builtin"
+//RS                     && matches!(
+//RS                         row.member.as_str(),
+//RS                         "iter_take"
+//RS                             | "iter_skip"
+//RS                             | "iter_step_by"
+//RS                             | "iter_chunks"
+//RS                             | "iter_windows"
+//RS                             | "iter_repeat"
+//RS                             | "iter_cycle"
+//RS                             | "iter_drop_last"
+//RS                             | "map_top_n"
+//RS                             | "list_remove_slot"
+//RS                     )
+//RS                     || row.symbol.name() == "jet_list_insert")
+//RS                     && index == 0
+//RS                     && matches!(
+//RS                         self.value_type(function, *value_id).kind(),
+//RS                         MirTypeKind::Int
+//RS                     ))
+//RS             {
+//RS                 self.native_int_argument(value, None)
+//RS             } else {
+//RS                 value
+//RS             }
+//RS         }));
+//RS         // An exact adapter that changes only the result carrier (`Int.parse`
+//RS         // returns an owned `Int`, never a packed native word) applies to this
+//RS         // receiver route exactly as it does to a direct Prelude call.
+//RS         let symbol = self.prelude_symbol(call);
+//RS         let symbol = match self.exact_prelude_adapter(&symbol) {
+//RS             Some((name, [])) => format!("{}{name}", self.config.root_prefix),
+//RS             _ => symbol,
+//RS         };
+//RS         format!("{symbol}({})", values.join(", "))
+//RS     }
+//RS 
+//RS     fn prelude_receiver_is_mutating(&self, row: &MirPreludeCall) -> bool {
+//RS         row.family == MirPreludeFamily::ClosureMethod
+//RS             && matches!(
+//RS                 row.symbol.name(),
+//RS                 "jet_edit_disjoint"
+//RS                     | "jet_list_sort_by"
+//RS                     | "jet_list_sort_by_desc"
+//RS                     | "jet_list_try_sort_by"
+//RS                     | "jet_list_try_sort_by_desc"
+//RS                     | "jet_list_sort_by_compare"
+//RS                     | "jet_list_update_first"
+//RS             )
+//RS     }
+//RS 
+//RS     fn closure_callback_params(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS     ) -> Option<Vec<MirType>> {
+//RS         match self.value_type(function, value).kind() {
+//RS             MirTypeKind::Fn(signature) => Some(signature.params.clone()),
+//RS             MirTypeKind::SendFn { params, .. } => Some(params.clone()),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn closure_route_uses_borrowed_callback(
+//RS         &self,
+//RS         row: &MirPreludeCall,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS     ) -> bool {
+//RS         if row.family != MirPreludeFamily::ClosureMethod
+//RS             || self.closure_callback_params(function, value).is_none()
+//RS         {
+//RS             return false;
+//RS         }
+//RS         match row.module.as_str() {
+//RS             "core.collections" | "core.list" | "core.iter" | "core.map" | "core.view"
+//RS             | "core.option" | "core.bag" => true,
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn host_borrow_callback_value(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS         adapt_unit_result: bool,
+//RS         parallel_adapter: bool,
+//RS     ) -> Option<String> {
+//RS         self.value_instruction(function, value)
+//RS             .and_then(|instruction| {
+//RS                 match &instruction.operation {
+//RS                     MirOperation::Semantic(MirSemanticOp::HostBorrowCallback {
+//RS                         callable,
+//RS                         params,
+//RS                     }) => {
+//RS                         let callback = self.host_callback(
+//RS                             function,
+//RS                             *callable,
+//RS                             params,
+//RS                             true,
+//RS                             adapt_unit_result,
+//RS                         );
+//RS                         let callback = if parallel_adapter
+//RS                             && matches!(
+//RS                                 self.value_type(function, value).kind(),
+//RS                                 MirTypeKind::SendFn { .. }
+//RS                             ) {
+//RS                             self.send_callback_fn_wrapper(callback, params, true)
+//RS                         } else {
+//RS                             callback
+//RS                         };
+//RS                         Some(callback)
+//RS                     }
+//RS                     _ => None,
+//RS                 }
+//RS             })
+//RS     }
+//RS 
+//RS     fn mutable_receiver_reference(&self, function: &MirFunction, value: MirValueId) -> String {
+//RS         let instruction = self
+//RS             .value_instruction(function, value)
+//RS             .unwrap_or_else(|| panic!("MIR mutating receiver value {:?} has no definition", value));
+//RS         match &instruction.operation {
+//RS             MirOperation::AddressOf { place, .. } | MirOperation::ReadPlace(place) => {
+//RS                 self.place_reference(function, *place, MirAccess::Write)
+//RS             }
+//RS             MirOperation::Parameter { .. } | MirOperation::Capture { .. } => {
+//RS                 format!("&mut ({})", self.parameter_place(function, value, true))
+//RS             }
+//RS             _ => self.value_slot_reference(value, true),
+//RS         }
+//RS     }
+//RS 
+//RS     fn closure_call_argument(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         row: &MirPreludeCall,
+//RS         index: usize,
+//RS         arg: &MirCallArg,
+//RS     ) -> String {
+//RS         let borrowed = row.signature.borrow_mask[index + 1];
+//RS         let adapt_unit_result = row.symbol.name() == "jet_list_each_ref";
+//RS         if let Some(callback) = self.host_borrow_callback_value(
+//RS             function,
+//RS             arg.value,
+//RS             adapt_unit_result,
+//RS             row.member.starts_with("para_"),
+//RS         ) {
+//RS             return callback;
+//RS         }
+//RS         // `.indexed()` rows: `jet_iter_enumerate` calls a host `FnMut(i64, &T)`.
+//RS         if row.module == "core.builtin" && row.member == "iter_enumerate" && index == 0 {
+//RS             return self.host_callback_with_inputs(function, arg.value, &[false, true]);
+//RS         }
+//RS         if self.closure_route_uses_borrowed_callback(row, function, arg.value) {
+//RS             if !matches!(
+//RS                 self.value_definition(function, arg.value),
+//RS                 Some(MirOperation::Closure { .. })
+//RS             ) {
+//RS                 panic!(
+//RS                     "MIR borrowed callback argument {:?} is not an owned closure value",
+//RS                     arg.value
+//RS                 );
+//RS             }
+//RS             let params = self
+//RS                 .closure_callback_params(function, arg.value)
+//RS                 .unwrap_or_else(|| panic!("MIR borrowed callback has no callable signature"));
+//RS             let borrow_inputs = !(row.module == "core.iter"
+//RS                 && matches!(row.member.as_str(), "zip" | "zip_strict" | "zip_pad"));
+//RS             let callback = self.host_callback(
+//RS                 function,
+//RS                 arg.value,
+//RS                 &params,
+//RS                 borrow_inputs,
+//RS                 adapt_unit_result,
+//RS             );
+//RS             if row.member.starts_with("para_")
+//RS                 && matches!(
+//RS                     self.value_type(function, arg.value).kind(),
+//RS                     MirTypeKind::SendFn { .. }
+//RS                 )
+//RS             {
+//RS                 return self.send_callback_fn_wrapper(callback, &params, borrow_inputs);
+//RS             }
+//RS             return callback;
+//RS         }
+//RS         self.call_arg_for_function(function, arg, borrowed)
+//RS     }
+//RS 
+//RS     fn prelude_receiver_call(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         receiver: MirValueId,
+//RS         args: &[MirCallArg],
+//RS         result: Option<MirValueId>,
+//RS     ) -> String {
+//RS         let row = self.prelude_row(call);
+//RS         self.validate_prelude_count(row, args.len() + 1);
+//RS         if row.signature.borrow_mask.len() != args.len() + 1 {
+//RS             panic!(
+//RS                 "MIR closure route {:?} has inconsistent receiver/argument borrow metadata",
+//RS                 call
+//RS             );
+//RS         }
+//RS         let receiver_value = receiver;
+//RS         let receiver = if self.prelude_receiver_is_mutating(row) {
+//RS             if !row.signature.borrow_mask[0] {
+//RS                 panic!("MIR mutating closure route {:?} is not borrowed", call);
+//RS             }
+//RS             self.mutable_receiver_reference(function, receiver)
+//RS         } else if row.signature.borrow_mask[0] {
+//RS             self.borrowed_value_reference(function, receiver, MirAccess::Read)
+//RS         } else {
+//RS             self.value_move(receiver)
+//RS         };
+//RS         if row.abi == MirPreludeAbi::Aggregate
+//RS             && row.module == "core.list"
+//RS             && row.member == "min_max_by"
+//RS         {
+//RS             assert_eq!(
+//RS                 args.len(),
+//RS                 1,
+//RS                 "MIR List.min_max_by route expects one callback"
+//RS             );
+//RS             let callback = self.closure_call_argument(function, row, 0, &args[0]);
+//RS             return format!(
+//RS                 "{}({receiver}, {callback}, {})",
+//RS                 self.prelude_symbol(call),
+//RS                 self.list_aggregate_builder(function, receiver_value, result),
+//RS             );
+//RS         }
+//RS         let mut values = vec![receiver];
+//RS         values.extend(
+//RS             args.iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, arg)| self.closure_call_argument(function, row, index, arg)),
+//RS         );
+//RS         let emitted = format!("{}({})", self.prelude_symbol(call), values.join(", "));
+//RS         if row.symbol.name() == "jet_list_each_ref"
+//RS             && result.is_none_or(|value| {
+//RS                 !matches!(
+//RS                     self.value_type(function, value).kind(),
+//RS                     MirTypeKind::Result { .. }
+//RS                 )
+//RS             })
+//RS         {
+//RS             format!("({emitted})?")
+//RS         } else {
+//RS             emitted
+//RS         }
+//RS     }
+//RS 
+//RS     fn local_read(&self, function: &MirFunction, id: jet_foundation::MIR::MirLocalId) -> String {
+//RS         let local = function
+//RS             .locals
+//RS             .iter()
+//RS             .find(|local| local.id == id)
+//RS             .unwrap_or_else(|| panic!("MIR local ID {:?} has no row", id));
+//RS         self.place_read(function, local.place)
+//RS     }
+//RS 
+//RS     fn place_read(&self, function: &MirFunction, id: MirPlaceId) -> String {
+//RS         let place = self
+//RS             .place_row(function, id)
+//RS             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
+//RS         if place.projections.is_empty() {
+//RS             match &place.base {
+//RS                 MirPlaceBase::Local(local) => {
+//RS                     // A reference binding reads (copies) its referent.
+//RS                     if self.ref_binding_local(function, *local) {
+//RS                         return format!(
+//RS                             "(**{}.as_ref().expect(\"MIR local\")).clone()",
+//RS                             local_slot(*local)
+//RS                         );
+//RS                     }
+//RS                     if self.local_uninit_fixed_type(function, *local).is_some() {
+//RS                         return format!(
+//RS                             "{}.as_ref().expect(\"MIR local\").read_array()",
+//RS                             self.local_storage(function, *local)
+//RS                         );
+//RS                     }
+//RS                     if self.local_allocator_view(function, *local) {
+//RS                         return format!(
+//RS                             "&mut **{}.as_mut().expect(\"MIR local\")",
+//RS                             self.local_storage(function, *local)
+//RS                         );
+//RS                     }
+//RS                     let local_row = function
+//RS                         .locals
+//RS                         .iter()
+//RS                         .find(|candidate| candidate.id == *local)
+//RS                         .unwrap_or_else(|| panic!("MIR local ID {:?} has no row", local));
+//RS                     if is_allocator_result_type(&local_row.ty) {
+//RS                         return format!(
+//RS                             "{}.as_ref().expect(\"MIR local\").clone()",
+//RS                             self.local_storage(function, *local)
+//RS                         );
+//RS                     }
+//RS                     return format!(
+//RS                         "{}.as_ref().expect(\"MIR local\").clone()",
+//RS                         self.local_storage(function, *local)
+//RS                     );
+//RS                 }
+//RS                 MirPlaceBase::Temporary(value) => return self.value_owned(*value),
+//RS                 MirPlaceBase::Static(name) => {
+//RS                     return format!("({}{}).get()", self.config.root_prefix, mangle_path(name));
+//RS                 }
+//RS                 MirPlaceBase::Parameter(_) | MirPlaceBase::Capture(_) => {}
+//RS             }
+//RS         }
+//RS 
+//RS         let value = self.place_base(function, &place.base, false, &place.projections);
+//RS         // A native host record's Int slot widens on every read, exactly as the
+//RS         // value-level field read does, including a payload projected out of
+//RS         // that slot (`limits.max_total_bytes` matched as `.Val(max)`).
+//RS         let payloads = place
+//RS             .projections
+//RS             .iter()
+//RS             .rev()
+//RS             .take_while(|projection| matches!(projection, MirProjection::Payload { .. }))
+//RS             .count();
+//RS         let native_slot = match place.projections.iter().rev().nth(payloads) {
+//RS             Some(MirProjection::Field { field, .. }) if payloads == 0 => {
+//RS                 self.native_host_field_type(*field)
+//RS             }
+//RS             Some(MirProjection::Field { field, .. }) => {
+//RS                 self.native_host_field_type(*field).map(|_| &place.ty)
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         let range_window = match (place.projections.last(), &place.base) {
+//RS             (Some(MirProjection::Range { .. }), _) => true,
+//RS             (None, MirPlaceBase::Parameter(value)) => self.window_parameter_value(function, *value),
+//RS             _ => false,
+//RS         };
+//RS         let read = if range_window {
+//RS             format!("({value}).to_vec()")
+//RS         } else {
+//RS             format!("({value}).clone()")
+//RS         };
+//RS         native_slot
+//RS             .and_then(|ty| self.native_int_result(&read, ty))
+//RS             .unwrap_or(read)
+//RS     }
+//RS 
+//RS     fn move_parameter_name(&self, function: &MirFunction, value: MirValueId) -> String {
+//RS         if self.binding_uses_move_slot(function, value) {
+//RS             return format!("{}.take().expect(\"MIR parameter\")", value_slot(value));
+//RS         }
+//RS         let parameter = self
+//RS             .value_instruction(function, value)
+//RS             .and_then(|instruction| {
+//RS                 if let MirOperation::Parameter { index, .. } = &instruction.operation {
+//RS                     function.params.iter().find(|param| param.index == *index)
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             })
+//RS             .unwrap_or_else(|| panic!("MIR parameter value {:?} has no parameter row", value));
+//RS         if self.is_receiver(function, parameter) {
+//RS             return "self".to_string();
+//RS         }
+//RS         mangle(&parameter.name)
+//RS     }
+//RS 
+//RS     fn move_capture_name(&self, function: &MirFunction, value: MirValueId) -> String {
+//RS         if self.binding_uses_move_slot(function, value) {
+//RS             return format!("{}.take().expect(\"MIR capture\")", value_slot(value));
+//RS         }
+//RS         let slot = self
+//RS             .value_instruction(function, value)
+//RS             .and_then(|instruction| {
+//RS                 if let MirOperation::Capture { slot } = &instruction.operation {
+//RS                     Some(*slot)
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             })
+//RS             .unwrap_or_else(|| panic!("MIR capture value {:?} has no capture row", value));
+//RS         self.capture_param(function, slot);
+//RS         if !self.capture_move_required(function, slot) {
+//RS             panic!("MIR MovePlace capture has no checked move fact");
+//RS         }
+//RS         let name = self.capture_param_name(slot);
+//RS         name
+//RS     }
+//RS 
+//RS     fn move_place_for_capture(&self, function: &MirFunction, id: MirPlaceId) -> String {
+//RS         let place = self
+//RS             .place_row(function, id)
+//RS             .unwrap_or_else(|| panic!("MIR capture move place ID {:?} has no row", id));
+//RS         if matches!(&place.base, MirPlaceBase::Static(_)) {
+//RS             panic!("MIR capture move place {:?} is a static place", id);
+//RS         }
+//RS         if place.projections.is_empty() {
+//RS             self.move_base(function, &place.base)
+//RS         } else {
+//RS             self.move_projected_place(function, place)
+//RS         }
+//RS     }
+//RS 
+//RS     fn move_base(&self, function: &MirFunction, base: &MirPlaceBase) -> String {
+//RS         if let Some(node) = self.partial_move_root(function, base) {
+//RS             return format!("{{ {} {}.take().expect(\"MIR whole move\") }}",
+//RS                 self.restore_partial_node(node), node.slot);
+//RS         }
+//RS         match base {
+//RS             MirPlaceBase::Local(local) => {
+//RS                 // Moving a reference binding's value out copies the referent.
+//RS                 if self.ref_binding_local(function, *local) {
+//RS                     return format!(
+//RS                         "(*{}.take().expect(\"MIR local\")).clone()",
+//RS                         local_slot(*local)
+//RS                     );
+//RS                 }
+//RS                 if self.local_uninit_fixed_type(function, *local).is_some() {
+//RS                     return format!(
+//RS                         "{}.take().expect(\"MIR local\").into_array()",
+//RS                         self.local_storage(function, *local)
+//RS                     );
+//RS                 }
+//RS                 format!(
+//RS                     "{}.take().expect(\"MIR local\")",
+//RS                     self.local_storage(function, *local)
+//RS                 )
+//RS             }
+//RS             MirPlaceBase::Temporary(value) => self.value_move(*value),
+//RS             MirPlaceBase::Parameter(value) => self.move_parameter_name(function, *value),
+//RS             MirPlaceBase::Capture(value) => self.move_capture_name(function, *value),
+//RS             MirPlaceBase::Static(name) => {
+//RS                 format!("({}{}).take()", self.config.root_prefix, mangle_path(name))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn move_index_projection(&self, kind: MirIndexKind, base: String, index: MirValueId) -> String {
+//RS         let index = self.value_owned(index);
+//RS         match kind {
+//RS             MirIndexKind::List | MirIndexKind::FixedListProof => format!(
+//RS                 "jet_list_remove_slot(&mut ({base}), {index}).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning list index move failed\"))"
+//RS             ),
+//RS             MirIndexKind::Map => format!(
+//RS                 "jet_map_pop_kernel(&mut ({base}), &({index})).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning map index move failed\"))"
+//RS             ),
+//RS             MirIndexKind::Pool => format!(
+//RS                 "({base}).remove({index}).unwrap_or_else(|_| jet_panic(\"<core.pool>\", 0, \"MIR owning pool index move failed\"))"
+//RS             ),
+//RS             MirIndexKind::Lane => {
+//RS                 panic!("MIR MovePlace lane index has no canonical owning collection primitive")
+//RS             }
+//RS         }
+//RS     }
+//RS     fn move_projection_chain(
+//RS         &self,
+//RS         mut expression: String,
+//RS         projections: &[MirProjection],
+//RS     ) -> String {
+//RS         if projections.is_empty() {
+//RS             return expression;
+//RS         }
+//RS         match &projections[0] {
+//RS             MirProjection::Field { field, .. } => {
+//RS                 expression = if self.boxed_field(*field) {
+//RS                     format!("(*({expression}).{})", self.field_name(*field))
+//RS                 } else {
+//RS                     format!("({expression}).{}", self.field_name(*field))
+//RS                 };
+//RS                 self.move_projection_chain(expression, &projections[1..])
+//RS             }
+//RS             MirProjection::Index { kind, index, .. } => {
+//RS                 let moved = self.move_index_projection(*kind, expression, *index);
+//RS                 if projections.len() == 1 {
+//RS                     moved
+//RS                 } else {
+//RS                     format!(
+//RS                         "{{ let mut __jet_move_value = {moved}; {} }}",
+//RS                         self.move_projection_chain(
+//RS                             "__jet_move_value".to_string(),
+//RS                             &projections[1..]
+//RS                         )
+//RS                     )
+//RS                 }
+//RS             }
+//RS             MirProjection::Deref { .. } => {
+//RS                 panic!("MIR MovePlace dereference has no canonical owned representation")
+//RS             }
+//RS             MirProjection::Payload { kind, .. } => {
+//RS                 let (pattern, boxed) = self.payload_pattern(kind);
+//RS                 let payload = if boxed { "*payload" } else { "payload" };
+//RS                 expression = format!(
+//RS                     "(match {expression} {{ {pattern} => {payload}, _ => unreachable!(\"MIR payload variant mismatch\") }})"
+//RS                 );
+//RS                 self.move_projection_chain(expression, &projections[1..])
+//RS             }
+//RS             MirProjection::Range { .. } => {
+//RS                 panic!("MIR MovePlace range window has no canonical owned representation")
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn move_projected_place(&self, function: &MirFunction, place: &MirPlace) -> String {
+//RS         if matches!(&place.base, MirPlaceBase::Static(_)) {
+//RS             panic!("MIR MovePlace projected static is rejected by the canonical front end");
+//RS         }
+//RS         if let Some(index) = place
+//RS             .projections
+//RS             .iter()
+//RS             .position(|projection| matches!(projection, MirProjection::Index { .. }))
+//RS         {
+//RS             // Remove from the live collection, leaving its other entries and
+//RS             // the enclosing record in place. Sema already checked the move.
+//RS             let owner = self.place_base(function, &place.base, true, &place.projections[..index]);
+//RS             return self.move_projection_chain(owner, &place.projections[index..]);
+//RS         }
+//RS         let fields = place.projections.iter().map(|projection| match projection {
+//RS             MirProjection::Field { field, .. } => *field,
+//RS             _ => panic!("checked projected move has no field storage"),
+//RS         }).collect::<Vec<_>>();
+//RS         let node = self.partial_move_root(function, &place.base)
+//RS             .expect("checked partial move has consuming field slots");
+//RS         format!("{{ {} }}", self.move_partial_field(node, &fields))
+//RS     }
+//RS 
+//RS     fn move_place(&self, function: &MirFunction, id: MirPlaceId) -> String {
+//RS         let place = self
+//RS             .place_row(function, id)
+//RS             .unwrap_or_else(|| panic!("MIR move place ID {:?} has no row", id));
+//RS         if place.access != MirAccess::Move {
+//RS             panic!("MIR MovePlace {:?} does not have move access", id);
+//RS         }
+//RS         if place.projections.is_empty() {
+//RS             return self.move_base(function, &place.base);
+//RS         }
+//RS         self.move_projected_place(function, place)
+//RS     }
+//RS 
+//RS     fn place_lvalue(&self, function: &MirFunction, id: MirPlaceId) -> String {
+//RS         let place = self
+//RS             .place_row(function, id)
+//RS             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
+//RS         if place.projections.is_empty() {
+//RS             match &place.base {
+//RS                 MirPlaceBase::Local(local) if self.local_allocator_view(function, *local) => {
+//RS                     return format!(
+//RS                         "**{}.as_mut().expect(\"MIR local\")",
+//RS                         self.local_storage(function, *local)
+//RS                     );
+//RS                 }
+//RS                 MirPlaceBase::Local(local) if self.ref_binding_local(function, *local) => {
+//RS                     panic!("MIR reference binding local {:?} has a write", local)
+//RS                 }
+//RS                 MirPlaceBase::Local(local) => return self.local_storage(function, *local),
+//RS                 MirPlaceBase::Temporary(value) => return value_slot(*value),
+//RS                 MirPlaceBase::Parameter(_) | MirPlaceBase::Capture(_) => {
+//RS                     return self.place_base(function, &place.base, true, &place.projections)
+//RS                 }
+//RS                 MirPlaceBase::Static(name) => {
+//RS                     return format!("{}{}", self.config.root_prefix, mangle_path(name))
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.place_base(function, &place.base, true, &place.projections)
+//RS     }
+//RS 
+//RS     fn place_base(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         base: &MirPlaceBase,
+//RS         mutable: bool,
+//RS         projections: &[MirProjection],
+//RS     ) -> String {
+//RS         let mut remaining = projections;
+//RS         let mut expression = if let Some(node) = self.partial_move_root(function, base) {
+//RS             let fields: Vec<_> = projections.iter().map_while(|projection| match projection {
+//RS                 MirProjection::Field { field, .. } => Some(*field),
+//RS                 _ => None,
+//RS             }).collect();
+//RS             remaining = &projections[fields.len()..];
+//RS             // The split slots keep a boxed recursive edge boxed; the place is
+//RS             // the edge's value, as for an unsplit owner below.
+//RS             let unbox = if fields.last().is_some_and(|field| self.boxed_field(*field)) {
+//RS                 "*"
+//RS             } else {
+//RS                 ""
+//RS             };
+//RS             format!("{unbox}*({})", self.partial_field_reference(node, &fields, mutable))
+//RS         } else {
+//RS             match base {
+//RS             MirPlaceBase::Local(local) => {
+//RS                 if self.ref_binding_local(function, *local) {
+//RS                     if mutable {
+//RS                         panic!("MIR reference binding local {:?} has a write", local);
+//RS                     }
+//RS                     format!("**{}.as_ref().expect(\"MIR local\")", local_slot(*local))
+//RS                 } else if self.local_uninit_fixed_type(function, *local).is_some() {
+//RS                     if mutable {
+//RS                         format!(
+//RS                             "*{}.as_mut().expect(\"MIR local\").as_array_mut()",
+//RS                             self.local_storage(function, *local)
+//RS                         )
+//RS                     } else {
+//RS                         format!(
+//RS                             "*{}.as_ref().expect(\"MIR local\").as_array()",
+//RS                             self.local_storage(function, *local)
+//RS                         )
+//RS                     }
+//RS                 } else if self.local_allocator_view(function, *local) {
+//RS                     if mutable {
+//RS                         format!(
+//RS                             "**{}.as_mut().expect(\"MIR local\")",
+//RS                             self.local_storage(function, *local)
+//RS                         )
+//RS                     } else {
+//RS                         format!(
+//RS                             "**{}.as_ref().expect(\"MIR local\")",
+//RS                             self.local_storage(function, *local)
+//RS                         )
+//RS                     }
+//RS                 } else if mutable {
+//RS                     format!(
+//RS                         "*{}.as_mut().expect(\"MIR local\")",
+//RS                         self.local_storage(function, *local)
+//RS                     )
+//RS                 } else {
+//RS                     format!(
+//RS                         "*{}.as_ref().expect(\"MIR local\")",
+//RS                         self.local_storage(function, *local)
+//RS                     )
+//RS                 }
+//RS             }
+//RS             MirPlaceBase::Parameter(value) => self.parameter_place(function, *value, mutable),
+//RS             MirPlaceBase::Capture(value) => self.capture_place(function, *value, mutable),
+//RS             MirPlaceBase::Temporary(value) => {
+//RS                 format!("*({})", self.value_slot_reference(*value, mutable))
+//RS             }
+//RS             MirPlaceBase::Static(name) => {
+//RS                 if mutable {
+//RS                     panic!("MIR mutable static projection has no canonical owning representation");
+//RS                 }
+//RS                 format!("({}{}).get()", self.config.root_prefix, mangle_path(name))
+//RS             }
+//RS             }
+//RS         };
+//RS 
+//RS         for projection in remaining {
+//RS             match projection {
+//RS                 MirProjection::Field { field, .. } => {
+//RS                     // A boxed recursive edge names the boxed value, so every
+//RS                     // borrow, read, write and index through it sees `T`.
+//RS                     expression = if self.boxed_field(*field) {
+//RS                         format!("(*({expression}).{})", self.field_name(*field))
+//RS                     } else {
+//RS                         format!("({expression}).{}", self.field_name(*field))
+//RS                     }
+//RS                 }
+//RS                 MirProjection::Index {
+//RS                     kind,
+//RS                     index,
+//RS                     call,
+//RS                     location,
+//RS                     context,
+//RS                     ..
+//RS                 } => {
+//RS                     let index = if *kind == MirIndexKind::Map && !mutable {
+//RS                         self.value_borrow(*index)
+//RS                     } else if *kind == MirIndexKind::Map {
+//RS                         self.value_owned(*index)
+//RS                     } else {
+//RS                         self.index_operand(function, *index, *location)
+//RS                     };
+//RS                     let symbol = match (kind, mutable) {
+//RS                         (MirIndexKind::List | MirIndexKind::FixedListProof, false) => {
+//RS                             "jet_index_vec_ref"
+//RS                         }
+//RS                         (MirIndexKind::List | MirIndexKind::FixedListProof, true) => {
+//RS                             "jet_index_vec_mut"
+//RS                         }
+//RS                         (MirIndexKind::Map, false) => "jet_index_map_ref",
+//RS                         (MirIndexKind::Map, true) => "jet_index_map_mut",
+//RS                         (MirIndexKind::Pool, false) => "jet_std::jet_pool_get_ref",
+//RS                         (MirIndexKind::Pool, true) => "jet_std::jet_pool_get_mut",
+//RS                         (MirIndexKind::Lane, false) => "jet_std::jet_native_lane_ref",
+//RS                         (MirIndexKind::Lane, true) => "jet_std::jet_native_lane_mut",
+//RS                     };
+//RS                     let borrow = if mutable { "&mut" } else { "&" };
+//RS                     let args = self.index_arguments(
+//RS                         *call,
+//RS                         format!("{borrow} ({expression})"),
+//RS                         index,
+//RS                         *location,
+//RS                         context.as_ref(),
+//RS                     );
+//RS                     expression = format!(
+//RS                         "*{}{}({})",
+//RS                         self.config.root_prefix,
+//RS                         symbol,
+//RS                         args.join(", ")
+//RS                     );
+//RS                 }
+//RS                 MirProjection::Deref { .. } => expression = format!("*({expression})"),
+//RS                 MirProjection::Payload { kind, .. } => {
+//RS                     let (pattern, boxed) = self.payload_pattern(kind);
+//RS                     let borrow = if mutable { "&mut" } else { "&" };
+//RS                     let payload = if boxed {
+//RS                         format!("{borrow} **payload")
+//RS                     } else {
+//RS                         "payload".to_string()
+//RS                     };
+//RS                     expression = format!(
+//RS                         "*(match {borrow} ({expression}) {{ {pattern} => {payload}, _ => unreachable!(\"MIR payload variant mismatch\") }})"
+//RS                     );
+//RS                 }
+//RS                 MirProjection::Range {
+//RS                     range, location, ..
+//RS                 } => {
+//RS                     let (symbol, borrow) = if mutable {
+//RS                         ("jet_view_mut_new_range", "&mut")
+//RS                     } else {
+//RS                         ("jet_view_new_range", "&")
+//RS                     };
+//RS                     expression = format!(
+//RS                         "*{}{symbol}({borrow} ({expression}), &({}), {:?}, {}u32)",
+//RS                         self.config.root_prefix,
+//RS                         self.value_owned(*range),
+//RS                         self.source_file_path(location.file),
+//RS                         location.line
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         expression
+//RS     }
+//RS 
+//RS     /// The Rust pattern that binds a `MirProjection::Payload` slot as
+//RS     /// `payload`, and whether that slot holds a boxed recursive edge.
+//RS     fn payload_pattern(&self, kind: &MirPayloadKind) -> (String, bool) {
+//RS         match kind {
+//RS             MirPayloadKind::Option => ("Ok(payload)".to_string(), false),
+//RS             MirPayloadKind::Result { ok: true } => ("Ok(payload)".to_string(), false),
+//RS             MirPayloadKind::Result { ok: false } => ("Err(payload)".to_string(), false),
+//RS             MirPayloadKind::Enum {
+//RS                 owner,
+//RS                 variant,
+//RS                 index,
+//RS             } => {
+//RS                 let head = self.variant_path(Some(*owner), variant, false);
+//RS                 let boxed_edges = &self.type_def(*owner).boxed_edges;
+//RS                 match self.enum_variant_payload(*owner, variant) {
+//RS                     MirVariantPayload::Unit => panic!("MIR unit variant has no payload place"),
+//RS                     MirVariantPayload::Single(_) => {
+//RS                         if *index != 0 {
+//RS                             panic!("MIR single variant payload index out of range")
+//RS                         }
+//RS                         (
+//RS                             format!("{head}(payload)"),
+//RS                             boxed_edges.iter().any(|edge| edge == variant),
+//RS                         )
+//RS                     }
+//RS                     MirVariantPayload::Named(fields) => {
+//RS                         let field = fields
+//RS                             .get(*index)
+//RS                             .unwrap_or_else(|| panic!("MIR named variant payload index out of range"));
+//RS                         let edge = format!("{variant}.{}", field.name);
+//RS                         (
+//RS                             format!("{head} {{ {}: payload, .. }}", self.field_name(field.id)),
+//RS                             boxed_edges.contains(&edge),
+//RS                         )
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn capture_place(&self, function: &MirFunction, value: MirValueId, mutable: bool) -> String {
+//RS         if self.binding_uses_move_slot(function, value) {
+//RS             let borrow = if mutable { "as_mut" } else { "as_ref" };
+//RS             return format!("*{}.{borrow}().expect(\"MIR capture\")", value_slot(value));
+//RS         }
+//RS         let slot = self
+//RS             .value_definition(function, value)
+//RS             .and_then(|operation| match operation {
+//RS                 MirOperation::Capture { slot } => Some(*slot),
+//RS                 _ => None,
+//RS             })
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "MIR capture place value {:?} has no Capture instruction",
+//RS                     value
+//RS                 )
+//RS             });
+//RS         let capture = self.capture_param(function, slot);
+//RS         let name = self.capture_param_name(slot);
+//RS         match capture.access {
+//RS             MirAccess::Read | MirAccess::Write => {
+//RS                 if mutable && matches!(capture.access, MirAccess::Read) {
+//RS                     panic!("MIR read capture place is not writable");
+//RS                 }
+//RS                 format!("*{name}")
+//RS             }
+//RS             MirAccess::Move => name,
+//RS         }
+//RS     }
+//RS 
+//RS     fn place_reference(&self, function: &MirFunction, id: MirPlaceId, access: MirAccess) -> String {
+//RS         let place = self
+//RS             .place_row(function, id)
+//RS             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
+//RS         let mutable = matches!(access, MirAccess::Write);
+//RS         if place.projections.is_empty() {
+//RS             match &place.base {
+//RS                 MirPlaceBase::Local(local) => {
+//RS                     if self.ref_binding_local(function, *local) {
+//RS                         if mutable {
+//RS                             panic!("MIR reference binding local {:?} has a write", local);
+//RS                         }
+//RS                         return format!("(*{}.as_ref().expect(\"MIR local\"))", local_slot(*local));
+//RS                     }
+//RS                     if self.local_uninit_fixed_type(function, *local).is_some() {
+//RS                         return if mutable {
+//RS                             format!(
+//RS                                 "{}.as_mut().expect(\"MIR local\").as_array_mut()",
+//RS                                 self.local_storage(function, *local)
+//RS                             )
+//RS                         } else {
+//RS                             format!(
+//RS                                 "{}.as_ref().expect(\"MIR local\").as_array()",
+//RS                                 self.local_storage(function, *local)
+//RS                             )
+//RS                         };
+//RS                     }
+//RS                     return if mutable {
+//RS                         format!(
+//RS                             "{}.as_mut().expect(\"MIR local\")",
+//RS                             self.local_storage(function, *local)
+//RS                         )
+//RS                     } else {
+//RS                         format!(
+//RS                             "{}.as_ref().expect(\"MIR local\")",
+//RS                             self.local_storage(function, *local)
+//RS                         )
+//RS                     };
+//RS                 }
+//RS                 MirPlaceBase::Temporary(value) => {
+//RS                     return self.value_slot_reference(*value, mutable);
+//RS                 }
+//RS                 MirPlaceBase::Parameter(_) | MirPlaceBase::Capture(_) | MirPlaceBase::Static(_) => {
+//RS                 }
+//RS             }
+//RS         }
+//RS         let value = self.place_base(function, &place.base, mutable, &place.projections);
+//RS         if mutable {
+//RS             format!("&mut ({value})")
+//RS         } else {
+//RS             format!("&({value})")
+//RS         }
+//RS     }
+//RS     fn parameter_place(&self, function: &MirFunction, value: MirValueId, mutable: bool) -> String {
+//RS         if self.binding_uses_move_slot(function, value) {
+//RS             let borrow = if mutable { "as_mut" } else { "as_ref" };
+//RS             return format!("*{}.{borrow}().expect(\"MIR parameter\")", value_slot(value));
+//RS         }
+//RS         let parameter = self
+//RS             .value_definition(function, value)
+//RS             .and_then(|operation| match operation {
+//RS                 MirOperation::Parameter { index, .. } => {
+//RS                     function
+//RS                         .params
+//RS                         .iter()
+//RS                         .find(|param| param.index == *index)
+//RS                         .map(|param| {
+//RS                             if self.is_receiver(function, param) {
+//RS                                 // `&self`/`&mut self` deref like any borrowed slot,
+//RS                                 // whatever the owner's representation.
+//RS                                 ("self".to_string(), param.access, false, false)
+//RS                             } else {
+//RS                                 (
+//RS                                     mangle(&param.name),
+//RS                                     param.access,
+//RS                                     !self.parameter_borrowed(param),
+//RS                                     false,
+//RS                                 )
+//RS                             }
+//RS                         })
+//RS                 }
+//RS                 MirOperation::Capture { slot } => {
+//RS                     let capture = self.capture_param(function, *slot);
+//RS                     Some((
+//RS                         self.capture_param_name(*slot),
+//RS                         capture.access,
+//RS                         self.is_scalar(&capture.ty),
+//RS                         true,
+//RS                     ))
+//RS                 }
+//RS                 MirOperation::WritePlace { .. }
+//RS                 | MirOperation::ReplacePlace { .. }
+//RS                 | MirOperation::Global { .. }
+//RS                 | MirOperation::Phi { .. }
+//RS                 | MirOperation::ReadPlace(_)
+//RS                 | MirOperation::MovePlace { .. }
+//RS                 | MirOperation::InitializeUninit { .. }
+//RS                 | MirOperation::Copy { .. }
+//RS                 | MirOperation::TraitBox { .. }
+//RS                 | MirOperation::Move { .. }
+//RS                 | MirOperation::Constant(_)
+//RS                 | MirOperation::Unary { .. }
+//RS                 | MirOperation::Binary { .. }
+//RS                 | MirOperation::BuildString { .. }
+//RS                 | MirOperation::BuildList { .. }
+//RS                 | MirOperation::BuildMap { .. }
+//RS                 | MirOperation::EnumIs { .. }
+//RS                 | MirOperation::EnumPayload { .. }
+//RS                 | MirOperation::OptionIsSome { .. }
+//RS                 | MirOperation::OptionValue { .. }
+//RS                 | MirOperation::ResultIsOk { .. }
+//RS                 | MirOperation::ResultValue { .. }
+//RS                 | MirOperation::PatternCapture { .. }
+//RS                 | MirOperation::PatternMatched { .. }
+//RS                 | MirOperation::ProjectMembers { .. }
+//RS                 | MirOperation::Index { .. }
+//RS                 | MirOperation::Slice { .. }
+//RS                 | MirOperation::Range { .. }
+//RS                 | MirOperation::Field { .. }
+//RS                 | MirOperation::Struct { .. }
+//RS                 | MirOperation::Enum { .. }
+//RS                 | MirOperation::Tuple { .. }
+//RS                 | MirOperation::Present { .. }
+//RS                 | MirOperation::Convert { .. }
+//RS                 | MirOperation::Absent
+//RS                 | MirOperation::ResultOk { .. }
+//RS                 | MirOperation::ResultErr { .. }
+//RS                 | MirOperation::Call { .. }
+//RS                 | MirOperation::IndirectCall { .. }
+//RS                 | MirOperation::Closure { .. }
+//RS                 | MirOperation::PtrFromAddr { .. }
+//RS                 | MirOperation::Deref { .. }
+//RS                 | MirOperation::RawAddressOf { .. }
+//RS                 | MirOperation::AddressOf { .. }
+//RS                 | MirOperation::CoreCall { .. }
+//RS                 | MirOperation::AttachTag { .. }
+//RS                 | MirOperation::Todo { .. }
+//RS                 | MirOperation::Never { .. }
+//RS                 | MirOperation::Semantic(_)
+//RS                 | MirOperation::LoopRangeInit { .. }
+//RS                 | MirOperation::LoopRangeHasNext { .. }
+//RS                 | MirOperation::LoopRangeValue { .. }
+//RS                 | MirOperation::LoopRangeAdvance { .. }
+//RS                 | MirOperation::LoopIterInit { .. }
+//RS                 | MirOperation::LoopIterHasNext { .. }
+//RS                 | MirOperation::LoopIterValue { .. }
+//RS                 | MirOperation::LoopIterAdvance { .. }
+//RS                 | MirOperation::ScopeEnter { .. }
+//RS                 | MirOperation::ScopeExit { .. }
+//RS                 | MirOperation::Drop { .. } => None,
+//RS             })
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "MIR parameter value {:?} has no Parameter or Capture instruction",
+//RS                     value
+//RS                 )
+//RS             });
+//RS         let (name, access, by_value, capture) = parameter;
+//RS         if mutable {
+//RS             if access == MirAccess::Move {
+//RS                 return name;
+//RS             }
+//RS             if !matches!(access, MirAccess::Write) {
+//RS                 panic!("MIR place is not writable");
+//RS             }
+//RS             return format!("*{name}");
+//RS         }
+//RS         match access {
+//RS             MirAccess::Read if !capture && by_value => name,
+//RS             MirAccess::Read | MirAccess::Write => format!("*{name}"),
+//RS             MirAccess::Move => name,
+//RS         }
+//RS     }
+//RS 
+//RS     fn value_slot_reference(&self, value: MirValueId, mutable: bool) -> String {
+//RS         if let Some((base, _)) = self.history_binding(value) {
+//RS             let function = self.function_row(
+//RS                 self.history_current_function
+//RS                     .get()
+//RS                     .expect("current native function"),
+//RS             );
+//RS             let value = self.place_base(function, &base, mutable, &[]);
+//RS             return if mutable {
+//RS                 format!("&mut ({value})")
+//RS             } else {
+//RS                 format!("&({value})")
+//RS             };
+//RS         }
+//RS         if mutable {
+//RS             format!("{}.as_mut().expect(\"MIR value\")", value_slot(value))
+//RS         } else {
+//RS             format!("{}.as_ref().expect(\"MIR value\")", value_slot(value))
+//RS         }
+//RS     }
+//RS 
+//RS     /// #4318: a shared reference to the value (its slot, or the place a
+//RS     /// history binding names). Inspecting and borrowing consumers read
+//RS     /// through it; nothing is copied.
+//RS     fn value_borrow(&self, value: MirValueId) -> String {
+//RS         self.value_slot_reference(value, false)
+//RS     }
+//RS 
+//RS     /// #4318: the copy of a MIR `Copy{fact}` operand, and the only printer
+//RS     /// of a value clone. A value whose Rust carrier is `Copy` is read
+//RS     /// bitwise; any other value clones.
+//RS     fn value_copy(&self, value: MirValueId, fact: MirCopyFact) -> String {
+// END-PORT-PENDING 2017 crates/jet-codegen/src/Codegen/MIRRust.rs:28801-30600
+

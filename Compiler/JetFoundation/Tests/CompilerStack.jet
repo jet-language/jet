@@ -1,0 +1,41 @@
+use JetFoundation.CompilerStack.[COMPILER_STACK_SIZE, on_compiler_worker, run_on_compiler_stack, map_on_compiler_workers]
+use std.panic as unwind
+
+// Rust: crates/jet-foundation/src/CompilerStack.rs:92,144
+// No original inline tests; real worker/reentrancy controls, gated on #4494.
+#Test("compiler stack establishes worker state and returns unchanged values") {
+    assert(!on_compiler_worker())
+    assert(COMPILER_STACK_SIZE == 192 * 1024 * 1024)
+    value :: run_on_compiler_stack(fn() {
+        assert(on_compiler_worker())
+        run_on_compiler_stack(fn() { assert(on_compiler_worker()); 37 })
+    })
+    assert(value == 37)
+    assert(!on_compiler_worker())
+}
+// Rust: crates/jet-foundation/src/CompilerStack.rs:184
+#Test("compiler workers retain job order and inline single worker path") {
+    assert(map_on_compiler_workers([Int]{3, 1, 2}, 2, fn(value) {
+        assert(on_compiler_worker())
+        value * 10
+    }) == [Int]{30, 10, 20})
+    assert(map_on_compiler_workers([Int]{3, 1, 2}, 1, fn(value) {
+        assert(!on_compiler_worker())
+        value * 10
+    }) == [Int]{30, 10, 20})
+    assert(map_on_compiler_workers([Int]{}, 8, fn(value) { value }).is_empty())
+}
+// Rust: crates/jet-foundation/src/CompilerStack.rs:184
+#Test("compiler workers propagate lowest-index panic after completing jobs") {
+    outcome :: unwind.catch_unwind(unwind.AssertUnwindSafe(fn() {
+        map_on_compiler_workers([Int]{0, 1, 2}, 3, fn(value) {
+            if value == 0 -> panic("first job panic")
+            if value == 1 -> panic("second job panic")
+            value
+        })
+    }))
+    if outcome == {
+        .Ok(_) -> panic("expected job panic")
+        .Err(payload) -> assert(payload.downcast_ref<String>() == Val("first job panic"))
+    }
+}

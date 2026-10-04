@@ -1,0 +1,159 @@
+use JetFoundation.Encoding.CanonicalJson.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_integer, canonical_json_bytes]
+use JetFoundation.Encoding.CanonicalJson02.*
+use JetFoundation.Encoding.CanonicalJson01.*
+use JetFoundation.SHA256.sha256_hex
+
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2433
+fn q(value: I128) -> Rational Never! { Rational.integer(value) }
+fn field(key: String, value: ^CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: ^value} }
+// Test mutation preserves the canonical sorted-field representation.
+fn set_field(value: &CanonicalJSON, key: String, replacement: ^CanonicalJSON) Never! {
+    if value == .Object(fields) {
+        low := 0
+        high := fields.len()
+        loop low < high { mid :: low + (high - low) / 2; if fields[mid].key < key -> low = mid + 1 else -> high = mid }
+        if low == fields.len() || fields[low].key != key -> panic("fixture field missing")
+        fields[low].value = ^replacement
+        return
+    }
+    panic("fixture requires an object")
+}
+fn test_wire_evaluation(evidence: String, value: CanonicalJSON) Err! {
+    if value == .Object(fields) -> return verify_wire_evaluation(evidence, fields.view(0..<fields.len()))
+    panic("fixture requires an object")
+}
+
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2438
+#Test("canonical_json_sorts_keys_escapes_and_hashes_lf_terminated_content") {
+    value :: canonical_json_object([field("z", .String("é\n")), field("a", canonical_json_integer("123"))])
+    expected :: "{\"a\":123,\"z\":\"é\\n\"}\n".bytes()
+    assert(canonical_json_bytes(value) == expected)
+    assert(stable_id(value) == sha256_hex(expected))
+    assert(canonical_json_integer("-0").is_err())
+    assert(canonical_json_integer("01").is_err())
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2454
+#Test("rational_statistics_are_reduced_and_nearest_rank_exact") {
+    assert(Rational.new(20, -30) == Rational.new(-2, 3))
+    stats :: statistics([q(1), q(2), q(3), q(4), q(100)])
+    assert(stats.p50 == q(3))
+    assert(stats.p90 == q(100))
+    assert(stats.mean == Rational.new(22, 1))
+    assert(stats.mad == q(1))
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2467
+#Test("arbitrary_precision_rationals_are_total_and_reduce_exactly") {
+    huge :: "999999999999999999999999999999999999999999999999999999999999999999999999"
+    value :: Rational.parse(huge, "300000000000000000000000000000000000000000000000000000000000000000000000")
+    assert(value.den.to_string() == "100000000000000000000000000000000000000000000000000000000000000000000000")
+    assert(value.num.to_string() == "333333333333333333333333333333333333333333333333333333333333333333333333")
+    squared :: value.mul(value)
+    assert(squared.num.to_string().len() > 140)
+    assert(squared.div(value) == value)
+    assert(Rational.parse("-0", "1").unwrap_err() == "non-canonical integer `-0`")
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2492
+#Test("deterministic_absolute_and_trend_follow_direction") {
+    comparison :: Comparison.Absolute(limit: q(10), direction: .AtMost)
+    evaluation :: evaluate("e", "c", [], [q(9)], [], None, comparison, .LowerIsBetter, .Fail, None)
+    assert(evaluation.evidence == .Pass)
+    ids :: ["old", "mid", "new"]
+    got :: trend(ids, [q(12), q(10), q(8)], .LowerIsBetter)
+    assert(got.label == .Improving)
+    assert(got.score == Val(q(2)))
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2517
+#Test("bootstrap_is_deterministic_and_reader_recomputes_every_outcome") {
+    policy :: MeasurementPolicy{bootstrap_resamples: 20, lower_rank: 1, upper_rank: 20}
+    comparison :: Comparison.RelativeTo(limit_basis_points: BigInt.from_i128(500), goal: .RegressionAtMost)
+    ids :: ["0".repeat(64)]
+    evidence :: "1".repeat(64)
+    context :: "2".repeat(64)
+    candidate :: [q(90), q(91), q(92)]
+    baseline :: [q(100), q(101), q(102)]
+    inputs :: EvaluationInputs{evidence_id: @evidence, context_key: @context, baseline_report_ids: ids.view(0..<ids.len()), candidate: candidate.view(0..<candidate.len()), baseline: baseline.view(0..<baseline.len()), percentile: Val(.P50), comparison: @comparison, direction: .LowerIsBetter, enforcement: .Fail, policy: Val(@policy)}
+    got :: evaluate(inputs.evidence_id, inputs.context_key, inputs.baseline_report_ids, inputs.candidate, inputs.baseline, inputs.percentile, inputs.comparison, inputs.direction, inputs.enforcement, inputs.policy)
+    assert(got.evidence == .Pass)
+    verify_evaluation(got, inputs)
+    corrupted := got.clone()
+    corrupted.point = q(1)
+    assert(verify_evaluation(corrupted, inputs).is_err())
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2573
+#Test("report_reader_rejects_noncanonical_unknown_and_hash_corrupt_artifacts") {
+    content :: canonical_json_object([field("summary", .String("pass"))])
+    report :: budget_report(content)
+    bytes :: canonical_json_bytes(report)
+    assert(verify_budget_report(bytes).unwrap_err().contains("report content"))
+    encoded :: String.from_bytes(bytes.clone()) ?? panic("canonical JSON UTF-8")
+    spaced :: encoded.replace("{\"content\"", "{ \"content\"")
+    assert(verify_budget_report(spaced.bytes()).is_err())
+    corrupt :: encoded.replace("\"pass\"", "\"fail\"")
+    assert(verify_budget_report(corrupt.bytes()).is_err())
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2593
+#Test("typed_schema_rejects_extra_nonreduced_and_forged_statistics") {
+    extra :: canonical_json_object([field("den", .Integer("2")), field("num", .Integer("1")), field("surprise", .Null)])
+    assert(validate_rational(extra, false, "q").unwrap_err().contains("unknown"))
+    nonreduced :: canonical_json_object([field("den", .Integer("4")), field("num", .Integer("2"))])
+    assert(validate_rational(nonreduced, false, "q").unwrap_err().contains("gcd-reduced"))
+    qj :: fn(n: I128) { Rational.integer(n).to_json() }
+    forged :: canonical_json_object([
+        field("count", .Integer("3")), field("sorted_samples", .Array([qj(1), qj(2), qj(3)])),
+        field("p50", qj(3)), field("p90", qj(3)), field("p95", qj(3)), field("p99", qj(3)),
+        field("p999", qj(3)), field("mean", qj(2)), field("mad", qj(1))])
+    assert(validate_statistics(forged).unwrap_err().contains("p50"))
+}
+// Rust: crates/jet-foundation/src/PerformanceBudget.rs:2631
+#Test("wire_reader_recomputes_decision_confidence_trend_and_history") {
+    evidence :: "1".repeat(64)
+    context :: "2".repeat(64)
+    ids :: ["3".repeat(64)]
+    samples :: [q(1), q(10), q(100), q(1000)]
+    comparison :: Comparison.AbsoluteFrom(limit: q(50), direction: .AtMost)
+    policy :: MeasurementPolicy{bootstrap_resamples: 100, lower_rank: 50, upper_rank: 51}
+    actual :: evaluate(evidence, context, ids, samples, [], Val(.P50), comparison, .LowerIsBetter, .Fail, Val(@policy))
+    ev :: if actual.evidence == { .Pass -> "pass", .Regression -> "regression", .Inconclusive -> "inconclusive", .Unavailable -> "unavailable" }
+    outcome :: if actual.outcome == { .Pass -> "pass", .Warn -> "warn", .Fail -> "fail" }
+    trend_json :: canonical_json_object([field("label", .String("insufficient")), field("report_ids", .Array([])), field("estimators", .Array([])), field("score", .Null)])
+    decision :: canonical_json_object([
+        field("evidence", .String(ev)), field("reason", .Null), field("point", actual.point.to_json()),
+        field("lower95", (actual.lower95 ?? panic("confidence lower bound")).to_json()),
+        field("upper95", (actual.upper95 ?? panic("confidence upper bound")).to_json()),
+        field("trend", ^trend_json), field("policy_outcome", .String(outcome))])
+    policy_json :: canonical_json_object([
+        field("min_candidate_samples", .Integer("1")), field("min_baseline_samples", .Integer("1")),
+        field("baseline_generations", .Integer("5")), field("bootstrap_resamples", .Integer("100")),
+        field("lower_rank", .Integer("50")), field("upper_rank", .Integer("51")),
+        field("stale_after_seconds", .Integer("2592000")), field("trend_generations", .Integer("5"))])
+    sample_json := [CanonicalJSON]{}
+    loop sample in samples { sample_json.push(sample.to_json()) }
+    id_json := [CanonicalJSON]{}
+    loop id in ids { id_json.push(.String(id.clone())) }
+    m := canonical_json_object([
+        field("decision", ^decision), field("direction", .String("lower_is_better")), field("enforcement", .String("fail")),
+        field("comparison", canonical_json_object([field("kind", .String("absolute_from")), field("baseline", .String("main")), field("limit", q(50).to_json()), field("direction", .String("at_most"))])),
+        field("policy", ^policy_json), field("samples", .Array(^sample_json)), field("baseline", .Null),
+        field("history", canonical_json_object([field("state_id", .String("4".repeat(64))), field("report_ids", .Array(^id_json))])),
+        field("metric", canonical_json_object([field("name", .String("BenchTime")), field("percentile", .String("p50"))])),
+        field("context_key", .String(context))])
+    test_wire_evaluation(evidence, m)
+    if m == .Object(fields) {
+        original :: budget_json_field(fields.view(0..<fields.len()), "decision").clone()
+        changed := original.clone()
+        set_field(&changed, "upper95", q(999).to_json())
+        set_field(&m, "decision", ^changed)
+        assert(test_wire_evaluation(evidence, m).is_err())
+        changed = original.clone()
+        set_field(&changed, "policy_outcome", .String("warn"))
+        set_field(&m, "decision", ^changed)
+        assert(test_wire_evaluation(evidence, m).is_err())
+        set_field(&m, "decision", ^original)
+    } else -> panic("fixture requires an object")
+    if m == .Object(fields) {
+        history := budget_json_field(fields.view(0..<fields.len()), "history").clone()
+        set_field(&history, "report_ids", .Array([.String("forged")]))
+        set_field(&m, "history", ^history)
+    } else -> panic("fixture requires an object")
+    if m == .Object(fields) { assert(validate_history(budget_json_field(fields.view(0..<fields.len()), "history")).is_err()) }
+}

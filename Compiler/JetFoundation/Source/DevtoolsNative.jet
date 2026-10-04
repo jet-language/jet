@@ -1,0 +1,722 @@
+// PORT-PENDING 2131 crates-jet-foundation-src-devtoolsnative: crates/jet-foundation/src/DevtoolsNative.rs:1-718
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS /// Typed native game-window hooks shared by the Foundation host and every
+//RS /// generated Prelude. The callback is deliberately independent of any
+//RS /// devserver or renderer implementation; hosts receive canonical events and
+//RS /// return bounded draw commands for the active window.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsNativeColor {
+//RS     pub red: u8,
+//RS     pub green: u8,
+//RS     pub blue: u8,
+//RS     pub alpha: u8,
+//RS }
+//RS 
+//RS impl JetDevtoolsNativeColor {
+//RS     pub const WHITE: Self = Self {
+//RS         red: 255,
+//RS         green: 255,
+//RS         blue: 255,
+//RS         alpha: 255,
+//RS     };
+//RS 
+//RS     pub const fn new(red: u8, green: u8, blue: u8, alpha: u8) -> Self {
+//RS         Self {
+//RS             red,
+//RS             green,
+//RS             blue,
+//RS             alpha,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetDevtoolsNativeDrawCommand {
+//RS     Rectangle {
+//RS         x: i32,
+//RS         y: i32,
+//RS         width: i32,
+//RS         height: i32,
+//RS         color: JetDevtoolsNativeColor,
+//RS     },
+//RS     Text {
+//RS         text: String,
+//RS         x: i32,
+//RS         y: i32,
+//RS         size: i32,
+//RS         color: JetDevtoolsNativeColor,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetDevtoolsNativeInput {
+//RS     Key { code: String, pressed: bool },
+//RS     Gamepad {
+//RS         gamepad: i64,
+//RS         control: String,
+//RS         pressed: bool,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsNativeWindow {
+//RS     pub session_id: String,
+//RS     pub width: u32,
+//RS     pub height: u32,
+//RS }
+//RS 
+//RS impl JetDevtoolsNativeWindow {
+//RS     pub fn new(session_id: impl Into<String>, width: u32, height: u32) -> Self {
+//RS         Self {
+//RS             session_id: session_id.into(),
+//RS             width,
+//RS             height,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetDevtoolsNativeFrame {
+//RS     pub session_id: String,
+//RS     pub frame_index: u64,
+//RS     pub width: u32,
+//RS     pub height: u32,
+//RS }
+//RS 
+//RS impl JetDevtoolsNativeFrame {
+//RS     pub fn new(
+//RS         session_id: impl Into<String>,
+//RS         frame_index: u64,
+//RS         width: u32,
+//RS         height: u32,
+//RS     ) -> Self {
+//RS         Self {
+//RS             session_id: session_id.into(),
+//RS             frame_index,
+//RS             width,
+//RS             height,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One canonical native-host callback. The host receives the same typed
+//RS /// `JetDevtoolsEvent` that generic sinks receive and may return only bounded,
+//RS /// typed drawing commands for the active frame.
+//RS pub trait JetDevtoolsNativeHost: Send + Sync {
+//RS     fn on_event(&self, session_id: &str, event: JetDevtoolsEvent);
+//RS     fn on_window_open(&self, window: JetDevtoolsNativeWindow);
+//RS     fn on_window_close(&self, session_id: &str);
+//RS     fn on_input(&self, session_id: &str, input: JetDevtoolsNativeInput) -> bool;
+//RS     fn on_frame_begin(&self, frame: JetDevtoolsNativeFrame) -> Vec<JetDevtoolsNativeDrawCommand>;
+//RS     fn on_draw(&self, session_id: &str, command: JetDevtoolsNativeDrawCommand);
+//RS     fn on_frame_end(&self, session_id: &str);
+//RS }
+//RS 
+//RS pub type JetDevtoolsNativeHostHandle = std::sync::Arc<dyn JetDevtoolsNativeHost>;
+//RS 
+//RS struct JetDevtoolsNativeHostRegistration {
+//RS     id: u64,
+//RS     session_id: String,
+//RS     host: JetDevtoolsNativeHostHandle,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct JetDevtoolsNativeHostRegistry {
+//RS     next_id: u64,
+//RS     hosts: Vec<JetDevtoolsNativeHostRegistration>,
+//RS }
+//RS 
+//RS pub struct JetDevtoolsNativeHostGuard {
+//RS     id: u64,
+//RS     session_id: String,
+//RS }
+//RS 
+//RS /// Runtime callback for one bounded, host-authorized database EXPLAIN request.
+//RS /// The host owns command decoding and authority; the runtime receives only
+//RS /// canonical identity and limits, then resolves its observed statement.
+//RS pub type JetDevtoolsDatabaseExplainCallback =
+//RS     fn(&str, &str, &str, u64, u64);
+//RS 
+//RS pub struct JetDevtoolsDatabaseExplainCallbackGuard {
+//RS     callback: JetDevtoolsDatabaseExplainCallback,
+//RS }
+//RS 
+//RS fn validate_command_text(value: &str, field: &str) -> Result<(), String> {
+//RS     if value.is_empty() {
+//RS         return Err(format!("jet.devtools.v1 {field} must not be empty"));
+//RS     }
+//RS     if value.len() > JET_DEVTOOLS_MAX_TEXT_BYTES {
+//RS         return Err(format!("jet.devtools.v1 {field} exceeds the Prelude text limit"));
+//RS     }
+//RS     if value.chars().any(char::is_control) {
+//RS         return Err(format!("jet.devtools.v1 {field} contains a control character"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS impl Drop for JetDevtoolsDatabaseExplainCallbackGuard {
+//RS     fn drop(&mut self) {
+//RS         if let Ok(mut callback) = JET_DEVTOOLS_DATABASE_EXPLAIN_CALLBACK.lock() {
+//RS             if callback
+//RS                 .as_ref()
+//RS                 .is_some_and(|installed| *installed as usize == self.callback as usize)
+//RS             {
+//RS                 *callback = None;
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS const JET_DEVTOOLS_MAX_DATABASE_EXPLAIN_ROWS: u64 = 256;
+//RS const JET_DEVTOOLS_MAX_DATABASE_EXPLAIN_TIMEOUT_MS: u64 = 30_000;
+//RS /// Runtime callback for one host-authorized game control. Returning the
+//RS /// callback's checked admission result keeps parse, queue, and authority
+//RS /// failures visible to the host instead of treating invocation as success.
+//RS pub type JetDevtoolsGameControlCallback = fn(&str, &str) -> Result<(), String>;
+//RS 
+//RS pub struct JetDevtoolsGameControlCallbackGuard {
+//RS     callback: JetDevtoolsGameControlCallback,
+//RS }
+//RS 
+//RS impl Drop for JetDevtoolsGameControlCallbackGuard {
+//RS     fn drop(&mut self) {
+//RS         if let Ok(mut callback) = JET_DEVTOOLS_GAME_CONTROL_CALLBACK.lock() {
+//RS             if callback
+//RS                 .as_ref()
+//RS                 .is_some_and(|installed| *installed as usize == self.callback as usize)
+//RS             {
+//RS                 *callback = None;
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl Drop for JetDevtoolsNativeHostGuard {
+//RS     fn drop(&mut self) {
+//RS         if self.id == 0 {
+//RS             return;
+//RS         }
+//RS         let mut registry = JET_DEVTOOLS_NATIVE_HOSTS
+//RS             .lock()
+//RS             .expect("native devtools host registry poisoned");
+//RS         registry.hosts.retain(|registration| registration.id != self.id);
+//RS         if !registry
+//RS             .hosts
+//RS             .iter()
+//RS             .any(|registration| registration.session_id == self.session_id)
+//RS         {
+//RS             let mut active = JET_DEVTOOLS_NATIVE_SESSION
+//RS                 .lock()
+//RS                 .expect("native devtools session poisoned");
+//RS             if active.as_deref() == Some(self.session_id.as_str()) {
+//RS                 *active = None;
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS static JET_DEVTOOLS_DATABASE_EXPLAIN_CALLBACK: std::sync::LazyLock<
+//RS     std::sync::Mutex<Option<JetDevtoolsDatabaseExplainCallback>>,
+//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+//RS static JET_DEVTOOLS_GAME_CONTROL_CALLBACK: std::sync::LazyLock<
+//RS     std::sync::Mutex<Option<JetDevtoolsGameControlCallback>>,
+//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+//RS 
+//RS static JET_DEVTOOLS_NATIVE_HOSTS: std::sync::LazyLock<
+//RS     std::sync::Mutex<JetDevtoolsNativeHostRegistry>,
+//RS > = std::sync::LazyLock::new(|| {
+//RS     std::sync::Mutex::new(JetDevtoolsNativeHostRegistry {
+//RS         next_id: 1,
+//RS         hosts: Vec::new(),
+//RS     })
+//RS });
+//RS 
+//RS static JET_DEVTOOLS_NATIVE_SESSION: std::sync::LazyLock<std::sync::Mutex<Option<String>>> =
+//RS     std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+//RS 
+//RS /// Install the one runtime callback used by the Foundation devtools host.
+//RS /// Command parsing, session ownership, and authority remain host-owned.
+//RS pub fn jet_devtools_install_database_explain_callback(
+//RS     callback: JetDevtoolsDatabaseExplainCallback,
+//RS ) -> Result<JetDevtoolsDatabaseExplainCallbackGuard, String> {
+//RS     let mut installed = JET_DEVTOOLS_DATABASE_EXPLAIN_CALLBACK
+//RS         .lock()
+//RS         .map_err(|_| "database EXPLAIN callback registry poisoned".to_string())?;
+//RS     if installed.is_some() {
+//RS         return Err("database EXPLAIN callback is already installed".to_string());
+//RS     }
+//RS     *installed = Some(callback);
+//RS     Ok(JetDevtoolsDatabaseExplainCallbackGuard { callback })
+//RS }
+//RS 
+//RS /// Dispatch one validated host command into the registered runtime. The
+//RS /// runtime callback receives no SQL, bindings, credentials, or authority.
+//RS pub fn jet_devtools_dispatch_database_explain(
+//RS     session_id: &str,
+//RS     request_id: &str,
+//RS     statement_identity: &str,
+//RS     timeout_ms: u64,
+//RS     max_rows: u64,
+//RS ) -> Result<(), String> {
+//RS     validate_command_text(session_id, "session_id")?;
+//RS     validate_command_text(request_id, "request_id")?;
+//RS     validate_command_text(statement_identity, "statement_identity")?;
+//RS     if timeout_ms == 0 || timeout_ms > JET_DEVTOOLS_MAX_DATABASE_EXPLAIN_TIMEOUT_MS {
+//RS         return Err("database EXPLAIN timeout is outside its limit".to_string());
+//RS     }
+//RS     if max_rows == 0 || max_rows > JET_DEVTOOLS_MAX_DATABASE_EXPLAIN_ROWS {
+//RS         return Err("database EXPLAIN row limit is outside its limit".to_string());
+//RS     }
+//RS     let callback = JET_DEVTOOLS_DATABASE_EXPLAIN_CALLBACK
+//RS         .lock()
+//RS         .map_err(|_| "database EXPLAIN callback registry poisoned".to_string())?
+//RS         .ok_or_else(|| "database EXPLAIN runtime callback is unavailable".to_string())?;
+//RS     callback(session_id, request_id, statement_identity, timeout_ms, max_rows);
+//RS     Ok(())
+//RS }
+//RS /// Install the one runtime callback used by the Foundation game-control host.
+//RS /// The callback receives a checked session id and canonical DTO JSON; the
+//RS /// runtime adapter owns parsing and Prelude transition policy.
+//RS pub fn jet_devtools_install_game_control_callback(
+//RS     callback: JetDevtoolsGameControlCallback,
+//RS ) -> Result<JetDevtoolsGameControlCallbackGuard, String> {
+//RS     let mut installed = JET_DEVTOOLS_GAME_CONTROL_CALLBACK
+//RS         .lock()
+//RS         .map_err(|_| "game control callback registry poisoned".to_string())?;
+//RS     if installed.is_some() {
+//RS         return Err("game control callback is already installed".to_string());
+//RS     }
+//RS     *installed = Some(callback);
+//RS     Ok(JetDevtoolsGameControlCallbackGuard { callback })
+//RS }
+//RS 
+//RS /// Dispatch one checked game-control payload into the installed runtime
+//RS /// adapter. The caller validates the DTO and session before this seam.
+//RS pub fn jet_devtools_dispatch_game_control(
+//RS     session_id: &str,
+//RS     payload_json: &str,
+//RS ) -> Result<(), String> {
+//RS     validate_command_text(session_id, "session_id")?;
+//RS     validate_command_text(payload_json, "game control payload")?;
+//RS     let callback = JET_DEVTOOLS_GAME_CONTROL_CALLBACK
+//RS         .lock()
+//RS         .map_err(|_| "game control callback registry poisoned".to_string())?
+//RS         .ok_or_else(|| "game control runtime callback is unavailable".to_string())?;
+//RS     callback(session_id, payload_json)
+//RS }
+//RS 
+//RS const JET_DEVTOOLS_COMMAND_RELAY_PATH_ENV: &str = "JET_DEVTOOLS_COMMAND_RELAY_PATH";
+//RS const JET_DEVTOOLS_COMMAND_RELAY_MAX_FILES: usize = 256;
+//RS static JET_DEVTOOLS_COMMAND_RELAY_WRITE_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+//RS     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+//RS static JET_DEVTOOLS_COMMAND_RELAY_SEQUENCE: std::sync::atomic::AtomicU64 =
+//RS     std::sync::atomic::AtomicU64::new(1);
+//RS 
+//RS fn jet_devtools_command_relay_path() -> Result<std::path::PathBuf, String> {
+//RS     let value = std::env::var(JET_DEVTOOLS_COMMAND_RELAY_PATH_ENV)
+//RS         .map_err(|_| "game control command relay is unavailable".to_string())?;
+//RS     if value.is_empty()
+//RS         || value.len() > JET_DEVTOOLS_MAX_TEXT_BYTES
+//RS         || value.chars().any(char::is_control)
+//RS     {
+//RS         return Err("game control command relay path is invalid".to_string());
+//RS     }
+//RS     Ok(std::path::PathBuf::from(value))
+//RS }
+//RS 
+//RS fn jet_devtools_relay_json_string(value: &str) -> String {
+//RS     let mut escaped = String::with_capacity(value.len());
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '"' => escaped.push_str("\\\""),
+//RS             '\\' => escaped.push_str("\\\\"),
+//RS             '\u{08}' => escaped.push_str("\\b"),
+//RS             '\u{0c}' => escaped.push_str("\\f"),
+//RS             '\n' => escaped.push_str("\\n"),
+//RS             '\r' => escaped.push_str("\\r"),
+//RS             '\t' => escaped.push_str("\\t"),
+//RS             character if character.is_control() => {
+//RS                 escaped.push_str(&format!("\\u{:04x}", character as u32));
+//RS             }
+//RS             character => escaped.push(character),
+//RS         }
+//RS     }
+//RS     format!("\"{escaped}\"")
+//RS }
+//RS fn jet_devtools_relay_string_field(frame: &str, field: &str) -> Result<String, String> {
+//RS     let marker = format!("\"{field}\":\"");
+//RS     let start = frame
+//RS         .find(&marker)
+//RS         .ok_or_else(|| format!("game control relay is missing `{field}`"))?
+//RS         + marker.len();
+//RS     let mut value = String::new();
+//RS     let mut escaped = false;
+//RS     for character in frame[start..].chars() {
+//RS         if escaped {
+//RS             match character {
+//RS                 '"' | '\\' | '/' => value.push(character),
+//RS                 'b' => value.push('\u{08}'),
+//RS                 'f' => value.push('\u{0c}'),
+//RS                 'n' => value.push('\n'),
+//RS                 'r' => value.push('\r'),
+//RS                 't' => value.push('\t'),
+//RS                 _ => {
+//RS                     return Err(format!(
+//RS                         "game control relay `{field}` contains an unsupported escape"
+//RS                     ))
+//RS                 }
+//RS             }
+//RS             escaped = false;
+//RS         } else if character == '\\' {
+//RS             escaped = true;
+//RS         } else if character == '"' {
+//RS             validate_command_text(&value, field)?;
+//RS             return Ok(value);
+//RS         } else {
+//RS             value.push(character);
+//RS         }
+//RS     }
+//RS     Err(format!("game control relay `{field}` is not a closed JSON string"))
+//RS }
+//RS 
+//RS fn jet_devtools_validate_relay_frame(frame: &str, session_id: &str) -> Result<(), String> {
+//RS     if frame.len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
+//RS         return Err("game control relay frame exceeds the envelope limit".to_string());
+//RS     }
+//RS     let protocol = jet_devtools_relay_string_field(frame, "protocol")?;
+//RS     if protocol != JET_DEVTOOLS_PROTOCOL {
+//RS         return Err("game control relay protocol is unsupported".to_string());
+//RS     }
+//RS     let frame_session = jet_devtools_relay_string_field(frame, "session_id")?;
+//RS     if frame_session != session_id {
+//RS         return Err("game control relay belongs to another devtools session".to_string());
+//RS     }
+//RS     let direction = jet_devtools_relay_string_field(frame, "direction")?;
+//RS     if direction != "host_to_runtime" {
+//RS         return Err("game control relay direction is unsupported".to_string());
+//RS     }
+//RS     if !frame.contains("\"commands\":[{\"kind\":\"GameControl\",\"payload\":") {
+//RS         return Err("game control relay has no GameControl command payload".to_string());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS 
+//RS /// Append one host command to the process relay. Each command is an
+//RS /// independently renamed file, so a reader can consume complete commands in
+//RS /// lexical sequence without observing a torn write.
+//RS pub fn jet_devtools_write_game_control_relay(
+//RS     session_id: &str,
+//RS     payload_json: &str,
+//RS ) -> Result<(), String> {
+//RS     let _write_guard = JET_DEVTOOLS_COMMAND_RELAY_WRITE_LOCK
+//RS         .lock()
+//RS         .map_err(|_| "game control command relay lock is poisoned".to_string())?;
+//RS     validate_command_text(session_id, "session_id")?;
+//RS     validate_command_text(payload_json, "game control payload")?;
+//RS     let directory = jet_devtools_command_relay_path()?;
+//RS     std::fs::create_dir_all(&directory)
+//RS         .map_err(|error| format!("cannot create game control command relay: {error}"))?;
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::{MetadataExt, PermissionsExt};
+//RS         let metadata = std::fs::symlink_metadata(&directory)
+//RS             .map_err(|error| format!("cannot inspect game control command relay: {error}"))?;
+//RS         let owner = std::fs::metadata("/proc/self")
+//RS             .map(|process| process.uid())
+//RS             .unwrap_or(metadata.uid());
+//RS         if !metadata.file_type().is_dir() || metadata.uid() != owner {
+//RS             return Err("game control command relay directory is not owned by this user".to_string());
+//RS         }
+//RS         let mut permissions = metadata.permissions();
+//RS         permissions.set_mode(0o700);
+//RS         let _ = std::fs::set_permissions(&directory, permissions);
+//RS     }
+//RS     let retained = std::fs::read_dir(&directory)
+//RS         .map_err(|error| format!("cannot inspect game control command relay: {error}"))?
+//RS         .filter_map(Result::ok)
+//RS         .filter(|entry| entry.path().extension().is_some_and(|extension| extension == "cmd"))
+//RS         .count();
+//RS     if retained >= JET_DEVTOOLS_COMMAND_RELAY_MAX_FILES {
+//RS         return Err("game control command relay is full".to_string());
+//RS     }
+//RS     let sequence =
+//RS         JET_DEVTOOLS_COMMAND_RELAY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS     let started_at_ms = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map(|duration| duration.as_millis() as u64)
+//RS         .unwrap_or(0);
+//RS     let envelope = format!(
+//RS         "{{\"protocol\":{},\"session_id\":{},\"started_at_ms\":{},\
+//RS \"direction\":\"host_to_runtime\",\"commands\":[{{\"kind\":\"GameControl\",\"payload\":{}}}]}}",
+//RS         jet_devtools_relay_json_string(JET_DEVTOOLS_PROTOCOL),
+//RS         jet_devtools_relay_json_string(session_id),
+//RS         started_at_ms,
+//RS         payload_json,
+//RS     );
+//RS     if envelope.len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
+//RS         return Err("game control command relay payload exceeds the envelope limit".to_string());
+//RS     }
+//RS     let process = std::process::id();
+//RS     let temporary = directory.join(format!(".{process:020}-{sequence:020}.tmp"));
+//RS     let final_path = directory.join(format!("{sequence:020}-{process:020}.cmd"));
+//RS     let mut options = std::fs::OpenOptions::new();
+//RS     options.write(true).create_new(true);
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::OpenOptionsExt;
+//RS         options.mode(0o600);
+//RS     }
+//RS     let mut file = options
+//RS         .open(&temporary)
+//RS         .map_err(|error| format!("cannot open game control command relay: {error}"))?;
+//RS     use std::io::Write;
+//RS     if let Err(error) = file
+//RS         .write_all(envelope.as_bytes())
+//RS         .and_then(|()| file.sync_all())
+//RS     {
+//RS         let _ = std::fs::remove_file(&temporary);
+//RS         return Err(format!("cannot write game control command relay: {error}"));
+//RS     }
+//RS     std::fs::rename(&temporary, &final_path)
+//RS         .map_err(|error| format!("cannot publish game control command relay: {error}"))
+//RS }
+//RS 
+//RS /// Consume complete host command files in sequence order for one session.
+//RS /// Invalid, foreign, and malformed frames are removed and returned as errors;
+//RS /// callers cannot silently discard a command that needs a verdict.
+//RS pub fn jet_devtools_take_game_control_relays(session_id: &str) -> Result<Vec<String>, String> {
+//RS     validate_command_text(session_id, "session_id")?;
+//RS     let directory = match std::env::var(JET_DEVTOOLS_COMMAND_RELAY_PATH_ENV) {
+//RS         Ok(value) => {
+//RS             if value.is_empty()
+//RS                 || value.len() > JET_DEVTOOLS_MAX_TEXT_BYTES
+//RS                 || value.chars().any(char::is_control)
+//RS             {
+//RS                 return Err("game control command relay path is invalid".to_string());
+//RS             }
+//RS             std::path::PathBuf::from(value)
+//RS         }
+//RS         Err(std::env::VarError::NotPresent) => return Ok(Vec::new()),
+//RS         Err(error) => return Err(format!("cannot read game control command relay path: {error}")),
+//RS     };
+//RS     let Ok(entries) = std::fs::read_dir(&directory) else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let mut paths = entries
+//RS         .filter_map(Result::ok)
+//RS         .map(|entry| entry.path())
+//RS         .filter(|path| path.extension().is_some_and(|extension| extension == "cmd"))
+//RS         .collect::<Vec<_>>();
+//RS     paths.sort();
+//RS     paths.truncate(JET_DEVTOOLS_COMMAND_RELAY_MAX_FILES);
+//RS     let mut frames = Vec::with_capacity(paths.len());
+//RS     for path in paths {
+//RS         let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+//RS             format!("cannot inspect game control command relay entry: {error}")
+//RS         })?;
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::MetadataExt;
+//RS             let owner = std::fs::metadata("/proc/self")
+//RS                 .map(|process| process.uid())
+//RS                 .unwrap_or(metadata.uid());
+//RS             if metadata.uid() != owner || metadata.mode() & 0o077 != 0 {
+//RS                 let _ = std::fs::remove_file(&path);
+//RS                 return Err("game control command relay entry has unsafe ownership".to_string());
+//RS             }
+//RS         }
+//RS         if !metadata.file_type().is_file()
+//RS             || metadata.len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES as u64
+//RS         {
+//RS             let _ = std::fs::remove_file(&path);
+//RS             return Err("game control command relay entry is invalid".to_string());
+//RS         }
+//RS         let frame = std::fs::read_to_string(&path)
+//RS             .map_err(|error| format!("cannot read game control command relay: {error}"))?;
+//RS         std::fs::remove_file(&path)
+//RS             .map_err(|error| format!("cannot consume game control command relay: {error}"))?;
+//RS         jet_devtools_validate_relay_frame(&frame, session_id)?;
+//RS         frames.push(frame);
+//RS     }
+//RS     Ok(frames)
+//RS }
+//RS /// Remove pending relay files during session teardown. The relay directory is
+//RS /// process-scoped by construction, so this cannot touch another dev process.
+//RS pub fn jet_devtools_clear_game_control_relays() -> Result<(), String> {
+//RS     let directory = jet_devtools_command_relay_path()?;
+//RS     let entries = match std::fs::read_dir(&directory) {
+//RS         Ok(entries) => entries,
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+//RS         Err(error) => {
+//RS             return Err(format!(
+//RS                 "cannot inspect game control command relay for teardown: {error}"
+//RS             ))
+//RS         }
+//RS     };
+//RS     for entry in entries {
+//RS         let path = entry
+//RS             .map_err(|error| format!("cannot inspect game control command relay: {error}"))?
+//RS             .path();
+//RS         if path.extension().is_some_and(|extension| extension == "cmd") {
+//RS             std::fs::remove_file(&path)
+//RS                 .map_err(|error| format!("cannot clear game control command relay: {error}"))?;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS 
+//RS pub fn jet_devtools_install_native_host_unchecked(
+//RS     session_id: impl Into<String>,
+//RS     host: JetDevtoolsNativeHostHandle,
+//RS ) -> Result<JetDevtoolsNativeHostGuard, String> {
+//RS     let session_id = session_id.into();
+//RS     if session_id.is_empty() || session_id.len() > JET_DEVTOOLS_MAX_TEXT_BYTES {
+//RS         return Err("native devtools host session identity is invalid".to_string());
+//RS     }
+//RS     if session_id.chars().any(char::is_control) {
+//RS         return Err("native devtools host session identity contains control text".to_string());
+//RS     }
+//RS     let mut registry = JET_DEVTOOLS_NATIVE_HOSTS
+//RS         .lock()
+//RS         .map_err(|_| "native devtools host registry poisoned".to_string())?;
+//RS     let id = registry.next_id;
+//RS     registry.next_id = registry.next_id.saturating_add(1).max(1);
+//RS     registry.hosts.push(JetDevtoolsNativeHostRegistration {
+//RS         id,
+//RS         session_id: session_id.clone(),
+//RS         host,
+//RS     });
+//RS     drop(registry);
+//RS     jet_devtools_native_bind_session_unchecked(&session_id)?;
+//RS     Ok(JetDevtoolsNativeHostGuard { id, session_id })
+//RS }
+//RS 
+//RS pub fn jet_devtools_native_bind_session_unchecked(session_id: &str) -> Result<(), String> {
+//RS     if session_id.is_empty()
+//RS         || session_id.len() > JET_DEVTOOLS_MAX_TEXT_BYTES
+//RS         || session_id.chars().any(char::is_control)
+//RS     {
+//RS         return Err("native devtools session identity is invalid".to_string());
+//RS     }
+//RS     let mut active = JET_DEVTOOLS_NATIVE_SESSION
+//RS         .lock()
+//RS         .map_err(|_| "native devtools session poisoned".to_string())?;
+//RS     *active = Some(session_id.to_string());
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn jet_devtools_native_clear_session_unchecked(session_id: &str) {
+//RS     if let Ok(mut active) = JET_DEVTOOLS_NATIVE_SESSION.lock() {
+//RS         if active.as_deref() == Some(session_id) {
+//RS             *active = None;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_devtools_native_active_session() -> Option<String> {
+//RS     JET_DEVTOOLS_NATIVE_SESSION.lock().ok()?.clone()
+//RS }
+//RS /// Return the session selected by the native host registration.
+//RS pub fn jet_devtools_native_session_id() -> Option<String> {
+//RS     jet_devtools_native_active_session()
+//RS }
+//RS 
+//RS /// Invoke the first exact-session host without retaining the registry lock.
+//RS /// The empty/mismatched path returns before cloning an `Arc` or invoking user
+//RS /// code.
+//RS #[inline(always)]
+//RS pub fn jet_devtools_try_with_native_host<R>(
+//RS     session_id: &str,
+//RS     callback: impl FnOnce(&dyn JetDevtoolsNativeHost) -> R,
+//RS ) -> Option<R> {
+//RS     let host = {
+//RS         let registry = JET_DEVTOOLS_NATIVE_HOSTS.lock().ok()?;
+//RS         registry
+//RS             .hosts
+//RS             .iter()
+//RS             .find(|registration| registration.session_id == session_id)
+//RS             .map(|registration| registration.host.clone())
+//RS     }?;
+//RS     Some(callback(host.as_ref()))
+//RS }
+//RS 
+//RS /// Publish one event through the ordinary sink registry and the matching
+//RS /// native host. The event remains typed; no callback decodes wire fields.
+//RS pub fn jet_devtools_publish_event_for_session_unchecked(
+//RS     session_id: &str,
+//RS     event: JetDevtoolsEvent,
+//RS ) {
+//RS     jet_devtools_publish_event(event.clone());
+//RS     let _ = jet_devtools_try_with_native_host(session_id, |host| {
+//RS         host.on_event(session_id, event);
+//RS     });
+//RS }
+//RS 
+//RS pub fn jet_devtools_native_window_open_unchecked(width: u32, height: u32) {
+//RS     let Some(session_id) = jet_devtools_native_active_session() else {
+//RS         return;
+//RS     };
+//RS     let window = JetDevtoolsNativeWindow::new(session_id.clone(), width, height);
+//RS     let _ = jet_devtools_try_with_native_host(&session_id, |host| {
+//RS         host.on_window_open(window);
+//RS     });
+//RS }
+//RS 
+//RS pub fn jet_devtools_native_window_close_unchecked() {
+//RS     let Some(session_id) = jet_devtools_native_active_session() else {
+//RS         return;
+//RS     };
+//RS     let _ = jet_devtools_try_with_native_host(&session_id, |host| {
+//RS         host.on_window_close(&session_id);
+//RS     });
+//RS }
+//RS 
+//RS pub fn jet_devtools_native_input_unchecked(input: JetDevtoolsNativeInput) -> bool {
+//RS     let Some(session_id) = jet_devtools_native_active_session() else {
+//RS         return false;
+//RS     };
+//RS     jet_devtools_try_with_native_host(&session_id, |host| {
+//RS         host.on_input(&session_id, input)
+//RS     })
+//RS     .unwrap_or(false)
+//RS }
+//RS 
+//RS pub fn jet_devtools_native_frame_begin_unchecked(
+//RS     frame_index: u64,
+//RS     width: u32,
+//RS     height: u32,
+//RS ) -> Vec<JetDevtoolsNativeDrawCommand> {
+//RS     let Some(session_id) = jet_devtools_native_active_session() else {
+//RS         return Vec::new();
+//RS     };
+//RS     let frame = JetDevtoolsNativeFrame::new(session_id.clone(), frame_index, width, height);
+//RS     let mut commands = jet_devtools_try_with_native_host(&session_id, |host| {
+//RS         host.on_frame_begin(frame)
+//RS     })
+//RS     .unwrap_or_default();
+//RS     commands.truncate(JET_DEVTOOLS_MAX_HISTORY);
+//RS     commands
+//RS }
+//RS 
+//RS pub fn jet_devtools_native_draw_unchecked(command: JetDevtoolsNativeDrawCommand) {
+//RS     let Some(session_id) = jet_devtools_native_active_session() else {
+//RS         return;
+//RS     };
+//RS     let _ = jet_devtools_try_with_native_host(&session_id, |host| {
+//RS         host.on_draw(&session_id, command);
+//RS     });
+//RS }
+//RS 
+//RS pub fn jet_devtools_native_frame_end_unchecked() {
+//RS     let Some(session_id) = jet_devtools_native_active_session() else {
+//RS         return;
+//RS     };
+//RS     let _ = jet_devtools_try_with_native_host(&session_id, |host| {
+//RS         host.on_frame_end(&session_id);
+//RS     });
+//RS }
+//RS 
+// END-PORT-PENDING 2131 crates/jet-foundation/src/DevtoolsNative.rs:1-718
+

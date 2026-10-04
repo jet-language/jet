@@ -422,14 +422,14 @@ fn normalize_fixed_reduction_loop(function: &MIRFunction, fact: MIRVectorFact) -
 }
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs:7799
-fn fixed_reduction_plan(function: MIRFunction, instructions: [MIRInstruction]) -> (MIRPlaceID, MIRValueID, MIRValueID)? Never! {
+fn fixed_reduction_plan(function: MIRFunction, instructions: [MIRInstruction]) -> (accumulator: MIRPlaceID, addend: MIRValueID, seed: MIRValueID)? Never! {
     definitions := [U64:MIRInstruction]{}
     loop instruction in instructions {
         if instruction.result == .Val(value) {
             if definitions.get(value.value) == None -> &definitions.add(value.value, instruction).drop("retain the first definition")
         }
     }
-    plans := [(MIRPlaceID, MIRValueID, MIRValueID)]{}
+    plans := [(accumulator: MIRPlaceID, addend: MIRValueID, seed: MIRValueID)]{}
     loop instruction in instructions {
         if instruction.operation == {
             .WritePlace(place, value) -> {
@@ -440,8 +440,8 @@ fn fixed_reduction_plan(function: MIRFunction, instructions: [MIRInstruction]) -
                         visited_left := [MIRValueID:Bool]{} // GATE #4499: exact identity keys.
                         visited_right := [MIRValueID:Bool]{}
                         if {
-                            value_reads_place(instructions, left, place, &visited_left) -> &plans.push((place, right, left))
-                            value_reads_place(instructions, right, place, &visited_right) -> &plans.push((place, left, right))
+                            value_reads_place(instructions, left, place, &visited_left) -> &plans.push((accumulator: place, addend: right, seed: left))
+                            value_reads_place(instructions, right, place, &visited_right) -> &plans.push((accumulator: place, addend: left, seed: right))
                             else -> {}
                         }
                     }

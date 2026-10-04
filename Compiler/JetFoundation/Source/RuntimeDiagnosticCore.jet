@@ -1,0 +1,252 @@
+// PORT-PENDING 2159 crates-jet-foundation-src-runtimediagnosticcore: crates/jet-foundation/src/RuntimeDiagnosticCore.rs:1-248
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // One allocation-free runtime report renderer for every execution target.
+//RS use core::fmt::{self, Write};
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub struct JetRuntimeDiagnosticRow {
+//RS     pub code: &'static str,
+//RS     pub what: &'static str,
+//RS     pub why: &'static str,
+//RS     pub fix: &'static str,
+//RS     pub template_holes: &'static [&'static str],
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS pub struct JetRuntimeStopContext<'a> {
+//RS     pub file: &'a str,
+//RS     pub line: u32,
+//RS     pub function: &'a str,
+//RS     pub source_line: &'a str,
+//RS     pub column: u32,
+//RS     pub caret_len: u32,
+//RS     pub expected_type: &'a str,
+//RS }
+//RS /// Canonical omitted-message policy for checked `require`.
+//RS ///
+//RS /// `None` is the omitted message; an explicitly empty string remains empty.
+//RS pub fn jet_require_message(message: Option<&str>) -> &str {
+//RS     message.unwrap_or("condition failed")
+//RS }
+//RS 
+//RS /// Allocation-free expected/got carrier for checked `require_eq`.
+//RS pub struct JetRequireEqMessage<'a> {
+//RS     left_debug: &'a dyn fmt::Display,
+//RS     right_debug: &'a dyn fmt::Display,
+//RS }
+//RS 
+//RS impl fmt::Display for JetRequireEqMessage<'_> {
+//RS     fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         write!(
+//RS             out,
+//RS             "expected: {}, got: {}",
+//RS             self.right_debug,
+//RS             self.left_debug
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_require_eq_message<'a>(
+//RS     left_debug: &'a dyn fmt::Display,
+//RS     right_debug: &'a dyn fmt::Display,
+//RS ) -> JetRequireEqMessage<'a> {
+//RS     JetRequireEqMessage {
+//RS         left_debug,
+//RS         right_debug,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub fn jet_write_diagnostic_template(
+//RS     out: &mut dyn fmt::Write,
+//RS     template: &str,
+//RS     mut hole: impl FnMut(&mut dyn fmt::Write, &str) -> fmt::Result,
+//RS ) -> fmt::Result {
+//RS     let bytes = template.as_bytes();
+//RS     let mut index = 0;
+//RS     while index < bytes.len() {
+//RS         if bytes[index] == b'{' && bytes.get(index + 1) == Some(&b'{') {
+//RS             out.write_char('{')?;
+//RS             index += 2;
+//RS             continue;
+//RS         }
+//RS         if bytes[index] == b'}' && bytes.get(index + 1) == Some(&b'}') {
+//RS             out.write_char('}')?;
+//RS             index += 2;
+//RS             continue;
+//RS         }
+//RS         if bytes[index] == b'{' {
+//RS             if let Some(close_offset) = template[index + 1..].find('}') {
+//RS                 let close = index + 1 + close_offset;
+//RS                 let name = &template[index + 1..close];
+//RS                 if !name.is_empty()
+//RS                     && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+//RS                 {
+//RS                     hole(out, name)?;
+//RS                     index = close + 1;
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS         }
+//RS         let character = template[index..].chars().next().expect("template character boundary");
+//RS         out.write_char(character)?;
+//RS         index += character.len_utf8();
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS // Only an initial ASCII lowercase word can change. All protected type names
+//RS // start uppercase; `fn` is the one lowercase reserved word in this rule.
+//RS #[derive(Default)]
+//RS struct ProseStart {
+//RS     offset: usize,
+//RS     first: Option<usize>,
+//RS     token_len: usize,
+//RS     is_fn: bool,
+//RS     preserve: bool,
+//RS     period: bool,
+//RS     finished: bool,
+//RS }
+//RS impl fmt::Write for ProseStart {
+//RS     fn write_str(&mut self, text: &str) -> fmt::Result {
+//RS         for ch in text.chars() {
+//RS             let offset = self.offset;
+//RS             self.offset += ch.len_utf8();
+//RS             if self.finished { continue; }
+//RS             if self.first.is_none() {
+//RS                 if ch.is_whitespace() || matches!(ch, '*' | '~' | '_') { continue; }
+//RS                 if !ch.is_ascii_lowercase() {
+//RS                     self.finished = true;
+//RS                     continue;
+//RS                 }
+//RS                 self.first = Some(offset);
+//RS                 self.token_len = 1;
+//RS                 self.is_fn = ch == 'f';
+//RS                 continue;
+//RS             }
+//RS             if ch.is_whitespace() || matches!(ch, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!') {
+//RS                 self.finished = true;
+//RS                 continue;
+//RS             }
+//RS             if self.period { self.preserve = true; }
+//RS             self.period = ch == '.';
+//RS             if self.period { continue; }
+//RS             self.token_len += 1;
+//RS             self.is_fn &= self.token_len == 2 && ch == 'n';
+//RS             self.preserve |= ch.is_ascii_digit() || matches!(ch, '_' | '/' | '\\' | '@' | '#');
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_write_sentence_case(out: &mut dyn fmt::Write, value: &dyn fmt::Display) -> fmt::Result {
+//RS     let mut start = ProseStart::default();
+//RS     write!(&mut start, "{value}")?;
+//RS     let change = start.first.filter(|_| !start.preserve && !(start.is_fn && start.token_len == 2));
+//RS     struct Capitalize<'a> {
+//RS         out: &'a mut dyn fmt::Write,
+//RS         offset: usize,
+//RS         change: Option<usize>,
+//RS     }
+//RS     impl fmt::Write for Capitalize<'_> {
+//RS         fn write_str(&mut self, text: &str) -> fmt::Result {
+//RS             let begin = self.offset;
+//RS             self.offset += text.len();
+//RS             if let Some(change) = self.change.filter(|change| *change >= begin && *change < self.offset) {
+//RS                 let index = change - begin;
+//RS                 self.out.write_str(&text[..index])?;
+//RS                 self.out.write_char((text.as_bytes()[index] as char).to_ascii_uppercase())?;
+//RS                 self.out.write_str(&text[index + 1..])
+//RS             } else {
+//RS                 self.out.write_str(text)
+//RS             }
+//RS         }
+//RS     }
+//RS     write!(&mut Capitalize { out, offset: 0, change }, "{value}")
+//RS }
+//RS 
+//RS pub struct JetRuntimeStopField<'a> {
+//RS     row: JetRuntimeDiagnosticRow,
+//RS     template: &'static str,
+//RS     context: JetRuntimeStopContext<'a>,
+//RS     message: &'a dyn fmt::Display,
+//RS     raw_message: bool,
+//RS }
+//RS impl fmt::Display for JetRuntimeStopField<'_> {
+//RS     fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         struct Raw<'a, 'b>(&'a JetRuntimeStopField<'b>);
+//RS         impl fmt::Display for Raw<'_, '_> {
+//RS             fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS                 let field = self.0;
+//RS                 if field.raw_message { return write!(out, "{}", field.message); }
+//RS                 jet_write_diagnostic_template(out, field.template, |out, name| {
+//RS                     assert!(field.row.template_holes.contains(&name), "missing diagnostic template hole `{name}`");
+//RS                     match name {
+//RS                         "file" => out.write_str(field.context.file),
+//RS                         "line" | "n" => write!(out, "{}", field.context.line),
+//RS                         "fn" => out.write_str(field.context.function),
+//RS                         "type" => out.write_str(field.context.expected_type),
+//RS                         _ => write!(out, "{}", field.message),
+//RS                     }
+//RS                 })
+//RS             }
+//RS         }
+//RS         jet_write_sentence_case(out, &Raw(self))
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_runtime_stop_fields<'a>(
+//RS     row: JetRuntimeDiagnosticRow,
+//RS     code: &str,
+//RS     context: JetRuntimeStopContext<'a>,
+//RS     message: &'a dyn fmt::Display,
+//RS ) -> [JetRuntimeStopField<'a>; 3] {
+//RS     [(row.what, code == "E3005"), (row.why, false), (row.fix, false)].map(|(template, raw_message)| JetRuntimeStopField {
+//RS         row, template, context, message, raw_message,
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_runtime_stop_has_context(code: &str) -> bool {
+//RS     matches!(code, "E0128" | "E3001" | "E3012" | "E3014")
+//RS }
+//RS 
+//RS pub fn jet_runtime_stop_status(row: Option<JetRuntimeDiagnosticRow>) -> i32 {
+//RS     if row.is_some() { 70 } else { 101 }
+//RS }
+//RS 
+//RS pub fn jet_write_runtime_stop(
+//RS     out: &mut dyn fmt::Write,
+//RS     row: Option<JetRuntimeDiagnosticRow>,
+//RS     code: &'static str,
+//RS     context: JetRuntimeStopContext<'_>,
+//RS     message: &dyn fmt::Display,
+//RS     locals: Option<&dyn fmt::Display>,
+//RS ) -> fmt::Result {
+//RS     let Some(row) = row else {
+//RS         return write!(out, "Internal error: runtime diagnostic `{code}` is not an active runtime row\n Why: Jet could not resolve this stop through the active diagnostic registry\n Fix: report this as a Jet compiler or host defect\nMore: jet-lang.dev/e/{code}\n");
+//RS     };
+//RS     let [what, why, fix] = jet_runtime_stop_fields(row, code, context, message);
+//RS     writeln!(out, "Stop [{code}]: {what}")?;
+//RS     let show_context = jet_runtime_stop_has_context(code);
+//RS     if !context.file.is_empty() {
+//RS         write!(out, "  --> {}:{}", context.file, context.line)?;
+//RS         if show_context && !context.function.is_empty() { write!(out, " in {}", context.function)?; }
+//RS         out.write_char('\n')?;
+//RS     }
+//RS     if show_context && !context.source_line.is_empty() {
+//RS         let mut digits = 1;
+//RS         let mut line = context.line;
+//RS         while line >= 10 { digits += 1; line /= 10; }
+//RS         write!(out, "{:width$}|\n{} | {}\n{:width$}| ", "", context.line, context.source_line, "", width = digits + 3)?;
+//RS         for _ in 0..context.column.saturating_sub(1) { out.write_char(' ')?; }
+//RS         for _ in 0..context.caret_len.max(1) { out.write_char('^')?; }
+//RS         out.write_char('\n')?;
+//RS     }
+//RS     if show_context {
+//RS         if let Some(locals) = locals { writeln!(out, "locals: {locals}")?; }
+//RS     }
+//RS     writeln!(out, " Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/{code}")
+//RS }
+//RS 
+// END-PORT-PENDING 2159 crates/jet-foundation/src/RuntimeDiagnosticCore.rs:1-248
+

@@ -1,4 +1,6 @@
-use jet_foundation.[MIRFunction, MIRBasicBlock, MIRBlockID, MIRValueID, MIRPlaceID, MIROpID, MIRInstruction, MIRConstant, MIRCopyCost, MIRLoopFact, MIRPreludeCallID, MIRPreludeCall, MIRTypeDef, MIRType, MIRPlace, MIRFieldID, MIRVectorFact, MIRVectorAccess, MIRVectorAccessRoot, MIRVectorLayout, MIRVectorRule, MIRFixedReductionFact, MIROptimizationDecision, mir_operation_value_uses, mir_terminator_targets]
+use jet_foundation.[MIRFunction, MIRBasicBlock, MIRBlockID, MIRValueID, MIRPlaceID, MIROpID, MIRInstruction, MIRConstant, MIRCopyCost, MIRLoopFact, MIRPreludeCallID, MIRPreludeCall, MIRCallArg, MIRBinaryOp, MIRPlaceBase, MIRStructLayout, MIRTypeDef, MIRType, MIRPlace, MIRFieldID, MIRVectorFact, MIRVectorAccess, MIRVectorAccessRoot, MIRVectorLayout, MIRVectorRule, MIRFixedReductionFact, MIROptimizationDecision, mir_operation_value_uses, mir_terminator_targets]
+use jet_optimizer.[CanonicalLoopShape, CanonicalLoopRange, canonical_range_for_cursor, fixed_reduction_plan, mir_pass_collect_scalar_constants, operation_place_refs, mir_place_path, mir_place_paths_overlap, vector_operation_has_effect, vector_memory_facts, is_packable_type, is_packable_for_rule, lane_width, place_root]
+use jet_foundation.MIROptimization.Acceleration.[D_FRED1_FIXED_ORDER]
 // Private helpers extend Facts/LoopVector; canonical shapes/ranges and shared pass helpers live there.
 // Composite ID map/set keys retain exact equality/hash semantics: GATE #4499.
 
@@ -76,9 +78,9 @@ fn cursor_value_matches_inner(function: MIRFunction, value: MIRValueID, cursor: 
 }
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs:10163
-fn scalar_int_constant(constants: [MIRValueID:MIRConstant], value: MIRValueID) -> I64? {
-    constant :: constants.get(value) ?? return None
-    if constant == .Int(value, _) -> Val(value) else -> None
+fn scalar_int_constant(constants: [U64:MIRConstant], value: MIRValueID) -> I64? {
+    constant :: constants.get(value.value) ?? return None
+    if constant == .Int(value, _, _) -> Val(value) else -> None
 }
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs:10173
@@ -270,7 +272,7 @@ fn loop_trip_count_for_cursor(function: MIRFunction, cursor: MIRValueID) -> U64?
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs:10477
 fn loop_trip_count(function: MIRFunction, range: CanonicalLoopRange) -> U64? {
-    constants :: collect_scalar_constants(function)
+    constants :: mir_pass_collect_scalar_constants(function)
     start :: scalar_int_constant(constants, range.start) ?? return None
     end :: scalar_int_constant(constants, range.end) ?? return None
     step := I64{1}
@@ -309,7 +311,7 @@ fn loop_copy_cost(function: MIRFunction, blocks: [MIRBlockID]) -> MIRCopyCost {
                     copies = copies.saturating_add(count)
                 }
                 .Semantic(operation) -> if operation == {
-                    .StaticPreludeCall(_, args, _) | .ClosureMethod(_, _, args, _) | .HostCall(_, args, _) -> {
+                    .StaticPreludeCall(_, args, _, _) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> {
                         count := U32{0}
                         loop arg in args { if arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list -> count += 1 }
                         copies = copies.saturating_add(count)
@@ -481,7 +483,7 @@ fn vector_indexing_is_proven(function: MIRFunction, instructions: [MIRInstructio
     cursor_value :: cursor ?? return false
     loop_range :: range ?? return false
     if !loop_range.exclusive -> return false
-    constants :: collect_scalar_constants(function)
+    constants :: mir_pass_collect_scalar_constants(function)
     if scalar_int_constant(constants, loop_range.start) != Val(0) -> return false
     if loop_range.step == .Val(step) { if scalar_int_constant(constants, step) != Val(1) -> return false }
     range_end := U64?{None}
@@ -496,7 +498,7 @@ fn vector_indexing_is_proven(function: MIRFunction, instructions: [MIRInstructio
         if required_len(index, cursor_index) == .Val(end) {
             if base_ty == .Val(ty) { if vector_fixed_bound_covers(ty, end) -> return true }
             if base == .Val(base_value) {
-                loop row in function.values { if row.0 == base_value && vector_fixed_bound_covers(row.1, end) -> return true }
+                loop row in function.values { if row.id == base_value && vector_fixed_bound_covers(row.ty, end) -> return true }
             }
         }
         if cursor_index && range_end == None {
@@ -594,7 +596,7 @@ fn vector_same_collection_direct_place(function: MIRFunction, value: MIRValueID,
 // Rust: crates/jet-foundation/src/MIROptimization.rs:11086
 fn vector_fixed_bound_covers(ty: MIRType, required_len: U64) -> Bool {
     if ty.kind == {
-        .FixedList(_, .Literal(value, _)) -> required_len <= value
+        .FixedList(_, .Literal(_, value)) -> required_len <= value
         .Tagged(_, inner) -> vector_fixed_bound_covers(inner, required_len)
         else -> false
     }
@@ -805,361 +807,202 @@ fn vector_has_indexed_input(function: MIRFunction, instructions: [MIRInstruction
     false
 }
 
-//RS fn value_has_cursor_index(
-//RS     function: &MirFunction,
-//RS     value: MirValueId,
-//RS     cursor: MirValueId,
-//RS     cursor_place: Option<MirPlaceId>,
-//RS     seen: &mut HashSet<MirValueId>,
-//RS ) -> bool {
-//RS     if !seen.insert(value) {
-//RS         return false;
-//RS     }
-//RS     let Some(instruction) = find_value_instruction(function, value) else {
-//RS         return false;
-//RS     };
-//RS     match &instruction.operation {
-//RS         MirOperation::Index { index, .. } => {
-//RS             cursor_value_matches(function, *index, cursor, cursor_place)
-//RS         }
-//RS         MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
-//RS             place_has_cursor_index(function, *place, cursor, cursor_place)
-//RS         }
-//RS         MirOperation::Field { base, .. }
-//RS         | MirOperation::Copy { value: base, .. }
-//RS         | MirOperation::Move { value: base }
-//RS         | MirOperation::TraitBox { value: base, .. }
-//RS         | MirOperation::AttachTag { value: base, .. } => {
-//RS             value_has_cursor_index(function, *base, cursor, cursor_place, seen)
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn find_value_instruction<'a>(
-//RS     function: &'a MirFunction,
-//RS     value: MirValueId,
-//RS ) -> Option<&'a crate::MIR::MirInstruction> {
-//RS     function
-//RS         .blocks
-//RS         .iter()
-//RS         .flat_map(|block| block.instructions.iter())
-//RS         .find(|instruction| instruction.result == Some(value))
-//RS }
-//RS 
-//RS fn place_has_cursor_index(
-//RS     function: &MirFunction,
-//RS     place_id: MirPlaceId,
-//RS     cursor: MirValueId,
-//RS     cursor_place: Option<MirPlaceId>,
-//RS ) -> bool {
-//RS     function
-//RS         .places
-//RS         .iter()
-//RS         .find(|place| place.id == place_id)
-//RS         .is_some_and(|place| {
-//RS             place.projections.iter().any(|projection| {
-//RS                 matches!(
-//RS                     projection,
-//RS                     MirProjection::Index { index, .. }
-//RS                         if cursor_value_matches(function, *index, cursor, cursor_place)
-//RS                 )
-//RS             })
-//RS         })
-//RS }
-//RS 
-//RS fn vector_accesses(
-//RS     function: &MirFunction,
-//RS     blocks: &[MirBlockId],
-//RS     cursor: Option<MirValueId>,
-//RS     cursor_place: Option<MirPlaceId>,
-//RS     type_defs: &[MirTypeDef],
-//RS ) -> Vec<MirVectorAccess> {
-//RS     let mut accesses = Vec::new();
-//RS     for block_id in blocks {
-//RS         let Some(block) = function.blocks.iter().find(|block| block.id == *block_id) else {
-//RS             continue;
-//RS         };
-//RS         for instruction in &block.instructions {
-//RS             for place_id in operation_place_refs(&instruction.operation) {
-//RS                 let Some(place) = function.places.iter().find(|place| place.id == place_id) else {
-//RS                     continue;
-//RS                 };
-//RS                 let field = place.projections.iter().rev().find_map(|projection| match projection {
-//RS                     MirProjection::Field { field, .. } => Some(*field),
-//RS                     _ => None,
-//RS                 });
-//RS                 let (layout, column_index) =
-//RS                     vector_place_layout(function, place, field, type_defs);
-//RS                 accesses.push(MirVectorAccess {
-//RS                     root: MirVectorAccessRoot::Place(place_id),
-//RS                     field,
-//RS                     layout,
-//RS                     column_index,
-//RS                 });
-//RS             }
-//RS             match &instruction.operation {
-//RS                 MirOperation::Index { base, index, kind, .. }
-//RS                     if cursor.is_some_and(|cursor| {
-//RS                         cursor_value_matches(function, *index, cursor, cursor_place)
-//RS                     }) =>
-//RS                 {
-//RS                     accesses.push(MirVectorAccess {
-//RS                         root: value_access_root(function, *base),
-//RS                         field: None,
-//RS                         layout: MirVectorLayout::Flat,
-//RS                         column_index: None,
-//RS                     });
-//RS                     let _ = kind;
-//RS                 }
-//RS                 MirOperation::Semantic(MirSemanticOp::ColumnarRead {
-//RS                     base,
-//RS                     column,
-//RS                     column_index,
-//RS                     ..
-//RS                 }) => accesses.push(MirVectorAccess {
-//RS                     root: MirVectorAccessRoot::Value(*base),
-//RS                     field: Some(*column),
-//RS                     layout: MirVectorLayout::ColumnarDirect,
-//RS                     column_index: Some(*column_index),
-//RS                 }),
-//RS                 MirOperation::Field { base, field } => {
-//RS                     if let Some((root, layout, column_index)) =
-//RS                         vector_indexed_field_access(
-//RS                             function,
-//RS                             *base,
-//RS                             *field,
-//RS                             cursor,
-//RS                             cursor_place,
-//RS                             type_defs,
-//RS                         )
-//RS                     {
-//RS                         accesses.push(MirVectorAccess {
-//RS                             root,
-//RS                             field: Some(*field),
-//RS                             layout,
-//RS                             column_index,
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     accesses.sort_unstable();
-//RS     accesses.dedup();
-//RS     accesses
-//RS }
-//RS 
-//RS fn vector_place_layout(
-//RS     function: &MirFunction,
-//RS     place: &MirPlace,
-//RS     field: Option<MirFieldId>,
-//RS     type_defs: &[MirTypeDef],
-//RS ) -> (MirVectorLayout, Option<usize>) {
-//RS     let Some(field) = field else {
-//RS         return (MirVectorLayout::Flat, None);
-//RS     };
-//RS     let Some(base_type) = place_base_type(function, &place.base) else {
-//RS         return (MirVectorLayout::AosStrided, None);
-//RS     };
-//RS     let Some(element) = list_element_type(&base_type) else {
-//RS         return (MirVectorLayout::AosStrided, None);
-//RS     };
-//RS     if struct_layout(element, type_defs) == Some(MirStructLayout::Columnar) {
-//RS         (
-//RS             MirVectorLayout::ColumnarDirect,
-//RS             field_column_index(element, field, type_defs),
-//RS         )
-//RS     } else {
-//RS         (MirVectorLayout::AosStrided, None)
-//RS     }
-//RS }
-//RS 
-//RS fn vector_indexed_field_access(
-//RS     function: &MirFunction,
-//RS     base: MirValueId,
-//RS     field: MirFieldId,
-//RS     cursor: Option<MirValueId>,
-//RS     cursor_place: Option<MirPlaceId>,
-//RS     type_defs: &[MirTypeDef],
-//RS ) -> Option<(MirVectorAccessRoot, MirVectorLayout, Option<usize>)> {
-//RS     let instruction = find_value_instruction(function, base)?;
-//RS     let (root, index, collection_type) = match &instruction.operation {
-//RS         MirOperation::Index {
-//RS             base: collection,
-//RS             index,
-//RS             kind: MirIndexKind::List | MirIndexKind::FixedListProof,
-//RS             ..
-//RS         } => (
-//RS             value_access_root(function, *collection),
-//RS             *index,
-//RS             value_type(function, *collection)?,
-//RS         ),
-//RS         MirOperation::ReadPlace(place_id) => {
-//RS             let place = function.places.iter().find(|place| place.id == *place_id)?;
-//RS             let index = place.projections.iter().rev().find_map(|projection| {
-//RS                 let MirProjection::Index { index, .. } = projection else {
-//RS                     return None;
-//RS                 };
-//RS                 Some(*index)
-//RS             })?;
-//RS             let root = match &place.base {
-//RS                 MirPlaceBase::Parameter(value)
-//RS                 | MirPlaceBase::Capture(value)
-//RS                 | MirPlaceBase::Temporary(value) => value_access_root(function, *value),
-//RS                 MirPlaceBase::Local(_) => MirVectorAccessRoot::Place(*place_id),
-//RS                 MirPlaceBase::Static(_) => return None,
-//RS             };
-//RS             (root, index, place_base_type(function, &place.base)?)
-//RS         }
-//RS         _ => return None,
-//RS     };
-//RS     if !cursor.is_some_and(|cursor| cursor_value_matches(function, index, cursor, cursor_place)) {
-//RS         return None;
-//RS     }
-//RS     let element = list_element_type(&collection_type)?;
-//RS     let layout = if struct_layout(element, type_defs) == Some(MirStructLayout::Columnar) {
-//RS         MirVectorLayout::ColumnarDirect
-//RS     } else {
-//RS         MirVectorLayout::AosStrided
-//RS     };
-//RS     Some((
-//RS         root,
-//RS         layout,
-//RS         (layout == MirVectorLayout::ColumnarDirect)
-//RS             .then(|| field_column_index(element, field, type_defs))
-//RS             .flatten(),
-//RS     ))
-//RS }
-//RS 
-//RS fn place_base_type(function: &MirFunction, base: &MirPlaceBase) -> Option<MirType> {
-//RS     match base {
-//RS         MirPlaceBase::Local(local) => function
-//RS             .locals
-//RS             .iter()
-//RS             .find(|candidate| candidate.id == *local)
-//RS             .map(|local| local.ty.clone()),
-//RS         MirPlaceBase::Parameter(value)
-//RS         | MirPlaceBase::Capture(value)
-//RS         | MirPlaceBase::Temporary(value) => value_type(function, *value),
-//RS         MirPlaceBase::Static(_) => None,
-//RS     }
-//RS }
-//RS 
-//RS fn value_type(function: &MirFunction, value: MirValueId) -> Option<MirType> {
-//RS     function
-//RS         .values
-//RS         .iter()
-//RS         .find(|(candidate, ..)| *candidate == value)
-//RS         .map(|(_, ty, ..)| ty.clone())
-//RS }
-//RS 
-//RS fn value_access_root(function: &MirFunction, value: MirValueId) -> MirVectorAccessRoot {
-//RS     fn inner(
-//RS         function: &MirFunction,
-//RS         value: MirValueId,
-//RS         seen: &mut HashSet<MirValueId>,
-//RS     ) -> MirVectorAccessRoot {
-//RS         if !seen.insert(value) {
-//RS             return MirVectorAccessRoot::Value(value);
-//RS         }
-//RS         let Some(instruction) = find_value_instruction(function, value) else {
-//RS             return MirVectorAccessRoot::Value(value);
-//RS         };
-//RS         match &instruction.operation {
-//RS             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
-//RS                 MirVectorAccessRoot::Place(*place)
-//RS             }
-//RS             MirOperation::Copy { value, .. }
-//RS             | MirOperation::Move { value }
-//RS             | MirOperation::AttachTag { value, .. }
-//RS             | MirOperation::Field { base: value, .. }
-//RS             | MirOperation::Index { base: value, .. } => inner(function, *value, seen),
-//RS             MirOperation::Semantic(MirSemanticOp::ColumnarRead { base, .. }) => {
-//RS                 inner(function, *base, seen)
-//RS             }
-//RS             _ => MirVectorAccessRoot::Value(value),
-//RS         }
-//RS     }
-//RS     inner(function, value, &mut HashSet::new())
-//RS }
-//RS 
-//RS fn list_element_type(ty: &MirType) -> Option<&MirType> {
-//RS     match ty.kind() {
-//RS         MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => Some(inner),
-//RS         MirTypeKind::Tagged { inner, .. } => list_element_type(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn struct_layout(ty: &MirType, type_defs: &[MirTypeDef]) -> Option<MirStructLayout> {
-//RS     let id = ty.identity.or_else(|| match ty.kind() {
-//RS         MirTypeKind::Apply { name, .. } => Some(name.id),
-//RS         _ => None,
-//RS     })?;
-//RS     type_defs.iter().find(|definition| definition.id == id)?.layout
-//RS }
-//RS 
-//RS fn field_column_index(
-//RS     element: &MirType,
-//RS     field: MirFieldId,
-//RS     type_defs: &[MirTypeDef],
-//RS ) -> Option<usize> {
-//RS     let id = element.identity.or_else(|| match element.kind() {
-//RS         MirTypeKind::Apply { name, .. } => Some(name.id),
-//RS         _ => None,
-//RS     })?;
-//RS     let definition = type_defs.iter().find(|definition| definition.id == id)?;
-//RS     let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
-//RS         return None;
-//RS     };
-//RS     fields
-//RS         .iter()
-//RS         .filter(|field| !field.computed)
-//RS         .position(|candidate| candidate.id == field)
-//RS }
-//RS 
-//RS fn value_root_key(function: &MirFunction, value: MirValueId) -> String {
-//RS     fn inner(
-//RS         function: &MirFunction,
-//RS         value: MirValueId,
-//RS         seen: &mut HashSet<MirValueId>,
-//RS     ) -> String {
-//RS         if !seen.insert(value) {
-//RS             return format!("value:{}", value.0);
-//RS         }
-//RS         let Some(instruction) = find_value_instruction(function, value) else {
-//RS             return format!("value:{}", value.0);
-//RS         };
-//RS         match &instruction.operation {
-//RS             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
-//RS                 function
-//RS                     .places
-//RS                     .iter()
-//RS                     .find(|candidate| candidate.id == *place)
-//RS                     .map(place_root)
-//RS                     .unwrap_or_else(|| format!("value:{}", value.0))
-//RS             }
-//RS             MirOperation::Parameter { index, .. } => format!("parameter:{index}"),
-//RS             MirOperation::Capture { slot } => format!("capture:{slot}"),
-//RS             MirOperation::Copy { value, .. }
-//RS             | MirOperation::Move { value }
-//RS             | MirOperation::AttachTag { value, .. }
-//RS             | MirOperation::Field { base: value, .. }
-//RS             | MirOperation::Index { base: value, .. } => inner(function, *value, seen),
-//RS             MirOperation::Semantic(MirSemanticOp::ColumnarRead { base, .. }) => {
-//RS                 inner(function, *base, seen)
-//RS             }
-//RS             MirOperation::Phi { incoming } => incoming
-//RS                 .first()
-//RS                 .map(|(_, value)| inner(function, *value, seen))
-//RS                 .unwrap_or_else(|| format!("value:{}", value.0)),
-//RS             _ => format!("value:{}", value.0),
-//RS         }
-//RS     }
-//RS     inner(function, value, &mut HashSet::new())
-//RS }
-//RS 
-// END-PORT-PENDING 1196 crates/jet-foundation/src/MIROptimization.rs:10016-11812
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11457
+fn value_has_cursor_index(function: MIRFunction, value: MIRValueID, cursor: MIRValueID, cursor_place: MIRPlaceID?, seen: &[MIRValueID:Bool]) -> Bool {
+    if seen.get(value) != None -> return false
+    &seen.add(value, true).drop("absent value")
+    instruction :: find_value_instruction(function, value) ?? return false
+    if instruction.operation == {
+        .Index(_, _, index, _, _, _, _) -> cursor_value_matches(function, index, cursor, cursor_place)
+        .ReadPlace(place) | .MovePlace(place) -> place_has_cursor_index(function, place, cursor, cursor_place)
+        .Field(base, _) | .Copy(base, _) | .Move(base) | .TraitBox(base, _) | .AttachTag(base, _) -> value_has_cursor_index(function, base, cursor, cursor_place, seen)
+        else -> false
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11488
+fn find_value_instruction(function: MIRFunction, value: MIRValueID) -> MIRInstruction? {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.result == Val(value) -> return Val(instruction)
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11499
+fn place_has_cursor_index(function: MIRFunction, place_id: MIRPlaceID, cursor: MIRValueID, cursor_place: MIRPlaceID?) -> Bool {
+    place :: function.places.find(fn(place) { place.id == place_id }) ?? return false
+    loop projection in place.projections {
+        if projection == .Index(_, index, _, _, _, _, _) && cursor_value_matches(function, index, cursor, cursor_place) -> return true
+    }
+    false
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11520
+fn vector_accesses(function: MIRFunction, blocks: [MIRBlockID], cursor: MIRValueID?, cursor_place: MIRPlaceID?, type_defs: [MIRTypeDef]) -> [MIRVectorAccess] {
+    accesses := [MIRVectorAccess]{}
+    loop block_id in blocks {
+        block :: function.blocks.find(fn(block) { block.id == block_id }) ?? next
+        loop instruction in block.instructions {
+            loop place_id in operation_place_refs(instruction.operation) {
+                place :: function.places.find(fn(place) { place.id == place_id }) ?? next
+                field := MIRFieldID?{None}
+                loop projection in place.projections.rev() {
+                    if projection == .Field(candidate, _) { field = Val(candidate); break }
+                }
+                (layout, column_index) :: vector_place_layout(function, place, field, type_defs)
+                &accesses.push(MIRVectorAccess{root: .Place(place_id), field: field, layout: layout, column_index: column_index})
+            }
+            if instruction.operation == {
+                .Index(_, base, index, _, _, _, _) -> {
+                    if cursor == .Val(cursor_value) {
+                        if cursor_value_matches(function, index, cursor_value, cursor_place) -> &accesses.push(MIRVectorAccess{root: value_access_root(function, base), field: None, layout: .Flat, column_index: None})
+                    }
+                }
+                .Semantic(.ColumnarRead(base, _, column, column_index, _)) -> &accesses.push(MIRVectorAccess{root: .Value(base), field: Val(column), layout: .ColumnarDirect, column_index: Val(column_index)})
+                .Field(base, field) -> {
+                    if vector_indexed_field_access(function, base, field, cursor, cursor_place, type_defs) == .Val((root, layout, column_index)) -> &accesses.push(MIRVectorAccess{root: root, field: Val(field), layout: layout, column_index: column_index})
+                }
+                else -> {}
+            }
+        }
+    }
+    &accesses.sort()
+    &accesses.dedup()
+    accesses
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11603
+fn vector_place_layout(function: MIRFunction, place: MIRPlace, field: MIRFieldID?, type_defs: [MIRTypeDef]) -> (MIRVectorLayout, Int?) {
+    field_id :: field ?? return (.Flat, None)
+    base_type :: place_base_type(function, place.base) ?? return (.AosStrided, None)
+    element :: list_element_type(base_type) ?? return (.AosStrided, None)
+    if struct_layout(element, type_defs) == Val(.Columnar) -> (.ColumnarDirect, field_column_index(element, field_id, type_defs)) else -> (.AosStrided, None)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11628
+fn vector_indexed_field_access(function: MIRFunction, base: MIRValueID, field: MIRFieldID, cursor: MIRValueID?, cursor_place: MIRPlaceID?, type_defs: [MIRTypeDef]) -> (MIRVectorAccessRoot, MIRVectorLayout, Int?)? {
+    instruction :: find_value_instruction(function, base) ?? return None
+    (root, index, collection_type) :: if instruction.operation == {
+        .Index(_, collection, index, kind, _, _, _) && (kind == .List || kind == .FixedListProof) -> {
+            ty :: value_type(function, collection) ?? return None
+            (value_access_root(function, collection), index, ty)
+        }
+        .ReadPlace(place_id) -> {
+            place :: function.places.find(fn(place) { place.id == place_id }) ?? return None
+            index := MIRValueID?{None}
+            loop projection in place.projections.rev() {
+                if projection == .Index(_, value, _, _, _, _, _) { index = Val(value); break }
+            }
+            index_value :: index ?? return None
+            root :: if place.base == {
+                .Parameter(value) | .Capture(value) | .Temporary(value) -> value_access_root(function, value)
+                .Local(_) -> MIRVectorAccessRoot.Place(place_id)
+                .Static(_) -> return None
+            }
+            ty :: place_base_type(function, place.base) ?? return None
+            (root, index_value, ty)
+        }
+        else -> return None
+    }
+    cursor_value :: cursor ?? return None
+    if !cursor_value_matches(function, index, cursor_value, cursor_place) -> return None
+    element :: list_element_type(collection_type) ?? return None
+    layout :: if struct_layout(element, type_defs) == Val(.Columnar) -> MIRVectorLayout.ColumnarDirect else -> MIRVectorLayout.AosStrided
+    column_index :: if layout == .ColumnarDirect -> field_column_index(element, field, type_defs) else -> None
+    Val((root, layout, column_index))
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11685
+fn place_base_type(function: MIRFunction, base: MIRPlaceBase) -> MIRType? {
+    if base == {
+        .Local(local_id) -> {
+            local :: function.locals.find(fn(candidate) { candidate.id == local_id }) ?? return None
+            Val(local.ty)
+        }
+        .Parameter(value) | .Capture(value) | .Temporary(value) -> value_type(function, value)
+        .Static(_) -> None
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11699
+fn value_type(function: MIRFunction, value: MIRValueID) -> MIRType? {
+    row :: function.values.find(fn(candidate) { candidate.id == value }) ?? return None
+    Val(row.ty)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11707
+fn value_access_root(function: MIRFunction, value: MIRValueID) -> MIRVectorAccessRoot {
+    seen := [MIRValueID:Bool]{}
+    value_access_root_inner(function, value, &seen)
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11708
+fn value_access_root_inner(function: MIRFunction, value: MIRValueID, seen: &[MIRValueID:Bool]) -> MIRVectorAccessRoot {
+    if seen.get(value) != None -> return .Value(value)
+    &seen.add(value, true).drop("absent value")
+    instruction :: find_value_instruction(function, value) ?? return .Value(value)
+    if instruction.operation == {
+        .ReadPlace(place) | .MovePlace(place) -> .Place(place)
+        .Copy(source, _) | .Move(source) | .AttachTag(source, _) | .Field(source, _) | .Index(_, source, _, _, _, _, _) | .Semantic(.ColumnarRead(source, _, _, _, _)) -> value_access_root_inner(function, source, seen)
+        else -> .Value(value)
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11737
+fn list_element_type(ty: MIRType) -> MIRType? {
+    if ty.kind == {
+        .List(inner) | .FixedList(inner, _) -> Val(inner)
+        .Tagged(_, inner) -> list_element_type(inner)
+        else -> None
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11745
+fn struct_layout(ty: MIRType, type_defs: [MIRTypeDef]) -> MIRStructLayout? {
+    id :: ty.identity ?? (if ty.kind == .Apply(name, _) -> Val(name.id) else -> None) ?? return None
+    definition :: type_defs.find(fn(definition) { definition.id == id }) ?? return None
+    definition.layout
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11753
+fn field_column_index(element: MIRType, field: MIRFieldID, type_defs: [MIRTypeDef]) -> Int? {
+    id :: element.identity ?? (if element.kind == .Apply(name, _) -> Val(name.id) else -> None) ?? return None
+    definition :: type_defs.find(fn(definition) { definition.id == id }) ?? return None
+    if definition.kind == .Struct(fields, _) {
+        position := 0
+        loop candidate in fields {
+            if candidate.computed -> next
+            if candidate.id == field -> return Val(position)
+            position += 1
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11772
+fn value_root_key(function: MIRFunction, value: MIRValueID) -> String {
+    seen := [MIRValueID:Bool]{}
+    value_root_key_inner(function, value, &seen)
+}
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11773
+fn value_root_key_inner(function: MIRFunction, value: MIRValueID, seen: &[MIRValueID:Bool]) -> String {
+    if seen.get(value) != None -> return "value:{value.value}"
+    &seen.add(value, true).drop("absent value")
+    instruction :: find_value_instruction(function, value) ?? return "value:{value.value}"
+    if instruction.operation == {
+        .ReadPlace(place) | .MovePlace(place) -> {
+            candidate :: function.places.find(fn(candidate) { candidate.id == place }) ?? return "value:{value.value}"
+            place_root(candidate)
+        }
+        .Parameter(index, _) -> "parameter:{index}"
+        .Capture(slot) -> "capture:{slot}"
+        .Copy(source, _) | .Move(source) | .AttachTag(source, _) | .Field(source, _) | .Index(_, source, _, _, _, _, _) | .Semantic(.ColumnarRead(source, _, _, _, _)) -> value_root_key_inner(function, source, seen)
+        .Phi(incoming) -> {
+            first :: incoming.get(0) ?? return "value:{value.value}"
+            value_root_key_inner(function, first.value, seen)
+        }
+        else -> "value:{value.value}"
+    }
+}
 

@@ -1,0 +1,674 @@
+// PORT-PENDING 2136 crates-jet-foundation-src-packageidentity: crates/jet-foundation/src/PackageIdentity.rs:1-670
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2517 stage S1: package identity, the package graph, and the
+//RS //! fingerprints that key persisted package checks.
+//RS //!
+//RS //! The package is the unit of incremental checking (owner ruling of
+//RS //! 2026-09-30). A package is a directory with `package.jet` (its member files
+//RS //! share one namespace, D-MOD-CYCLE1=A), the embedded Core library, or a
+//RS //! single file outside any package. Identities are stable semantic labels,
+//RS //! never checkout paths or loader aliases, so two checkouts of one tree
+//RS //! produce equal keys and digests.
+//RS //!
+//RS //! Keys use one field framing that JetFoundation mirrors byte for byte: each
+//RS //! field is a UTF-8 string written as a LEB128 byte length followed by its
+//RS //! bytes, and a key is the lowercase SHA-256 hex of the concatenation.
+//RS //! Digests enter as 64-character lowercase hex and counts as decimal text.
+//RS 
+//RS use std::collections::BTreeMap;
+//RS use std::path::{Component, Path, PathBuf};
+//RS 
+//RS use crate::AST::{Func, ImportDecl, Item, LoadedModule, ProgramBundle};
+//RS use crate::RecordCodec::{digest_hex, record_digest, record_map, RecordSection, RecordValue};
+//RS use crate::SHA256::sha256_hex;
+//RS 
+//RS /// Package identity of the embedded Core library.
+//RS pub const CORE_PACKAGE: &str = "core";
+//RS 
+//RS pub const SOURCE_DIGEST_SCHEMA: &str = "jet.pkg-source/v1";
+//RS pub const TARGET_FACTS_SCHEMA: &str = "jet.target-facts/v1";
+//RS pub const CHECK_KEY_SCHEMA: &str = "jet.pkg-check-key/v1";
+//RS pub const INTERFACE_SCHEMA: &str = "jet.iface/v1";
+//RS 
+//RS /// Interface record sections that enter the interface digest.
+//RS pub const IFACE_SECTION_HEADER: u64 = 1;
+//RS pub const IFACE_SECTION_DECLARATIONS: u64 = 2;
+//RS pub const IFACE_SECTION_REEXPORTS: u64 = 3;
+//RS pub const IFACE_SECTION_SUMMARIES: u64 = 4;
+//RS 
+//RS /// The shared key framing.
+//RS pub struct KeyHasher {
+//RS     bytes: Vec<u8>,
+//RS }
+//RS 
+//RS impl KeyHasher {
+//RS     pub fn new(schema: &str) -> Self {
+//RS         let mut hasher = Self { bytes: Vec::new() };
+//RS         hasher.field(schema);
+//RS         hasher
+//RS     }
+//RS 
+//RS     pub fn field(&mut self, value: &str) -> &mut Self {
+//RS         let mut len = value.len() as u64;
+//RS         loop {
+//RS             let byte = (len & 0x7f) as u8;
+//RS             len >>= 7;
+//RS             if len == 0 {
+//RS                 self.bytes.push(byte);
+//RS                 break;
+//RS             }
+//RS             self.bytes.push(byte | 0x80);
+//RS         }
+//RS         self.bytes.extend_from_slice(value.as_bytes());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn count(&mut self, count: usize) -> &mut Self {
+//RS         self.field(&count.to_string())
+//RS     }
+//RS 
+//RS     pub fn finish(&self) -> String {
+//RS         sha256_hex(&self.bytes)
+//RS     }
+//RS }
+//RS 
+//RS /// Source digest of one package: its member files as `(package-relative
+//RS /// path, bytes)` in any order, and its manifest bytes when it has one.
+//RS pub fn source_digest(files: &[(String, &[u8])], manifest: Option<&[u8]>) -> String {
+//RS     let mut files = files
+//RS         .iter()
+//RS         .map(|(path, bytes)| (path.as_str(), sha256_hex(bytes)))
+//RS         .collect::<Vec<_>>();
+//RS     files.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+//RS     let mut hasher = KeyHasher::new(SOURCE_DIGEST_SCHEMA);
+//RS     hasher.field("files").count(files.len());
+//RS     for (path, digest) in &files {
+//RS         hasher.field(path).field(digest);
+//RS     }
+//RS     hasher
+//RS         .field("manifest")
+//RS         .field(&manifest.map(sha256_hex).unwrap_or_default());
+//RS     hasher.finish()
+//RS }
+//RS 
+//RS /// Digest of the target facts sema reads, as `(name, value)` pairs.
+//RS pub fn target_facts_digest(pairs: &[(String, String)]) -> String {
+//RS     let mut pairs = pairs.iter().collect::<Vec<_>>();
+//RS     pairs.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+//RS     let mut hasher = KeyHasher::new(TARGET_FACTS_SCHEMA);
+//RS     hasher.count(pairs.len());
+//RS     for (name, value) in pairs {
+//RS         hasher.field(name).field(value);
+//RS     }
+//RS     hasher.finish()
+//RS }
+//RS 
+//RS /// The package check key: the Go action ID for one package check.
+//RS /// `dependencies` holds each direct dependency's identity and the interface
+//RS /// digest it produced in this run.
+//RS pub fn package_check_key(
+//RS     compiler_identity: &str,
+//RS     target_facts_digest: &str,
+//RS     package_identity: &str,
+//RS     source_digest: &str,
+//RS     dependencies: &[(String, String)],
+//RS ) -> String {
+//RS     let mut dependencies = dependencies.iter().collect::<Vec<_>>();
+//RS     dependencies.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+//RS     let mut hasher = KeyHasher::new(CHECK_KEY_SCHEMA);
+//RS     hasher
+//RS         .field(compiler_identity)
+//RS         .field(target_facts_digest)
+//RS         .field(package_identity)
+//RS         .field(source_digest)
+//RS         .count(dependencies.len());
+//RS     for (identity, interface) in dependencies {
+//RS         hasher.field(identity).field(interface);
+//RS     }
+//RS     hasher.finish()
+//RS }
+//RS 
+//RS /// The target facts the Rust checker reads from a bundle. The build clock is
+//RS /// excluded: it changes on every unlocked run and never changes checking.
+//RS /// Contribution chains and setting provenance are excluded too: they name
+//RS /// the declaring files (checkout paths) for `jet explain`, while checking
+//RS /// reads only the folded values, which stay in.
+//RS pub fn target_fact_pairs(bundle: &ProgramBundle) -> Vec<(String, String)> {
+//RS     let mut build_facts = bundle.build_facts.clone();
+//RS     build_facts.stamp.at.clear();
+//RS     build_facts.contributions.clear();
+//RS     build_facts.setting_provenance.clear();
+//RS     vec![
+//RS         ("os".to_string(), format!("{:?}", bundle.active_os)),
+//RS         ("edition".to_string(), bundle.edition.clone()),
+//RS         (
+//RS             "web_partition".to_string(),
+//RS             bundle.web_partition_enforced.to_string(),
+//RS         ),
+//RS         (
+//RS             "layer_ceiling".to_string(),
+//RS             format!("{:?}", bundle.layer_ceiling),
+//RS         ),
+//RS         (
+//RS             "build_facts".to_string(),
+//RS             sha256_hex(&crate::CanonicalAST::canonical_fragment(&build_facts)),
+//RS         ),
+//RS     ]
+//RS }
+//RS 
+//RS // ------------------------------------------------------------ package graph
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub enum PackageKind {
+//RS     /// The embedded Core library.
+//RS     Core,
+//RS     /// A directory package with `package.jet`.
+//RS     Manifest,
+//RS     /// One file outside any directory package (a loose file, a one-file
+//RS     /// package with a `package { }` header, or a synthetic module).
+//RS     File,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct PackageNode {
+//RS     /// Stable identity: `core`, `pkg:<dir>`, `dep:<name>/<dir>`, or
+//RS     /// `file:<path>`, relative to the project root or dependency root.
+//RS     pub identity: String,
+//RS     pub kind: PackageKind,
+//RS     /// The package directory for a manifest package.
+//RS     pub root: Option<PathBuf>,
+//RS     /// Member module indexes into `ProgramBundle::modules`, ascending.
+//RS     pub modules: Vec<usize>,
+//RS     /// Direct dependency package indexes, ascending.
+//RS     pub dependencies: Vec<usize>,
+//RS }
+//RS 
+//RS /// The package partition of a loaded bundle and its dependency graph.
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct PackageGraph {
+//RS     /// Packages ordered by identity.
+//RS     pub packages: Vec<PackageNode>,
+//RS     module_package: Vec<usize>,
+//RS }
+//RS 
+//RS fn normalize(path: &Path) -> PathBuf {
+//RS     let mut out = PathBuf::new();
+//RS     for component in path.components() {
+//RS         match component {
+//RS             Component::ParentDir => {
+//RS                 out.pop();
+//RS             }
+//RS             Component::CurDir => {}
+//RS             other => out.push(other.as_os_str()),
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn slash(path: &Path) -> String {
+//RS     let text = path.to_string_lossy().replace('\\', "/");
+//RS     if text.is_empty() {
+//RS         ".".to_string()
+//RS     } else {
+//RS         text
+//RS     }
+//RS }
+//RS 
+//RS /// Stable label of a path: relative to the project root, else relative to the
+//RS /// dependency root that holds it, else the normalized path itself.
+//RS fn stable_label(bundle: &ProgramBundle, path: &Path) -> String {
+//RS     let path = normalize(path);
+//RS     if path.is_relative() {
+//RS         return slash(&path);
+//RS     }
+//RS     let root = normalize(&bundle.project_root);
+//RS     if let Ok(relative) = path.strip_prefix(&root) {
+//RS         return slash(relative);
+//RS     }
+//RS     let mut dependencies = bundle.dep_roots.iter().collect::<Vec<_>>();
+//RS     dependencies.sort();
+//RS     for (name, dependency_root) in dependencies {
+//RS         if let Ok(relative) = path.strip_prefix(normalize(dependency_root)) {
+//RS             return format!("dep:{name}/{}", slash(relative));
+//RS         }
+//RS     }
+//RS     slash(&path)
+//RS }
+//RS 
+//RS impl PackageGraph {
+//RS     /// Partition the bundle's modules into packages. Membership comes from
+//RS     /// the loader's namespace facts in the name ledger (the same rule that
+//RS     /// decides which files share a namespace); edges come from the loader's
+//RS     /// resolved file imports. Every non-Core package depends on Core when
+//RS     /// Core modules are loaded, because the prelude is implicit.
+//RS     pub fn from_bundle(bundle: &ProgramBundle) -> Self {
+//RS         Self::from_ledger(bundle, &bundle.name_ledger)
+//RS     }
+//RS 
+//RS     /// `from_bundle` with the name ledger passed separately, for sema, which
+//RS     /// holds the ledger outside the bundle while it checks.
+//RS     pub fn from_ledger(bundle: &ProgramBundle, ledger: &crate::Names::NameLedger) -> Self {
+//RS         let mut groups: BTreeMap<String, (PackageKind, Option<PathBuf>, Vec<usize>)> =
+//RS             BTreeMap::new();
+//RS         let mut module_identity = Vec::with_capacity(bundle.modules.len());
+//RS         for (index, module) in bundle.modules.iter().enumerate() {
+//RS             let (identity, kind, root) = if module.is_core_source() {
+//RS                 (CORE_PACKAGE.to_string(), PackageKind::Core, None)
+//RS             } else if let Some(namespace) = ledger.module_namespace(index) {
+//RS                 let root = PathBuf::from(namespace);
+//RS                 let label = stable_label(bundle, &root);
+//RS                 let identity = if label.starts_with("dep:") {
+//RS                     label
+//RS                 } else {
+//RS                     format!("pkg:{label}")
+//RS                 };
+//RS                 (identity, PackageKind::Manifest, Some(root))
+//RS             } else {
+//RS                 (
+//RS                     format!("file:{}", stable_label(bundle, &module.path)),
+//RS                     PackageKind::File,
+//RS                     None,
+//RS                 )
+//RS             };
+//RS             groups
+//RS                 .entry(identity.clone())
+//RS                 .or_insert_with(|| (kind, root, Vec::new()))
+//RS                 .2
+//RS                 .push(index);
+//RS             module_identity.push(identity);
+//RS         }
+//RS         let index_of = groups
+//RS             .keys()
+//RS             .enumerate()
+//RS             .map(|(index, identity)| (identity.clone(), index))
+//RS             .collect::<BTreeMap<_, _>>();
+//RS         let module_package = module_identity
+//RS             .iter()
+//RS             .map(|identity| index_of[identity])
+//RS             .collect::<Vec<_>>();
+//RS         let core = index_of.get(CORE_PACKAGE).copied();
+//RS         let mut packages = groups
+//RS             .into_iter()
+//RS             .map(|(identity, (kind, root, modules))| PackageNode {
+//RS                 identity,
+//RS                 kind,
+//RS                 root,
+//RS                 modules,
+//RS                 dependencies: Vec::new(),
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         for (from, to) in ledger.import_edges() {
+//RS             let (Some(&from), Some(&to)) = (module_package.get(from), module_package.get(to)) else {
+//RS                 continue;
+//RS             };
+//RS             if from != to {
+//RS                 packages[from].dependencies.push(to);
+//RS             }
+//RS         }
+//RS         for (index, package) in packages.iter_mut().enumerate() {
+//RS             if let Some(core) = core.filter(|core| *core != index) {
+//RS                 package.dependencies.push(core);
+//RS             }
+//RS             package.dependencies.sort_unstable();
+//RS             package.dependencies.dedup();
+//RS         }
+//RS         Self {
+//RS             packages,
+//RS             module_package,
+//RS         }
+//RS     }
+//RS 
+//RS     /// The package index that owns `module`.
+//RS     pub fn package_of(&self, module: usize) -> Option<usize> {
+//RS         self.module_package.get(module).copied()
+//RS     }
+//RS 
+//RS     /// Strongly connected components in dependency order: every component
+//RS     /// comes after the components it depends on. A component with more than
+//RS     /// one package is an import cycle across packages.
+//RS     pub fn components(&self) -> Vec<Vec<usize>> {
+//RS         // Tarjan's algorithm emits components in reverse topological order of
+//RS         // the "depends on" edges, which is dependencies first.
+//RS         struct State<'a> {
+//RS             graph: &'a PackageGraph,
+//RS             next: usize,
+//RS             index: Vec<Option<usize>>,
+//RS             low: Vec<usize>,
+//RS             stack: Vec<usize>,
+//RS             on_stack: Vec<bool>,
+//RS             components: Vec<Vec<usize>>,
+//RS         }
+//RS         fn visit(state: &mut State<'_>, node: usize) {
+//RS             state.index[node] = Some(state.next);
+//RS             state.low[node] = state.next;
+//RS             state.next += 1;
+//RS             state.stack.push(node);
+//RS             state.on_stack[node] = true;
+//RS             let graph = state.graph;
+//RS             for &dependency in &graph.packages[node].dependencies {
+//RS                 match state.index[dependency] {
+//RS                     None => {
+//RS                         visit(state, dependency);
+//RS                         state.low[node] = state.low[node].min(state.low[dependency]);
+//RS                     }
+//RS                     Some(index) if state.on_stack[dependency] => {
+//RS                         state.low[node] = state.low[node].min(index);
+//RS                     }
+//RS                     Some(_) => {}
+//RS                 }
+//RS             }
+//RS             if Some(state.low[node]) == state.index[node] {
+//RS                 let mut component = Vec::new();
+//RS                 while let Some(member) = state.stack.pop() {
+//RS                     state.on_stack[member] = false;
+//RS                     component.push(member);
+//RS                     if member == node {
+//RS                         break;
+//RS                     }
+//RS                 }
+//RS                 component.sort_unstable();
+//RS                 state.components.push(component);
+//RS             }
+//RS         }
+//RS         let count = self.packages.len();
+//RS         let mut state = State {
+//RS             graph: self,
+//RS             next: 0,
+//RS             index: vec![None; count],
+//RS             low: vec![0; count],
+//RS             stack: Vec::new(),
+//RS             on_stack: vec![false; count],
+//RS             components: Vec::new(),
+//RS         };
+//RS         for node in 0..count {
+//RS             if state.index[node].is_none() {
+//RS                 visit(&mut state, node);
+//RS             }
+//RS         }
+//RS         state.components
+//RS     }
+//RS 
+//RS     pub fn is_acyclic(&self) -> bool {
+//RS         self.components().iter().all(|component| component.len() == 1)
+//RS     }
+//RS 
+//RS     /// Package-relative label of a member module.
+//RS     pub fn member_label(&self, bundle: &ProgramBundle, module: usize) -> String {
+//RS         let loaded = &bundle.modules[module];
+//RS         let package = self.package_of(module).map(|index| &self.packages[index]);
+//RS         match package.and_then(|package| package.root.as_ref()) {
+//RS             Some(root) => normalize(&loaded.path)
+//RS                 .strip_prefix(normalize(root))
+//RS                 .map(slash)
+//RS                 .unwrap_or_else(|_| stable_label(bundle, &loaded.path)),
+//RS             None if loaded.is_core_source() => slash(&loaded.path),
+//RS             None => stable_label(bundle, &loaded.path),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Source digest of one package from the bytes the loader read.
+//RS     /// `manifest` is the package manifest's bytes, read through the audited
+//RS     /// reader by the caller.
+//RS     pub fn source_digest(&self, bundle: &ProgramBundle, package: usize, manifest: Option<&[u8]>) -> String {
+//RS         let files = self.packages[package]
+//RS             .modules
+//RS             .iter()
+//RS             .map(|&module| {
+//RS                 (
+//RS                     self.member_label(bundle, module),
+//RS                     bundle.modules[module].source.as_bytes(),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         source_digest(&files, manifest)
+//RS     }
+//RS 
+//RS     /// Interface digest of one package's declarations. `summaries` holds the
+//RS     /// inferred facts importers depend on, keyed by semantic identity (for
+//RS     /// example effect rows and failure sets); the checker supplies them.
+//RS     pub fn interface_digest(
+//RS         &self,
+//RS         bundle: &ProgramBundle,
+//RS         package: usize,
+//RS         summaries: &BTreeMap<String, String>,
+//RS     ) -> String {
+//RS         let node = &self.packages[package];
+//RS         let mut declarations = Vec::new();
+//RS         let mut reexports = Vec::new();
+//RS         for &module in &node.modules {
+//RS             let loaded = &bundle.modules[module];
+//RS             let label = self.member_label(bundle, module);
+//RS             for (name, fingerprint) in module_interface(loaded) {
+//RS                 declarations.push((label.clone(), name, fingerprint));
+//RS             }
+//RS             for import in loaded.imports.iter().filter(|import| import.is_pub || import.is_package_pub) {
+//RS                 reexports.push((label.clone(), import_fingerprint(import)));
+//RS             }
+//RS         }
+//RS         declarations.sort();
+//RS         reexports.sort();
+//RS         let sections = [
+//RS             RecordSection::new(
+//RS                 IFACE_SECTION_HEADER,
+//RS                 vec![record_map([("package", RecordValue::str(node.identity.as_str()))])],
+//RS             ),
+//RS             RecordSection::new(
+//RS                 IFACE_SECTION_DECLARATIONS,
+//RS                 declarations
+//RS                     .into_iter()
+//RS                     .map(|(module, name, fingerprint)| {
+//RS                         record_map([
+//RS                             ("module", RecordValue::Str(module)),
+//RS                             ("name", RecordValue::Str(name)),
+//RS                             ("fingerprint", RecordValue::Str(fingerprint)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS             RecordSection::new(
+//RS                 IFACE_SECTION_REEXPORTS,
+//RS                 reexports
+//RS                     .into_iter()
+//RS                     .map(|(module, fingerprint)| {
+//RS                         record_map([
+//RS                             ("module", RecordValue::Str(module)),
+//RS                             ("fingerprint", RecordValue::Str(fingerprint)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS             RecordSection::new(
+//RS                 IFACE_SECTION_SUMMARIES,
+//RS                 summaries
+//RS                     .iter()
+//RS                     .map(|(identity, value)| {
+//RS                         record_map([
+//RS                             ("identity", RecordValue::str(identity.as_str())),
+//RS                             ("value", RecordValue::str(value.as_str())),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         ];
+//RS         let digest = record_digest(INTERFACE_SCHEMA, &sections)
+//RS             .expect("interface sections have distinct tags");
+//RS         digest_hex(&digest)
+//RS     }
+//RS }
+//RS 
+//RS // ------------------------------------------------------------ fingerprints
+//RS 
+//RS /// Fingerprint of a whole item, bodies included. Whitespace, comments, and
+//RS /// source positions never change it; any edit to the item's syntax does.
+//RS /// This is the input fingerprint of the item's own check.
+//RS pub fn item_source_fingerprint(item: &Item) -> String {
+//RS     sha256_hex(&crate::CanonicalAST::canonical_fragment(item))
+//RS }
+//RS 
+//RS /// Fingerprint of what importers see of an item, or `None` when the item is
+//RS /// not part of the package interface. Bodies are erased except the ones
+//RS /// importers consume: generic and `#Inline(Always)` functions and trait
+//RS /// default methods. Private inherent methods are dropped. A body edit that
+//RS /// changes an inferred fact reaches importers through the checker's
+//RS /// summaries, not through this fingerprint.
+//RS pub fn item_interface_fingerprint(item: &Item, pub_file: bool) -> Option<String> {
+//RS     let erased = interface_item(item, pub_file)?;
+//RS     Some(sha256_hex(&crate::CanonicalAST::canonical_fragment(&erased)))
+//RS }
+//RS 
+//RS fn exported(is_pub: bool, is_package_pub: bool, pub_file: bool) -> bool {
+//RS     is_pub || is_package_pub || pub_file
+//RS }
+//RS 
+//RS fn keeps_body(func: &Func) -> bool {
+//RS     !func.type_params.is_empty() || func.is_inline_always
+//RS }
+//RS 
+//RS fn erase_func(func: &mut Func) {
+//RS     if !keeps_body(func) {
+//RS         func.body.clear();
+//RS     }
+//RS }
+//RS 
+//RS fn erase_inherent_methods(methods: &mut Vec<Func>, pub_file: bool) {
+//RS     methods.retain(|method| exported(method.is_pub, method.is_package_pub, pub_file));
+//RS     methods.iter_mut().for_each(erase_func);
+//RS }
+//RS 
+//RS fn erase_trait_impls(blocks: &mut [crate::AST::TraitImplBlock]) {
+//RS     for block in blocks {
+//RS         block.methods.iter_mut().for_each(erase_func);
+//RS     }
+//RS }
+//RS 
+//RS fn interface_item(item: &Item, pub_file: bool) -> Option<Item> {
+//RS     let mut item = item.clone();
+//RS     let keep = match &mut item {
+//RS         Item::Func(func) => {
+//RS             erase_func(func);
+//RS             exported(func.is_pub, func.is_package_pub, pub_file)
+//RS         }
+//RS         Item::Struct(def) => {
+//RS             erase_inherent_methods(&mut def.methods, pub_file);
+//RS             erase_trait_impls(&mut def.trait_impls);
+//RS             exported(def.is_pub, def.is_package_pub, pub_file)
+//RS         }
+//RS         Item::Enum(def) => {
+//RS             erase_inherent_methods(&mut def.methods, pub_file);
+//RS             erase_trait_impls(&mut def.trait_impls);
+//RS             exported(def.is_pub, def.is_package_pub, pub_file)
+//RS         }
+//RS         Item::Impl(def) => {
+//RS             if def.trait_name.is_some() {
+//RS                 def.methods.iter_mut().for_each(erase_func);
+//RS             } else {
+//RS                 erase_inherent_methods(&mut def.methods, pub_file);
+//RS             }
+//RS             true
+//RS         }
+//RS         Item::CodeModule(module) => {
+//RS             if let Some(body) = &mut module.body {
+//RS                 *body = body
+//RS                     .iter()
+//RS                     .filter_map(|item| interface_item(item, pub_file))
+//RS                     .collect();
+//RS             }
+//RS             exported(module.is_pub, module.is_package_pub, pub_file)
+//RS         }
+//RS         Item::Distinct(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::TypeAlias(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::UnitFamily(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::Trait(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::Tag(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::Const(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::ProtocolDecl(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::GenericModule(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::ModuleAlias(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+//RS         Item::Test(_) => false,
+//RS         // Declarations without a visibility flag register package-wide facts
+//RS         // (effects, markers, facts, derives, migrations, conversions, foreign
+//RS         // bindings); they stay in the interface whole.
+//RS         Item::EffectDecl(_)
+//RS         | Item::ExternRust(_)
+//RS         | Item::Module(_)
+//RS         | Item::CModule(_)
+//RS         | Item::ErrorConv(_)
+//RS         | Item::Migration(_)
+//RS         | Item::UserDerive(_)
+//RS         | Item::TemplateLoop(_)
+//RS         | Item::MarkerDecl(_)
+//RS         | Item::FactDecl(_) => true,
+//RS     };
+//RS     keep.then_some(item)
+//RS }
+//RS 
+//RS fn item_name(item: &Item) -> String {
+//RS     match item {
+//RS         Item::Func(func) => format!("fn {}", func.name),
+//RS         Item::Struct(def) => format!("struct {}", def.name),
+//RS         Item::Enum(def) => format!("enum {}", def.name),
+//RS         Item::Distinct(def) => format!("distinct {}", def.name),
+//RS         Item::TypeAlias(def) => format!("alias {}", def.name),
+//RS         Item::Trait(def) => format!("trait {}", def.name),
+//RS         Item::Tag(def) => format!("tag {}", def.name),
+//RS         Item::Const(def) => format!("const {}", def.name),
+//RS         Item::ProtocolDecl(def) => format!("protocol {}", def.name),
+//RS         Item::CodeModule(def) => format!("module {}", def.name),
+//RS         Item::GenericModule(def) => format!("module {}", def.name),
+//RS         Item::ModuleAlias(def) => format!("module {}", def.name),
+//RS         Item::EffectDecl(def) => format!("effect {}", def.name),
+//RS         Item::MarkerDecl(def) => format!("marker {}", def.name),
+//RS         Item::FactDecl(def) => format!("fact {}", def.name),
+//RS         Item::Impl(def) => match &def.trait_name {
+//RS             Some(trait_name) => format!("impl {}: {trait_name}", def.type_name),
+//RS             None => format!("impl {}", def.type_name),
+//RS         },
+//RS         // Unnamed declarations are identified by their content.
+//RS         other => format!("item {}", item_source_fingerprint(other)),
+//RS     }
+//RS }
+//RS 
+//RS /// `(name, interface fingerprint)` for every item of one module that is part
+//RS /// of the package interface.
+//RS pub fn module_interface(module: &LoadedModule) -> Vec<(String, String)> {
+//RS     module
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| {
+//RS             item_interface_fingerprint(item, module.pub_file).map(|fingerprint| (item_name(item), fingerprint))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn import_fingerprint(import: &ImportDecl) -> String {
+//RS     sha256_hex(&crate::CanonicalAST::canonical_fragment(import))
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn key_framing_is_pinned() {
+//RS         // uvarint(3) "abc" uvarint(0)
+//RS         let mut hasher = KeyHasher::new("abc");
+//RS         hasher.field("");
+//RS         assert_eq!(hasher.finish(), sha256_hex(&[3, b'a', b'b', b'c', 0]));
+//RS         assert_eq!(
+//RS             source_digest(&[("b.jet".into(), &b"2"[..]), ("a.jet".into(), &b"1"[..])], None),
+//RS             source_digest(&[("a.jet".into(), &b"1"[..]), ("b.jet".into(), &b"2"[..])], None),
+//RS         );
+//RS         assert_ne!(
+//RS             source_digest(&[("a.jet".into(), &b"1"[..])], None),
+//RS             source_digest(&[("a.jet".into(), &b"1"[..])], Some(&b""[..])),
+//RS         );
+//RS         let key = |deps: &[(String, String)]| package_check_key("c", "t", "pkg:.", "s", deps);
+//RS         let a = ("pkg:a".to_string(), "1".repeat(64));
+//RS         let b = ("pkg:b".to_string(), "2".repeat(64));
+//RS         assert_eq!(key(&[a.clone(), b.clone()]), key(&[b.clone(), a.clone()]));
+//RS         assert_ne!(key(&[a.clone()]), key(&[a, b]));
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2136 crates/jet-foundation/src/PackageIdentity.rs:1-670
+

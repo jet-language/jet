@@ -1,0 +1,19 @@
+use JetFoundation.LiveLifecycle.[JetLiveLifecycle]
+// Rust: crates/jet-foundation/src/LiveLifecycle.rs:25-124
+// No original inline tests; generation and publication-transition controls.
+#Test("live lifecycle rejects stale publications and recovers cancellation") {
+    live := JetLiveLifecycle.active(100)
+    assert(live.is_current(1) && !live.dirty && live.fresh_at_ms == 100)
+    assert(live.begin_refresh(1) && !live.begin_refresh(1))
+    assert(live.invalidate("source edit") && live.generation == 2 && live.dirty)
+    assert(!live.publish(1, 200) && !live.refreshing && live.fresh_at_ms == 100)
+    assert(live.begin_refresh(2) && live.fail(2, "compile failed"))
+    assert(live.error == "compile failed" && live.dirty)
+    assert(live.cancel() && live.cancelled && live.generation == 3 && !live.is_current(3))
+    assert(live.invalidate("retry") && !live.cancelled && live.error == "" && live.generation == 4)
+    assert(live.publish(4, 300) && live.fresh_at_ms == 300 && !live.dirty)
+    assert(live.close() && !live.close() && !live.invalidate("closed") && !live.cancel())
+    assert(!live.publish(4, 400) && !live.fail(4, "late error"))
+    dead :: JetLiveLifecycle.error("startup failed")
+    assert(!dead.active && dead.generation == 0 && dead.error == "startup failed")
+}

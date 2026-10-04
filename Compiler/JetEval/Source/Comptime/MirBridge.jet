@@ -1,0 +1,1225 @@
+// PORT-PENDING 2113 crates-jet-comptime-src-comptime-mirbridge: crates/jet-comptime/src/Comptime/MirBridge.rs:1-1221
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Dependency-inversion seam: jet-codegen installs the MIR evaluator so
+//RS //! comptime/REPL/dev entry points share one engine without a crate cycle.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+//RS use std::path::Path;
+//RS use std::sync::OnceLock;
+//RS 
+//RS use crate::AST::{
+//RS     AccessConvention, ComptimeInput, CtFloat, CtKey, CtReport, Expr, Func, ProgramBundle, Stmt,
+//RS     StructDef, Type,
+//RS };
+//RS use crate::Comptime::{CtValue, DebugHook, DevSink, PurityStage, ReplAuthorizer};
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use jet_foundation::MIR::{MirConstKey, MirRuntimeValue, MirType, MirTypeKind};
+//RS use jet_foundation::Numeric::CtBigInt;
+//RS 
+//RS /// Loaded source-owned Core signature projected into a comptime fragment.
+//RS #[derive(Clone, Debug)]
+//RS pub struct MirFragmentCoreSourceSignature {
+//RS     /// Generic parameter names in declaration order.
+//RS     pub type_params: Vec<String>,
+//RS     /// Checked parameter conventions and types in declaration order.
+//RS     pub params: Vec<(AccessConvention, Type)>,
+//RS     /// Declared return type, if the function returns a value.
+//RS     pub return_type: Option<Type>,
+//RS }
+//RS 
+//RS /// Loaded source module whose bodies a comptime fragment lowers on demand,
+//RS /// exactly as runtime lowering does for a reachable call: a source-owned Core
+//RS /// module, or a user file module a `prep` initializer reaches.
+//RS #[derive(Clone, Debug)]
+//RS pub struct MirFragmentCoreSourceModule {
+//RS     /// Loader alias of the defining module (`CoreSourceModule::alias`).
+//RS     pub alias: String,
+//RS     /// Checked module identity. Lowered bodies and the call sites that reach
+//RS     /// them share this owner in their semantic key.
+//RS     pub module_identity: String,
+//RS     /// The defining module's own `use core... as alias` table.
+//RS     pub core_imports: HashMap<String, String>,
+//RS     /// Every top-level function of the module by name, private helpers
+//RS     /// included, so a demanded body can call its same-module helpers.
+//RS     pub functions: HashMap<String, Func>,
+//RS     /// Every top-level constant of the module, so a demanded body reads its
+//RS     /// same-module tables (`C_SHA256_K[t]`) as runtime lowering does.
+//RS     pub constants: Vec<crate::AST::ConstDef>,
+//RS     /// User file module: its own `use` aliases, source alias to the imported
+//RS     /// module's `core_source_bodies` key (its loader alias). Empty for Core.
+//RS     pub module_imports: HashMap<String, String>,
+//RS     /// User file module: member-imported functions (`use c.[f]`), local name
+//RS     /// to (`core_source_bodies` key, function name). Empty for Core.
+//RS     pub imported_functions: HashMap<String, (String, String)>,
+//RS     /// User file module: declared signatures of its cross-module callees,
+//RS     /// keyed by (source alias or local name, function name).
+//RS     pub import_signatures: HashMap<(String, String), MirFragmentCoreSourceSignature>,
+//RS     /// User file module: its source type spellings (`Point`, `c.Shape`) to
+//RS     /// canonical `package::module::Type` identities. Empty for Core.
+//RS     pub nominal_identities: HashMap<String, String>,
+//RS }
+//RS 
+//RS /// Checked nominal facts retained for a comptime fragment.
+//RS ///
+//RS /// Sema owns the source-to-canonical projection and the checked declaration
+//RS /// rows. The fragment lowerer consumes these facts without rediscovering an
+//RS /// imported owner from erased `CtValue` data.
+//RS #[derive(Clone, Debug, Default)]
+//RS pub struct MirFragmentNominalFacts {
+//RS     /// Source spellings (including import-qualified and selective-import
+//RS     /// names) to canonical `package::module::Type` identities.
+//RS     pub nominal_identities: HashMap<String, String>,
+//RS     /// Source import alias to the target module's loader alias.
+//RS     pub import_modules: HashMap<String, String>,
+//RS     /// Canonical nominal identity to the target module's loader alias.
+//RS     pub foreign_modules: HashMap<String, String>,
+//RS     /// Canonical imported struct identity to its checked declaration row.
+//RS     pub structs: HashMap<String, StructDef>,
+//RS     /// Checked enum declarations, including their payload shapes.
+//RS     pub enums: HashMap<String, crate::AST::EnumDef>,
+//RS     /// Loaded source signatures for imported source-owned Core members.
+//RS     pub core_source_sigs: HashMap<(String, String), MirFragmentCoreSourceSignature>,
+//RS     /// Loaded source-owned Core modules keyed by Core module path
+//RS     /// (`core.math`); the owner of every `core_source_sigs` row is here.
+//RS     /// Shared: every evaluation request clones these facts.
+//RS     pub core_source_bodies: std::sync::Arc<HashMap<String, MirFragmentCoreSourceModule>>,
+//RS     /// The evaluated module's member-imported user functions (`use b.[f]`):
+//RS     /// local name to (`core_source_bodies` key, function name).
+//RS     pub imported_functions: HashMap<String, (String, String)>,
+//RS     /// Declared signatures of the evaluated module's user-module callees,
+//RS     /// keyed by (source alias or local name, function name).
+//RS     pub import_signatures: HashMap<(String, String), MirFragmentCoreSourceSignature>,
+//RS }
+//RS 
+//RS pub struct ExprEvalRequest<'a> {
+//RS     pub data_pipeline: &'a mut crate::Comptime::DataPipelineState,
+//RS     pub expr: &'a Expr,
+//RS     pub funcs: &'a HashMap<String, &'a Func>,
+//RS     /// Authoritative static types for names in the active interpreter frame.
+//RS     /// Fragment lowering must use these instead of guessing from erased values.
+//RS     pub binding_types: &'a HashMap<String, Type>,
+//RS     /// Checked `impl Source -> Target` bodies available to fragment lowering.
+//RS     /// The evaluator lowers these through the same TIR conversion path as AOT.
+//RS     pub error_conversions: &'a [crate::AST::ErrorConvDef],
+//RS     /// Exact `(owner, method) -> trait` identity selected by sema for
+//RS     /// associated calls. The canonical fragment must carry the same trait
+//RS     /// identity as the normal bundle lowering; a method-name-only lookup can
+//RS     /// silently turn a literal capability into an inherent call.
+//RS     pub method_traits: &'a HashMap<(String, String), String>,
+//RS     /// Instance/associated methods are kept in their semantic owner/name table
+//RS     /// by comptime. The MIR fragment host needs the same table to lower
+//RS     /// computed-field getters and to call user methods.
+//RS     pub methods: &'a HashMap<(String, String), &'a Func>,
+//RS     pub extern_names: &'a HashSet<String>,
+//RS     pub base_dir: &'a Path,
+//RS     pub globals: &'a HashMap<String, CtValue>,
+//RS     pub core_imports: &'a HashMap<String, String>,
+//RS     pub gates: jet_foundation::Policy::GateSet,
+//RS     pub initial_impure_depth: usize,
+//RS     /// Explicit execution provenance for the canonical fragment. Runtime
+//RS     /// producers use the runtime Core dispatcher; comptime evaluation remains
+//RS     /// on the gated fragment dispatcher.
+//RS     pub runtime_execution: bool,
+//RS     pub structs: &'a HashMap<String, &'a StructDef>,
+//RS     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
+//RS     pub distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
+//RS     pub distinct_bases: &'a HashMap<String, Type>,
+//RS     /// Unit-family declarations seed the codegen context's canonical facts
+//RS     /// for fragment lowering; conversion semantics remain in MIR/Prelude.
+//RS     pub unit_families: &'a [crate::AST::UnitFamilyDef],
+//RS     pub fuel: u64,
+//RS     pub sink: Option<&'a mut DevSink>,
+//RS     /// Checked nominal identities and imported struct rows for fragment
+//RS     /// lowering. `None` is used by callers without an active module scope.
+//RS     pub checked_nominals: Option<MirFragmentNominalFacts>,
+//RS     pub repl_mode: bool,
+//RS     pub repl_grants: &'a [CtValue],
+//RS     pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
+//RS     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
+//RS     pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
+//RS     /// Bindings as the fragment left them. An expression can mutate a binding
+//RS     /// it reads — `reader.read_u32_le()` advances the reader — and a statement
+//RS     /// driver has to see the advance, or the next expression starts over.
+//RS     /// `None` for pure const evaluation, which has no caller scope to update.
+//RS     pub mutated: Option<&'a mut HashMap<String, CtValue>>,
+//RS }
+//RS pub struct BlockEvalRequest<'a, 'debug> {
+//RS     pub data_pipeline: &'a mut crate::Comptime::DataPipelineState,
+//RS     pub stmts: &'a [Stmt],
+//RS     pub funcs: &'a HashMap<String, &'a Func>,
+//RS     /// Authoritative static types for names in the active interpreter frame.
+//RS     /// Fragment lowering must use these instead of guessing from erased values.
+//RS     pub binding_types: &'a HashMap<String, Type>,
+//RS     pub error_conversions: &'a [crate::AST::ErrorConvDef],
+//RS     /// Exact `(owner, method) -> trait` identity selected by sema for
+//RS     /// associated calls. The canonical fragment must carry the same trait
+//RS     /// identity as the normal bundle lowering.
+//RS     pub method_traits: &'a HashMap<(String, String), String>,
+//RS     pub methods: &'a HashMap<(String, String), &'a Func>,
+//RS     pub extern_names: &'a HashSet<String>,
+//RS     pub base_dir: &'a Path,
+//RS     pub globals: &'a HashMap<String, CtValue>,
+//RS     pub core_imports: &'a HashMap<String, String>,
+//RS     pub structs: &'a HashMap<String, &'a StructDef>,
+//RS     pub distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
+//RS     pub distinct_bases: &'a HashMap<String, Type>,
+//RS     pub unit_families: &'a [crate::AST::UnitFamilyDef],
+//RS     pub fuel: u64,
+//RS     pub sink: Option<&'a mut DevSink>,
+//RS     /// Checked nominal identities and imported struct rows for fragment
+//RS     /// lowering. `None` is used by callers without an active module scope.
+//RS     pub checked_nominals: Option<MirFragmentNominalFacts>,
+//RS     pub repl_mode: bool,
+//RS     pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
+//RS     pub gates: jet_foundation::Policy::GateSet,
+//RS     pub impure_depth: usize,
+//RS     /// Explicit execution provenance for the canonical fragment. Runtime
+//RS     /// producers use the runtime Core dispatcher; comptime evaluation remains
+//RS     /// on the gated fragment dispatcher.
+//RS     pub runtime_execution: bool,
+//RS     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
+//RS     /// Optional source debugger carried through the canonical MIR evaluator.
+//RS     /// The evaluator owns statement order; the interpreter only supplies the
+//RS     /// observation hook.
+//RS     pub debugger: Option<&'debug mut dyn DebugHook>,
+//RS     pub debug_function: String,
+//RS     pub debug_depth: usize,
+//RS     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
+//RS     pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
+//RS }
+//RS 
+//RS /// Outcome of evaluating a statement list through the canonical MIR evaluator.
+//RS pub enum StmtOutcome {
+//RS     /// Finished normally; scope holds bindings.
+//RS     Done(HashMap<String, CtValue>),
+//RS     /// `return` escaped the fragment.
+//RS     Returned {
+//RS         value: CtValue,
+//RS         scope: HashMap<String, CtValue>,
+//RS     },
+//RS }
+//RS 
+//RS pub struct Hooks {
+//RS     pub run_bundle: fn(
+//RS         &ProgramBundle,
+//RS         &mut DevSink,
+//RS         jet_foundation::Policy::GateSet,
+//RS     ) -> Result<CtValue, Diagnostic>,
+//RS     /// Runtime/deopt callers must carry their stage explicitly. The staged
+//RS     /// hook prevents a runtime fragment from inheriting build-time purity
+//RS     /// defaults while keeping the direct dev/test seam.
+//RS     pub run_bundle_at_stage: fn(
+//RS         &ProgramBundle,
+//RS         &mut DevSink,
+//RS         jet_foundation::Policy::GateSet,
+//RS         PurityStage,
+//RS     ) -> Result<CtValue, Diagnostic>,
+//RS     pub eval_expr: fn(&mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic>,
+//RS     pub eval_block:
+//RS         for<'a, 'debug> fn(&mut BlockEvalRequest<'a, 'debug>) -> Result<StmtOutcome, Diagnostic>,
+//RS }
+//RS 
+//RS static HOOKS: OnceLock<Hooks> = OnceLock::new();
+//RS 
+//RS pub fn install(hooks: Hooks) {
+//RS     let _ = HOOKS.set(hooks);
+//RS }
+//RS 
+//RS fn hooks() -> &'static Hooks {
+//RS     HOOKS
+//RS         .get()
+//RS         .expect("MIR eval bridge not installed — call Codegen::MIREval::install_mir_bridge()")
+//RS }
+//RS 
+//RS pub fn run_bundle(
+//RS     bundle: &ProgramBundle,
+//RS     sink: &mut DevSink,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     (hooks().run_bundle)(bundle, sink, gates)
+//RS }
+//RS 
+//RS /// Run a whole program through an explicit purity stage. Runtime/deopt must
+//RS /// use [`PurityStage::RunTime`]; build-time evaluation keeps using the
+//RS /// expression/block seams, which retain their build-time gate.
+//RS pub fn run_bundle_at_stage(
+//RS     bundle: &ProgramBundle,
+//RS     sink: &mut DevSink,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     stage: PurityStage,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     (hooks().run_bundle_at_stage)(bundle, sink, gates, stage)
+//RS }
+//RS 
+//RS /// Evaluate the pure projection subset directly on values already owned by a
+//RS /// comptime scope.  Template expansion reaches this bridge before sema has
+//RS /// rewritten reflected field reads into `ComptimeName` nodes, so a nested
+//RS /// `@fact`/index/collection-length path must still use the same CtValue
+//RS /// projection semantics without forcing a synthetic MIR method dispatch.
+//RS pub(super) fn static_ct_value(
+//RS     expr: &Expr,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     mutated: Option<&HashMap<String, CtValue>>,
+//RS ) -> Option<CtValue> {
+//RS     match expr {
+//RS         Expr::Int(value, _, _, raw) => Some(crate::Comptime::exact_integer_ct_value(
+//RS             *value,
+//RS             raw.as_deref(),
+//RS         )),
+//RS         Expr::Bool(value, _) => Some(CtValue::Bool(*value)),
+//RS         Expr::Char(value, _) => Some(CtValue::Char(*value)),
+//RS         Expr::Str(parts, _) => parts
+//RS             .iter()
+//RS             .try_fold(String::new(), |mut value, part| match part {
+//RS                 crate::AST::StrPart::Lit(text) => {
+//RS                     value.push_str(text);
+//RS                     Some(value)
+//RS                 }
+//RS                 crate::AST::StrPart::Interp(..) => None,
+//RS             })
+//RS             .map(CtValue::Str),
+//RS         Expr::TypedLit {
+//RS             head: Some(Type::Named(type_name)),
+//RS             body: crate::AST::TypedLitBody::Value(inner),
+//RS             ..
+//RS         } if type_name == jet_foundation::Syntax::TYPE_PATH => {
+//RS             let CtValue::Str(text) = static_ct_value(inner, globals, mutated)? else {
+//RS                 return None;
+//RS             };
+//RS             Some(CtValue::Struct {
+//RS                 type_name: type_name.clone(),
+//RS                 fields: vec![("inner".to_string(), CtValue::Str(text))],
+//RS             })
+//RS         }
+//RS         // Template conditions (`T.$kind == "enum"`, `left.$index <
+//RS         // right.$index`) compare values already in scope. Evaluating them
+//RS         // here avoids building a whole MIR fragment per condition, which is
+//RS         // quadratic for derives over large enums. Only cases with one
+//RS         // unambiguous meaning are handled; everything else (big integers,
+//RS         // floats, string ordering, mixed kinds) returns `None` and takes the
+//RS         // canonical MIR path, which also reports any type error. Boolean
+//RS         // operators require both operands to be static, so nothing that the
+//RS         // MIR checker would reject is skipped.
+//RS         Expr::Unary(crate::AST::UnOp::Not, inner, _) => match static_ct_value(inner, globals, mutated)? {
+//RS             CtValue::Bool(value) => Some(CtValue::Bool(!value)),
+//RS             _ => None,
+//RS         },
+//RS         Expr::Binary(op, left, right, _) => {
+//RS             use crate::AST::BinOp;
+//RS             let left = static_ct_value(left, globals, mutated)?;
+//RS             let right = static_ct_value(right, globals, mutated)?;
+//RS             let result = match (op, &left, &right) {
+//RS                 (BinOp::And, CtValue::Bool(a), CtValue::Bool(b)) => *a && *b,
+//RS                 (BinOp::Or, CtValue::Bool(a), CtValue::Bool(b)) => *a || *b,
+//RS                 (BinOp::Eq | BinOp::Ne, CtValue::Int(a), CtValue::Int(b)) => a == b,
+//RS                 (BinOp::Eq | BinOp::Ne, CtValue::Bool(a), CtValue::Bool(b)) => a == b,
+//RS                 (BinOp::Eq | BinOp::Ne, CtValue::Char(a), CtValue::Char(b)) => a == b,
+//RS                 (BinOp::Eq | BinOp::Ne, CtValue::Str(a), CtValue::Str(b)) => a == b,
+//RS                 (BinOp::Lt, CtValue::Int(a), CtValue::Int(b)) => a < b,
+//RS                 (BinOp::Gt, CtValue::Int(a), CtValue::Int(b)) => a > b,
+//RS                 (BinOp::Le, CtValue::Int(a), CtValue::Int(b)) => a <= b,
+//RS                 (BinOp::Ge, CtValue::Int(a), CtValue::Int(b)) => a >= b,
+//RS                 (BinOp::Lt, CtValue::Char(a), CtValue::Char(b)) => a < b,
+//RS                 (BinOp::Gt, CtValue::Char(a), CtValue::Char(b)) => a > b,
+//RS                 (BinOp::Le, CtValue::Char(a), CtValue::Char(b)) => a <= b,
+//RS                 (BinOp::Ge, CtValue::Char(a), CtValue::Char(b)) => a >= b,
+//RS                 _ => return None,
+//RS             };
+//RS             Some(CtValue::Bool(if matches!(op, BinOp::Ne) { !result } else { result }))
+//RS         }
+//RS         Expr::ListLit(values, _) => values
+//RS             .iter()
+//RS             .map(|value| static_ct_value(value, globals, mutated))
+//RS             .collect::<Option<Vec<_>>>()
+//RS             .map(CtValue::List),
+//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => static_ct_value(inner, globals, mutated),
+//RS         Expr::Ident(name, _) => mutated
+//RS             .and_then(|values| values.get(name))
+//RS             .or_else(|| globals.get(name))
+//RS             .cloned(),
+//RS         Expr::ComptimeName {
+//RS             value: Some(value), ..
+//RS         } => Some(value.clone()),
+//RS         Expr::ComptimeName {
+//RS             name, value: None, ..
+//RS         } => mutated
+//RS             .and_then(|values| values.get(name))
+//RS             .or_else(|| globals.get(name))
+//RS             .cloned(),
+//RS         Expr::Field(base, member, _) => {
+//RS             // Project through a borrowed place when the base is one, so
+//RS             // `variant.$index` does not copy the whole reflected value.
+//RS             let owned;
+//RS             let value = match static_ct_place(base, globals, mutated) {
+//RS                 Some(value) => value,
+//RS                 None => {
+//RS                     owned = static_ct_value(base, globals, mutated)?;
+//RS                     &owned
+//RS                 }
+//RS             };
+//RS             static_ct_field(value, member).cloned()
+//RS         }
+//RS         Expr::Index { base, index, .. } => {
+//RS             let value = static_ct_value(base, globals, mutated)?;
+//RS             let index = match static_ct_value(index, globals, mutated)? {
+//RS                 CtValue::Int(index) => usize::try_from(index).ok()?,
+//RS                 _ => return None,
+//RS             };
+//RS             match value {
+//RS                 CtValue::List(values) => values.get(index).cloned(),
+//RS                 CtValue::Bytes(values) => values
+//RS                     .get(index)
+//RS                     .copied()
+//RS                     .map(|value| CtValue::Int(i64::from(value))),
+//RS                 _ => None,
+//RS             }
+//RS         }
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } if method == "has_marker" => {
+//RS             let value = static_ct_value(receiver, globals, mutated)?;
+//RS             let args = args
+//RS                 .iter()
+//RS                 .map(|arg| static_ct_value(&arg.expr, globals, mutated))
+//RS                 .collect::<Option<Vec<_>>>()?;
+//RS             crate::Comptime::Builtins::apply_method(&value, method, args, expr.span()).ok()
+//RS         }
+//RS         Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } if method == "len" && args.is_empty() => {
+//RS             let value = static_ct_value(receiver, globals, mutated)?;
+//RS             let len = match value {
+//RS                 CtValue::List(values) => values.len(),
+//RS                 CtValue::Bytes(values) => values.len(),
+//RS                 CtValue::Map(values) => values.len(),
+//RS                 CtValue::Str(value) => value.chars().count(),
+//RS                 _ => return None,
+//RS             };
+//RS             i64::try_from(len).ok().map(CtValue::Int)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// The value a scope already owns at a name or field path, borrowed.
+//RS fn static_ct_place<'v>(
+//RS     expr: &'v Expr,
+//RS     globals: &'v HashMap<String, CtValue>,
+//RS     mutated: Option<&'v HashMap<String, CtValue>>,
+//RS ) -> Option<&'v CtValue> {
+//RS     match expr {
+//RS         Expr::Paren(inner, _) | Expr::Copy(inner, _) => static_ct_place(inner, globals, mutated),
+//RS         Expr::Ident(name, _)
+//RS         | Expr::ComptimeName {
+//RS             name, value: None, ..
+//RS         } => mutated
+//RS             .and_then(|values| values.get(name))
+//RS             .or_else(|| globals.get(name)),
+//RS         Expr::ComptimeName {
+//RS             value: Some(value), ..
+//RS         } => Some(value),
+//RS         Expr::Field(base, member, _) => {
+//RS             static_ct_field(static_ct_place(base, globals, mutated)?, member)
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// One reflected fact or struct field of a compile-time value.
+//RS fn static_ct_field<'v>(value: &'v CtValue, member: &str) -> Option<&'v CtValue> {
+//RS     if let Some(read) = jet_foundation::Registry::fact_read(member) {
+//RS         return crate::Comptime::reflected_fact_field(value, read);
+//RS     }
+//RS     let CtValue::Struct { fields, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     fields
+//RS         .iter()
+//RS         .find(|(field, _)| field == member.trim_start_matches('$'))
+//RS         .map(|(_, value)| value)
+//RS }
+//RS 
+//RS /// Run one expression through the canonical evaluator, retaining the pure
+//RS /// reflected CtValue projection path for template-time aggregate reads.
+//RS pub fn eval_expr(req: &mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic> {
+//RS     if let Some(value) = static_ct_value(req.expr, req.globals, req.mutated.as_deref()) {
+//RS         return Ok(value);
+//RS     }
+//RS     (hooks().eval_expr)(req)
+//RS }
+//RS 
+//RS pub fn eval_block<'a, 'debug>(
+//RS     req: &mut BlockEvalRequest<'a, 'debug>,
+//RS ) -> Result<StmtOutcome, Diagnostic> {
+//RS     (hooks().eval_block)(req)
+//RS }
+//RS 
+//RS fn conversion_error(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0956",
+//RS         message.into(),
+//RS         "the comptime boundary accepts only canonical MIR runtime values".to_string(),
+//RS         "keep the value on the canonical Prelude/Core path or use a serializable value".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn mir_to_ct_key(key: &MirConstKey) -> CtKey {
+//RS     match key {
+//RS         MirConstKey::Int(value) => CtKey::Int(*value),
+//RS         MirConstKey::String(value) => CtKey::Str(value.clone()),
+//RS         MirConstKey::Bool(value) => CtKey::Bool(*value),
+//RS         MirConstKey::Char(value) => CtKey::Char(*value),
+//RS         MirConstKey::Tuple(fields) => CtKey::Tuple(
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, key)| (name.clone(), mir_to_ct_key(key)))
+//RS                 .collect(),
+//RS         ),
+//RS         MirConstKey::Struct { type_name, fields } => CtKey::Struct {
+//RS             type_name: type_name.clone(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, key)| (name.clone(), mir_to_ct_key(key)))
+//RS                 .collect(),
+//RS         },
+//RS         MirConstKey::Enum { type_name, variant } => CtKey::Enum {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn ct_to_mir_key(key: CtKey) -> MirConstKey {
+//RS     match key {
+//RS         CtKey::Int(value) => MirConstKey::Int(value),
+//RS         CtKey::Str(value) => MirConstKey::String(value),
+//RS         CtKey::Bool(value) => MirConstKey::Bool(value),
+//RS         CtKey::Char(value) => MirConstKey::Char(value),
+//RS         CtKey::Tuple(fields) => MirConstKey::Tuple(
+//RS             fields
+//RS                 .into_iter()
+//RS                 .map(|(name, key)| (name, ct_to_mir_key(key)))
+//RS                 .collect(),
+//RS         ),
+//RS         CtKey::Struct { type_name, fields } => MirConstKey::Struct {
+//RS             type_name,
+//RS             fields: fields
+//RS                 .into_iter()
+//RS                 .map(|(name, key)| (name, ct_to_mir_key(key)))
+//RS                 .collect(),
+//RS         },
+//RS         CtKey::Enum { type_name, variant } => MirConstKey::Enum { type_name, variant },
+//RS     }
+//RS }
+//RS 
+//RS /// Project an AST type onto the canonical MIR type shape without flattening
+//RS /// generic applications into display strings.
+//RS pub fn ast_to_mir_type(ty: &Type) -> MirType {
+//RS     let kind = match ty {
+//RS         Type::Int => MirTypeKind::Int,
+//RS         Type::Float => MirTypeKind::Float,
+//RS         Type::Bool => MirTypeKind::Bool,
+//RS         Type::String => MirTypeKind::String,
+//RS         Type::Char => MirTypeKind::Char,
+//RS         Type::List(inner) => MirTypeKind::List(Box::new(ast_to_mir_type(inner))),
+//RS         Type::Map { key, value, .. } => MirTypeKind::Map {
+//RS             key: Box::new(ast_to_mir_type(key)),
+//RS             value: Box::new(ast_to_mir_type(value)),
+//RS         },
+//RS         Type::Shared(inner) => MirTypeKind::Shared(Box::new(ast_to_mir_type(inner))),
+//RS         Type::Option(inner) => MirTypeKind::Option(Box::new(ast_to_mir_type(inner))),
+//RS         Type::Result { ok, err } => MirTypeKind::Result {
+//RS             ok: Box::new(ast_to_mir_type(ok)),
+//RS             err: Box::new(ast_to_mir_type(err)),
+//RS         },
+//RS         Type::Fn {
+//RS             params,
+//RS             ret,
+//RS             effect_bound,
+//RS             param_contract,
+//RS             call_metadata,
+//RS             return_view_provenance,
+//RS         } => MirTypeKind::Fn(ast_to_mir_function_signature(
+//RS             params,
+//RS             ret,
+//RS             effect_bound,
+//RS             param_contract,
+//RS             call_metadata,
+//RS             return_view_provenance,
+//RS         )),
+//RS         Type::Named(name) => MirTypeKind::Apply {
+//RS             name: jet_foundation::MIR::MirNominalRef::from_name(name),
+//RS             args: Vec::new(),
+//RS         },
+//RS         Type::Apply { name, args } => MirTypeKind::Apply {
+//RS             name: jet_foundation::MIR::MirNominalRef::from_name(name),
+//RS             args: args.iter().map(ast_to_mir_type).collect(),
+//RS         },
+//RS         Type::TraitObject(bounds) => MirTypeKind::TraitObject(
+//RS             bounds
+//RS                 .iter()
+//RS                 .map(|bound| jet_foundation::MIR::MirNominalRef::from_name(bound.clone()))
+//RS                 .collect(),
+//RS         ),
+//RS         Type::Tuple(fields) => MirTypeKind::Tuple(
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, ty)| (name.clone(), ast_to_mir_type(ty)))
+//RS                 .collect(),
+//RS         ),
+//RS         Type::FixedList { elem, len } => MirTypeKind::FixedList {
+//RS             elem: Box::new(ast_to_mir_type(elem)),
+//RS             len: ast_to_mir_measure(len),
+//RS         },
+//RS         Type::IntN { signed, bits } => MirTypeKind::IntN {
+//RS             signed: *signed,
+//RS             bits: *bits,
+//RS         },
+//RS         Type::InlineRange { base, lo, hi } => MirTypeKind::InlineRange {
+//RS             base: Box::new(ast_to_mir_type(base)),
+//RS             lo: *lo,
+//RS             hi: *hi,
+//RS         },
+//RS         Type::Float32 => MirTypeKind::Float32,
+//RS         Type::Tagged { marker, inner } => MirTypeKind::Tagged {
+//RS             marker: ast_to_mir_tag_marker(marker),
+//RS             inner: Box::new(ast_to_mir_type(inner)),
+//RS         },
+//RS         Type::Union(members) => MirTypeKind::Union(members.iter().map(ast_to_mir_type).collect()),
+//RS         Type::Quantity { base, dimension } => MirTypeKind::Quantity {
+//RS             base: Box::new(ast_to_mir_type(base)),
+//RS             dimension: ast_to_mir_dimension(dimension),
+//RS         },
+//RS         Type::Measure(measure) => MirTypeKind::Measure(ast_to_mir_measure(measure)),
+//RS     };
+//RS     MirType::from_kind(kind).with_identity(jet_foundation::MIR::MirTypeId(
+//RS         jet_foundation::MIR::stable_id("mir-type", &ty.identity_key()),
+//RS     ))
+//RS }
+//RS 
+//RS fn ast_to_mir_function_signature(
+//RS     params: &[Type],
+//RS     ret: &Option<Box<Type>>,
+//RS     effect_bound: &Option<Vec<(String, Span)>>,
+//RS     param_contract: &Option<Vec<(String, crate::AST::ParamZone)>>,
+//RS     call_metadata: &Option<crate::AST::FunctionCallMetadata>,
+//RS     return_view_provenance: &Option<crate::AST::ViewProvenanceMap>,
+//RS ) -> jet_foundation::MIR::MirFunctionSignature {
+//RS     jet_foundation::MIR::MirFunctionSignature {
+//RS         params: params.iter().map(ast_to_mir_type).collect(),
+//RS         ret: ret.as_deref().map(ast_to_mir_type).map(Box::new),
+//RS         effect_bound: effect_bound
+//RS             .as_ref()
+//RS             .map(|row| row.iter().map(|(name, _)| name.clone()).collect()),
+//RS         param_contract: param_contract.as_ref().map(|row| {
+//RS             row.iter()
+//RS                 .map(|(label, zone)| jet_foundation::MIR::MirCallContractRow {
+//RS                     label: label.clone(),
+//RS                     zone: match zone {
+//RS                         crate::AST::ParamZone::PositionalOnly => {
+//RS                             jet_foundation::MIR::MirParamZone::PositionalOnly
+//RS                         }
+//RS                         crate::AST::ParamZone::Either => jet_foundation::MIR::MirParamZone::Either,
+//RS                         crate::AST::ParamZone::LabelOnly => {
+//RS                             jet_foundation::MIR::MirParamZone::LabelOnly
+//RS                         }
+//RS                     },
+//RS                 })
+//RS                 .collect()
+//RS         }),
+//RS         call_metadata: call_metadata.as_ref().map(ast_to_mir_call_metadata),
+//RS         return_view_provenance: return_view_provenance
+//RS             .as_ref()
+//RS             .map(ast_to_mir_view_provenance),
+//RS     }
+//RS }
+//RS 
+//RS fn ast_to_mir_call_metadata(
+//RS     metadata: &crate::AST::FunctionCallMetadata,
+//RS ) -> jet_foundation::MIR::MirCallMetadata {
+//RS     jet_foundation::MIR::MirCallMetadata {
+//RS         names: metadata.names.clone(),
+//RS         defaults: metadata.defaults.iter().map(Option::is_some).collect(),
+//RS         variadic: metadata.variadic.clone(),
+//RS         conventions: metadata
+//RS             .conventions
+//RS             .iter()
+//RS             .copied()
+//RS             .map(ast_to_mir_access)
+//RS             .collect(),
+//RS         policies: jet_foundation::MIR::MirCallablePolicyChain {
+//RS             policies: metadata
+//RS                 .policies
+//RS                 .policies
+//RS                 .iter()
+//RS                 .map(|policy| jet_foundation::MIR::MirCallablePolicy {
+//RS                     name: policy.name.clone(),
+//RS                     arguments: policy.arguments.clone(),
+//RS                 })
+//RS                 .collect(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn ast_to_mir_access(access: crate::AST::AccessConvention) -> jet_foundation::MIR::MirAccess {
+//RS     match access {
+//RS         crate::AST::AccessConvention::Read => jet_foundation::MIR::MirAccess::Read,
+//RS         crate::AST::AccessConvention::Write => jet_foundation::MIR::MirAccess::Write,
+//RS         crate::AST::AccessConvention::Move => jet_foundation::MIR::MirAccess::Move,
+//RS     }
+//RS }
+//RS 
+//RS fn ast_to_mir_view_provenance(
+//RS     map: &crate::AST::ViewProvenanceMap,
+//RS ) -> BTreeMap<Vec<String>, jet_foundation::MIR::MirViewProvenance> {
+//RS     map.iter()
+//RS         .map(|(path, provenance)| {
+//RS             let sources = provenance
+//RS                 .sources
+//RS                 .iter()
+//RS                 .map(|source| jet_foundation::MIR::MirViewSourcePath {
+//RS                     source: match &source.source {
+//RS                         crate::AST::ViewSource::Receiver => {
+//RS                             jet_foundation::MIR::MirViewSource::Receiver
+//RS                         }
+//RS                         crate::AST::ViewSource::Parameter(index) => {
+//RS                             jet_foundation::MIR::MirViewSource::Parameter(*index)
+//RS                         }
+//RS                         crate::AST::ViewSource::Static { module_path, name } => {
+//RS                             jet_foundation::MIR::MirViewSource::Static {
+//RS                                 module_path: module_path.clone(),
+//RS                                 name: name.clone(),
+//RS                             }
+//RS                         }
+//RS                     },
+//RS                     projections: source
+//RS                         .projections
+//RS                         .iter()
+//RS                         .map(|projection| match projection {
+//RS                             crate::AST::ViewSourceProjection::Field(name) => {
+//RS                                 jet_foundation::MIR::MirViewProjection::Field(name.clone())
+//RS                             }
+//RS                             crate::AST::ViewSourceProjection::Index => {
+//RS                                 jet_foundation::MIR::MirViewProjection::Index
+//RS                             }
+//RS                             crate::AST::ViewSourceProjection::Range => {
+//RS                                 jet_foundation::MIR::MirViewProjection::Range
+//RS                             }
+//RS                         })
+//RS                         .collect(),
+//RS                 })
+//RS                 .collect::<BTreeSet<_>>();
+//RS             (
+//RS                 path.clone(),
+//RS                 jet_foundation::MIR::MirViewProvenance {
+//RS                     sources,
+//RS                     mutable: provenance.mutable,
+//RS                 },
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn ast_to_mir_measure(measure: &crate::AST::Measure) -> jet_foundation::MIR::MirMeasure {
+//RS     match measure {
+//RS         crate::AST::Measure::Literal { kind, value } => jet_foundation::MIR::MirMeasure::Literal {
+//RS             kind: kind.clone(),
+//RS             value: *value,
+//RS         },
+//RS         crate::AST::Measure::SignedLiteral { kind, value } => {
+//RS             jet_foundation::MIR::MirMeasure::SignedLiteral {
+//RS                 kind: kind.clone(),
+//RS                 value: *value,
+//RS             }
+//RS         }
+//RS         crate::AST::Measure::Symbol { kind, name } => jet_foundation::MIR::MirMeasure::Symbol {
+//RS             kind: kind.clone(),
+//RS             name: name.clone(),
+//RS         },
+//RS         crate::AST::Measure::Combined {
+//RS             kind,
+//RS             rule,
+//RS             left,
+//RS             right,
+//RS         } => jet_foundation::MIR::MirMeasure::Combined {
+//RS             kind: kind.clone(),
+//RS             rule: match rule {
+//RS                 crate::AST::MeasureRule::Add => jet_foundation::MIR::MirMeasureRule::Add,
+//RS                 crate::AST::MeasureRule::Mul => jet_foundation::MIR::MirMeasureRule::Mul,
+//RS                 crate::AST::MeasureRule::Match => jet_foundation::MIR::MirMeasureRule::Match,
+//RS             },
+//RS             left: Box::new(ast_to_mir_measure(left)),
+//RS             right: Box::new(ast_to_mir_measure(right)),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn ast_to_mir_dimension(dimension: &crate::AST::Dimension) -> jet_foundation::MIR::MirDimension {
+//RS     jet_foundation::MIR::MirDimension {
+//RS         axes: dimension
+//RS             .measure_exponents()
+//RS             .map(|(axis, exponent)| (axis.to_string(), ast_to_mir_measure(&exponent)))
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn ast_to_mir_tag_marker(marker: &crate::AST::TagMarker) -> jet_foundation::MIR::MirTagMarker {
+//RS     match marker {
+//RS         crate::AST::TagMarker::User(name) => jet_foundation::MIR::MirTagMarker::User(name.clone()),
+//RS         crate::AST::TagMarker::Internal(tag) => {
+//RS             jet_foundation::MIR::MirTagMarker::Internal(match tag {
+//RS                 crate::AST::InternalTag::CoreCryptoNominal => {
+//RS                     jet_foundation::MIR::MirInternalTag::CoreCryptoNominal
+//RS                 }
+//RS                 crate::AST::InternalTag::DeterministicClock => {
+//RS                     jet_foundation::MIR::MirInternalTag::DeterministicClock
+//RS                 }
+//RS                 crate::AST::InternalTag::SystemClock => {
+//RS                     jet_foundation::MIR::MirInternalTag::SystemClock
+//RS                 }
+//RS                 crate::AST::InternalTag::ExpiringSecretLoan => {
+//RS                     jet_foundation::MIR::MirInternalTag::ExpiringSecretLoan
+//RS                 }
+//RS                 crate::AST::InternalTag::SharedGuardRead => {
+//RS                     jet_foundation::MIR::MirInternalTag::SharedGuardRead
+//RS                 }
+//RS                 crate::AST::InternalTag::SharedGuardEdit => {
+//RS                     jet_foundation::MIR::MirInternalTag::SharedGuardEdit
+//RS                 }
+//RS                 crate::AST::InternalTag::TerminalFactSet => {
+//RS                     jet_foundation::MIR::MirInternalTag::TerminalFactSet
+//RS                 }
+//RS                 crate::AST::InternalTag::CppCallbackAbi => {
+//RS                     jet_foundation::MIR::MirInternalTag::CppCallbackAbi
+//RS                 }
+//RS                 crate::AST::InternalTag::AllocatorView => {
+//RS                     jet_foundation::MIR::MirInternalTag::AllocatorView
+//RS                 }
+//RS             })
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Recover an AST type for the comptime boundary without converting an
+//RS /// applied type into a single display-name string.
+//RS pub fn mir_to_ast_type(ty: &MirType) -> Type {
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int => Type::Int,
+//RS         MirTypeKind::Float => Type::Float,
+//RS         MirTypeKind::Bool => Type::Bool,
+//RS         MirTypeKind::String => Type::String,
+//RS         MirTypeKind::Char => Type::Char,
+//RS         MirTypeKind::List(inner) => Type::List(Box::new(mir_to_ast_type(inner))),
+//RS         MirTypeKind::Map { key, value } => Type::Map {
+//RS             key: Box::new(mir_to_ast_type(key)),
+//RS             key_span: None,
+//RS             value: Box::new(mir_to_ast_type(value)),
+//RS         },
+//RS         MirTypeKind::Shared(inner) => Type::Shared(Box::new(mir_to_ast_type(inner))),
+//RS         MirTypeKind::Option(inner) => Type::Option(Box::new(mir_to_ast_type(inner))),
+//RS         MirTypeKind::Result { ok, err } => Type::Result {
+//RS             ok: Box::new(mir_to_ast_type(ok)),
+//RS             err: Box::new(mir_to_ast_type(err)),
+//RS         },
+//RS         MirTypeKind::Fn(signature) => Type::Fn {
+//RS             params: signature.params.iter().map(mir_to_ast_type).collect(),
+//RS             ret: signature.ret.as_deref().map(mir_to_ast_type).map(Box::new),
+//RS             effect_bound: signature.effect_bound.as_ref().map(|row| {
+//RS                 row.iter()
+//RS                     .map(|name| (name.clone(), Span::new(0, 0)))
+//RS                     .collect()
+//RS             }),
+//RS             param_contract: signature.param_contract.as_ref().map(|row| {
+//RS                 row.iter()
+//RS                     .map(|row| {
+//RS                         (
+//RS                             row.label.clone(),
+//RS                             match row.zone {
+//RS                                 jet_foundation::MIR::MirParamZone::PositionalOnly => {
+//RS                                     crate::AST::ParamZone::PositionalOnly
+//RS                                 }
+//RS                                 jet_foundation::MIR::MirParamZone::Either => {
+//RS                                     crate::AST::ParamZone::Either
+//RS                                 }
+//RS                                 jet_foundation::MIR::MirParamZone::LabelOnly => {
+//RS                                     crate::AST::ParamZone::LabelOnly
+//RS                                 }
+//RS                             },
+//RS                         )
+//RS                     })
+//RS                     .collect()
+//RS             }),
+//RS             call_metadata: signature
+//RS                 .call_metadata
+//RS                 .as_ref()
+//RS                 .map(mir_to_ast_call_metadata),
+//RS             return_view_provenance: signature
+//RS                 .return_view_provenance
+//RS                 .as_ref()
+//RS                 .map(mir_to_ast_view_provenance),
+//RS         },
+//RS         MirTypeKind::SendFn { params, ret, .. } => Type::Fn {
+//RS             params: params.iter().map(mir_to_ast_type).collect(),
+//RS             ret: ret.as_deref().map(mir_to_ast_type).map(Box::new),
+//RS             effect_bound: None,
+//RS             param_contract: None,
+//RS             call_metadata: None,
+//RS             return_view_provenance: None,
+//RS         },
+//RS         MirTypeKind::Apply { name, args } => {
+//RS             if args.is_empty() {
+//RS                 Type::Named(name.name.clone())
+//RS             } else {
+//RS                 Type::Apply {
+//RS                     name: name.name.clone(),
+//RS                     args: args.iter().map(mir_to_ast_type).collect(),
+//RS                 }
+//RS             }
+//RS         }
+//RS         MirTypeKind::TraitObject(bounds) => {
+//RS             Type::TraitObject(bounds.iter().map(|bound| bound.name.clone()).collect())
+//RS         }
+//RS         MirTypeKind::Tuple(fields) => Type::Tuple(
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, ty)| (name.clone(), Box::new(mir_to_ast_type(ty))))
+//RS                 .collect(),
+//RS         ),
+//RS         MirTypeKind::FixedList { elem, len } => Type::FixedList {
+//RS             elem: Box::new(mir_to_ast_type(elem)),
+//RS             len: mir_to_ast_measure(len),
+//RS         },
+//RS         MirTypeKind::IntN { signed, bits } => Type::IntN {
+//RS             signed: *signed,
+//RS             bits: *bits,
+//RS         },
+//RS         MirTypeKind::InlineRange { base, lo, hi } => Type::InlineRange {
+//RS             base: Box::new(mir_to_ast_type(base)),
+//RS             lo: *lo,
+//RS             hi: *hi,
+//RS         },
+//RS         MirTypeKind::Float32 => Type::Float32,
+//RS         MirTypeKind::Tagged { marker, inner } => Type::Tagged {
+//RS             marker: mir_to_ast_tag_marker(marker),
+//RS             inner: Box::new(mir_to_ast_type(inner)),
+//RS         },
+//RS         MirTypeKind::Union(members) => Type::Union(members.iter().map(mir_to_ast_type).collect()),
+//RS         MirTypeKind::Quantity { base, dimension } => Type::Quantity {
+//RS             base: Box::new(mir_to_ast_type(base)),
+//RS             dimension: mir_to_ast_dimension(dimension),
+//RS         },
+//RS         MirTypeKind::Measure(measure) => Type::Measure(mir_to_ast_measure(measure)),
+//RS     }
+//RS }
+//RS 
+//RS fn mir_to_ast_call_metadata(
+//RS     metadata: &jet_foundation::MIR::MirCallMetadata,
+//RS ) -> crate::AST::FunctionCallMetadata {
+//RS     crate::AST::FunctionCallMetadata {
+//RS         names: metadata.names.clone(),
+//RS         defaults: metadata
+//RS             .defaults
+//RS             .iter()
+//RS             .map(|_| None::<crate::AST::Expr>)
+//RS             .collect(),
+//RS         variadic: metadata.variadic.clone(),
+//RS         conventions: metadata
+//RS             .conventions
+//RS             .iter()
+//RS             .copied()
+//RS             .map(mir_to_ast_access)
+//RS             .collect(),
+//RS         policies: crate::AST::CallablePolicyChain {
+//RS             policies: metadata
+//RS                 .policies
+//RS                 .policies
+//RS                 .iter()
+//RS                 .map(|policy| crate::AST::CallablePolicy {
+//RS                     name: policy.name.clone(),
+//RS                     arguments: policy.arguments.clone(),
+//RS                 })
+//RS                 .collect(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn mir_to_ast_access(access: jet_foundation::MIR::MirAccess) -> crate::AST::AccessConvention {
+//RS     match access {
+//RS         jet_foundation::MIR::MirAccess::Read => crate::AST::AccessConvention::Read,
+//RS         jet_foundation::MIR::MirAccess::Write => crate::AST::AccessConvention::Write,
+//RS         jet_foundation::MIR::MirAccess::Move => crate::AST::AccessConvention::Move,
+//RS     }
+//RS }
+//RS 
+//RS fn mir_to_ast_view_provenance(
+//RS     map: &BTreeMap<Vec<String>, jet_foundation::MIR::MirViewProvenance>,
+//RS ) -> crate::AST::ViewProvenanceMap {
+//RS     map.iter()
+//RS         .map(|(path, provenance)| {
+//RS             let sources = provenance
+//RS                 .sources
+//RS                 .iter()
+//RS                 .map(|source| crate::AST::ViewSourcePath {
+//RS                     source: match &source.source {
+//RS                         jet_foundation::MIR::MirViewSource::Receiver => {
+//RS                             crate::AST::ViewSource::Receiver
+//RS                         }
+//RS                         jet_foundation::MIR::MirViewSource::Parameter(index) => {
+//RS                             crate::AST::ViewSource::Parameter(*index)
+//RS                         }
+//RS                         jet_foundation::MIR::MirViewSource::Static { module_path, name } => {
+//RS                             crate::AST::ViewSource::Static {
+//RS                                 module_path: module_path.clone(),
+//RS                                 name: name.clone(),
+//RS                             }
+//RS                         }
+//RS                     },
+//RS                     projections: source
+//RS                         .projections
+//RS                         .iter()
+//RS                         .map(|projection| match projection {
+//RS                             jet_foundation::MIR::MirViewProjection::Field(name) => {
+//RS                                 crate::AST::ViewSourceProjection::Field(name.clone())
+//RS                             }
+//RS                             jet_foundation::MIR::MirViewProjection::Index => {
+//RS                                 crate::AST::ViewSourceProjection::Index
+//RS                             }
+//RS                             jet_foundation::MIR::MirViewProjection::Range => {
+//RS                                 crate::AST::ViewSourceProjection::Range
+//RS                             }
+//RS                         })
+//RS                         .collect(),
+//RS                 })
+//RS                 .collect::<BTreeSet<_>>();
+//RS             (
+//RS                 path.clone(),
+//RS                 crate::AST::ViewProvenance {
+//RS                     sources,
+//RS                     mutable: provenance.mutable,
+//RS                 },
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn mir_to_ast_measure(measure: &jet_foundation::MIR::MirMeasure) -> crate::AST::Measure {
+//RS     match measure {
+//RS         jet_foundation::MIR::MirMeasure::Literal { kind, value } => crate::AST::Measure::Literal {
+//RS             kind: kind.clone(),
+//RS             value: *value,
+//RS         },
+//RS         jet_foundation::MIR::MirMeasure::SignedLiteral { kind, value } => {
+//RS             crate::AST::Measure::SignedLiteral {
+//RS                 kind: kind.clone(),
+//RS                 value: *value,
+//RS             }
+//RS         }
+//RS         jet_foundation::MIR::MirMeasure::Symbol { kind, name } => crate::AST::Measure::Symbol {
+//RS             kind: kind.clone(),
+//RS             name: name.clone(),
+//RS         },
+//RS         jet_foundation::MIR::MirMeasure::Combined {
+//RS             kind,
+//RS             rule,
+//RS             left,
+//RS             right,
+//RS         } => crate::AST::Measure::Combined {
+//RS             kind: kind.clone(),
+//RS             rule: match rule {
+//RS                 jet_foundation::MIR::MirMeasureRule::Add => crate::AST::MeasureRule::Add,
+//RS                 jet_foundation::MIR::MirMeasureRule::Mul => crate::AST::MeasureRule::Mul,
+//RS                 jet_foundation::MIR::MirMeasureRule::Match => crate::AST::MeasureRule::Match,
+//RS             },
+//RS             left: Box::new(mir_to_ast_measure(left)),
+//RS             right: Box::new(mir_to_ast_measure(right)),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn mir_to_ast_dimension(dimension: &jet_foundation::MIR::MirDimension) -> crate::AST::Dimension {
+//RS     crate::AST::Dimension::from_identity(&dimension.identity())
+//RS         .expect("canonical MIR dimensions use concrete exponents")
+//RS }
+//RS 
+//RS fn mir_to_ast_tag_marker(marker: &jet_foundation::MIR::MirTagMarker) -> crate::AST::TagMarker {
+//RS     match marker {
+//RS         jet_foundation::MIR::MirTagMarker::User(name) => crate::AST::TagMarker::User(name.clone()),
+//RS         jet_foundation::MIR::MirTagMarker::Internal(tag) => {
+//RS             crate::AST::TagMarker::Internal(match tag {
+//RS                 jet_foundation::MIR::MirInternalTag::CoreCryptoNominal => {
+//RS                     crate::AST::InternalTag::CoreCryptoNominal
+//RS                 }
+//RS                 jet_foundation::MIR::MirInternalTag::DeterministicClock => {
+//RS                     crate::AST::InternalTag::DeterministicClock
+//RS                 }
+//RS                 jet_foundation::MIR::MirInternalTag::SystemClock => {
+//RS                     crate::AST::InternalTag::SystemClock
+//RS                 }
+//RS                 jet_foundation::MIR::MirInternalTag::ExpiringSecretLoan => {
+//RS                     crate::AST::InternalTag::ExpiringSecretLoan
+//RS                 }
+//RS                 jet_foundation::MIR::MirInternalTag::SharedGuardRead => {
+//RS                     crate::AST::InternalTag::SharedGuardRead
+//RS                 }
+//RS                 jet_foundation::MIR::MirInternalTag::SharedGuardEdit => {
+//RS                     crate::AST::InternalTag::SharedGuardEdit
+//RS                 }
+//RS                 jet_foundation::MIR::MirInternalTag::TerminalFactSet => {
+//RS                     crate::AST::InternalTag::TerminalFactSet
+//RS                 }
+//RS                 jet_foundation::MIR::MirInternalTag::CppCallbackAbi => {
+//RS                     crate::AST::InternalTag::CppCallbackAbi
+//RS                 }
+//RS                 jet_foundation::MIR::MirInternalTag::AllocatorView => {
+//RS                     crate::AST::InternalTag::AllocatorView
+//RS                 }
+//RS             })
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Marshal one canonical MIR value into the comptime value boundary.
+//RS pub fn mir_to_ct_value(value: MirRuntimeValue, span: Span) -> Result<CtValue, Diagnostic> {
+//RS     match value {
+//RS         MirRuntimeValue::Int(value) => Ok(CtValue::Int(value)),
+//RS         MirRuntimeValue::BigInt(value) => Ok(CtValue::BigInt(
+//RS             CtBigInt::from_str(&value).map_err(|message| conversion_error(message, span))?,
+//RS         )),
+//RS         MirRuntimeValue::Float { value, f32 } => Ok(CtValue::Float(if f32 {
+//RS             CtFloat::F32(value as f32)
+//RS         } else {
+//RS             CtFloat::F64(value)
+//RS         })),
+//RS         MirRuntimeValue::Bool(value) => Ok(CtValue::Bool(value)),
+//RS         MirRuntimeValue::Char(value) => Ok(CtValue::Char(value)),
+//RS         MirRuntimeValue::String(value) => Ok(CtValue::Str(value)),
+//RS         MirRuntimeValue::Bytes(value) => Ok(CtValue::Bytes(value)),
+//RS         MirRuntimeValue::List(values) => values
+//RS             .into_iter()
+//RS             .map(|value| mir_to_ct_value(value, span))
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(CtValue::List),
+//RS         MirRuntimeValue::Map(values) => values
+//RS             .into_iter()
+//RS             .map(|(key, value)| Ok((mir_to_ct_key(&key), mir_to_ct_value(value, span)?)))
+//RS             .collect::<Result<BTreeMap<_, _>, Diagnostic>>()
+//RS             .map(CtValue::Map),
+//RS         MirRuntimeValue::Struct { type_name, fields } => fields
+//RS             .into_iter()
+//RS             .map(|(name, value)| Ok((name, mir_to_ct_value(value, span)?)))
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(|fields| CtValue::Struct {
+//RS                 type_name: user_type_name(type_name),
+//RS                 fields,
+//RS             }),
+//RS         MirRuntimeValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } => args
+//RS             .into_iter()
+//RS             .map(|(name, value)| Ok((name, mir_to_ct_value(value, span)?)))
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(|args| CtValue::Enum {
+//RS                 type_name: user_type_name(type_name),
+//RS                 variant,
+//RS                 args,
+//RS             }),
+//RS         MirRuntimeValue::Present(value) => {
+//RS             Ok(CtValue::Present(Box::new(mir_to_ct_value(*value, span)?)))
+//RS         }
+//RS         MirRuntimeValue::FailedTold(value) => Ok(CtValue::Failed(CtReport::Told(Box::new(
+//RS             mir_to_ct_value(*value, span)?,
+//RS         )))),
+//RS         MirRuntimeValue::Absent { element } => Ok(CtValue::absent(mir_to_ast_type(&element))),
+//RS         MirRuntimeValue::Unit => Ok(CtValue::Unit),
+//RS         MirRuntimeValue::Moved => Err(conversion_error(
+//RS             "internal moved value cannot cross the comptime boundary",
+//RS             span,
+//RS         )),
+//RS         MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) => Err(conversion_error(
+//RS             "native-owned runtime resources cannot cross the comptime boundary",
+//RS             span,
+//RS         )),
+//RS         MirRuntimeValue::Closure(_) => Err(conversion_error(
+//RS             "MIR Core call cannot marshal a closure through the comptime boundary",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn user_type_name(name: String) -> String {
+//RS     let stripped = name.strip_prefix("__comptime::").unwrap_or(&name);
+//RS     stripped.strip_suffix("<>").unwrap_or(stripped).to_string()
+//RS }
+//RS 
+//RS /// Marshal one comptime value into the canonical MIR value boundary.
+//RS pub fn ct_to_mir_value(value: CtValue, span: Span) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Int(value) => Ok(MirRuntimeValue::Int(value)),
+//RS         CtValue::Float(value) => Ok(match value {
+//RS             CtFloat::F32(value) => MirRuntimeValue::Float {
+//RS                 value: f64::from(value),
+//RS                 f32: true,
+//RS             },
+//RS             CtFloat::F64(value) => MirRuntimeValue::Float { value, f32: false },
+//RS         }),
+//RS         CtValue::Bool(value) => Ok(MirRuntimeValue::Bool(value)),
+//RS         CtValue::Char(value) => Ok(MirRuntimeValue::Char(value)),
+//RS         CtValue::Str(value) => Ok(MirRuntimeValue::String(value)),
+//RS         CtValue::BigInt(value) => Ok(MirRuntimeValue::BigInt(value.to_string_rep())),
+//RS         CtValue::Bytes(value) => Ok(MirRuntimeValue::Bytes(value)),
+//RS         CtValue::List(values) => values
+//RS             .into_iter()
+//RS             .map(|value| ct_to_mir_value(value, span))
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(MirRuntimeValue::List),
+//RS         CtValue::Map(values) => values
+//RS             .into_iter()
+//RS             .map(|(key, value)| Ok((ct_to_mir_key(key), ct_to_mir_value(value, span)?)))
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(MirRuntimeValue::Map),
+//RS         CtValue::Struct { type_name, fields } => fields
+//RS             .into_iter()
+//RS             .map(|(name, value)| Ok((name, ct_to_mir_value(value, span)?)))
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(|fields| MirRuntimeValue::Struct { type_name, fields }),
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } => args
+//RS             .into_iter()
+//RS             .map(|(name, value)| Ok((name, ct_to_mir_value(value, span)?)))
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(|args| MirRuntimeValue::Enum {
+//RS                 type_name,
+//RS                 variant,
+//RS                 args,
+//RS             }),
+//RS         CtValue::Present(value) => Ok(MirRuntimeValue::Present(Box::new(ct_to_mir_value(
+//RS             *value, span,
+//RS         )?))),
+//RS         CtValue::Failed(CtReport::Told(value)) => Ok(MirRuntimeValue::FailedTold(Box::new(
+//RS             ct_to_mir_value(*value, span)?,
+//RS         ))),
+//RS         CtValue::Failed(CtReport::Clean(element)) => Ok(MirRuntimeValue::Absent {
+//RS             element: ast_to_mir_type(&element),
+//RS         }),
+//RS         CtValue::Unit => Ok(MirRuntimeValue::Unit),
+//RS         CtValue::Closure(_) => Err(conversion_error(
+//RS             "the comptime boundary cannot materialize a closure as a canonical MIR value",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2113 crates/jet-comptime/src/Comptime/MirBridge.rs:1-1221
+

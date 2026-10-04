@@ -1,424 +1,152 @@
-// PORT-PENDING 0065 crates-jet-foundation-src-factsderivation-module-group: crates/jet-foundation/src/FactsDerivation.rs:1-420
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Derivation records shared by evidence reports and generated AOT Prelude.
-//RS //!
-//RS //! Kept independent of the compiler fact registry so native programs can
-//RS //! splice this source without pulling TargetMachine, AST, or Policy.
-//RS 
-//RS /// Evidence method retained by a checked derivation record.
-//RS ///
-//RS /// These methods are deliberately not ordered by confidence.  A renderer must
-//RS /// preserve the producer's method and may not promote a sampled or observed
-//RS /// result into a proof.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub enum DerivationMethod {
-//RS     StaticDerivation,
-//RS     FormalProof,
-//RS     RecordedExecution,
-//RS     SampledAgreement,
-//RS     ExternalAssumption,
-//RS }
-//RS 
-//RS impl DerivationMethod {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::StaticDerivation => "static_derivation",
-//RS             Self::FormalProof => "formal_proof",
-//RS             Self::RecordedExecution => "recorded_execution",
-//RS             Self::SampledAgreement => "sampled_agreement",
-//RS             Self::ExternalAssumption => "external_assumption",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn from_str(value: &str) -> Option<Self> {
-//RS         match value {
-//RS             "static_derivation" => Some(Self::StaticDerivation),
-//RS             "formal_proof" => Some(Self::FormalProof),
-//RS             "recorded_execution" => Some(Self::RecordedExecution),
-//RS             "sampled_agreement" => Some(Self::SampledAgreement),
-//RS             "external_assumption" => Some(Self::ExternalAssumption),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Current applicability of one retained derivation.
-//RS ///
-//RS /// `Unknown` is used when the producer did not establish a current value.  It
-//RS /// is intentionally separate from `Unavailable` and never implies success.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub enum DerivationDisposition {
-//RS     Current,
-//RS     Stale,
-//RS     Expired,
-//RS     Redacted,
-//RS     Unavailable,
-//RS     Unsupported,
-//RS     BudgetExhausted,
-//RS     Unknown,
-//RS }
-//RS 
-//RS impl DerivationDisposition {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Current => "current",
-//RS             Self::Stale => "stale",
-//RS             Self::Expired => "expired",
-//RS             Self::Redacted => "redacted",
-//RS             Self::Unavailable => "unavailable",
-//RS             Self::Unsupported => "unsupported",
-//RS             Self::BudgetExhausted => "budget_exhausted",
-//RS             Self::Unknown => "unknown",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn from_str(value: &str) -> Option<Self> {
-//RS         match value {
-//RS             "current" => Some(Self::Current),
-//RS             "stale" => Some(Self::Stale),
-//RS             "expired" => Some(Self::Expired),
-//RS             "redacted" => Some(Self::Redacted),
-//RS             "unavailable" => Some(Self::Unavailable),
-//RS             "unsupported" => Some(Self::Unsupported),
-//RS             "budget_exhausted" => Some(Self::BudgetExhausted),
-//RS             "unknown" => Some(Self::Unknown),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn is_current(self) -> bool {
-//RS         matches!(self, Self::Current)
-//RS     }
-//RS 
-//RS     pub const fn is_unknown(self) -> bool {
-//RS         matches!(self, Self::Unknown)
-//RS     }
-//RS }
-//RS 
-//RS /// Optional observation attached to a checked derivation.
-//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct DerivationObservation {
-//RS     pub event_id: Option<String>,
-//RS     pub counterexample_id: Option<String>,
-//RS }
-//RS 
-//RS impl DerivationObservation {
-//RS     pub fn event(event_id: impl Into<String>) -> Self {
-//RS         Self {
-//RS             event_id: Some(event_id.into()),
-//RS             counterexample_id: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn counterexample(counterexample_id: impl Into<String>) -> Self {
-//RS         Self {
-//RS             event_id: None,
-//RS             counterexample_id: Some(counterexample_id.into()),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.event_id.is_none() && self.counterexample_id.is_none()
-//RS     }
-//RS }
-//RS 
-//RS /// Identity of the inputs that established one checked claim.
-//RS ///
-//RS /// Empty components are meaningful: static derivations normally have no run,
-//RS /// while recorded executions must fill it. Consumers compare all four
-//RS /// components and mark dependents stale instead of guessing a replacement.
-//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct DerivationIdentity {
-//RS     pub source: String,
-//RS     pub build: String,
-//RS     pub run: String,
-//RS     pub target: String,
-//RS }
-//RS 
-//RS /// Typed producer payload carried by a canonical derivation. The relation is
-//RS /// extensible by adding another checked payload variant; consumers must not
-//RS /// deserialize an untyped blob or derive a replacement graph.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum DerivationPayload {
-//RS     FrameSchedule(crate::ResourceSchedule::JetFrameSchedule),
-//RS }
-//RS 
-//RS impl DerivationPayload {
-//RS     pub const fn kind(&self) -> &'static str {
-//RS         match self {
-//RS             Self::FrameSchedule(_) => "jet_frame_schedule",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn frame_schedule(&self) -> Option<&crate::ResourceSchedule::JetFrameSchedule> {
-//RS         match self {
-//RS             Self::FrameSchedule(schedule) => Some(schedule),
-//RS         }
-//RS     }
-//RS 
-//RS     fn identity(&self) -> String {
-//RS         match self {
-//RS             Self::FrameSchedule(schedule) => schedule.canonical_json(),
-//RS         }
-//RS     }
-//RS     /// Canonical payload JSON is owned by the typed schedule module. This
-//RS     /// wrapper keeps the derivation relation typed without duplicating its
-//RS     /// wire format in Facts.
-//RS     pub fn to_json(&self) -> String {
-//RS         match self {
-//RS             Self::FrameSchedule(schedule) => schedule.canonical_json(),
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS }
-//RS 
-//RS impl DerivationIdentity {
-//RS     pub fn new(
-//RS         source: impl Into<String>,
-//RS         build: impl Into<String>,
-//RS         run: impl Into<String>,
-//RS         target: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             source: source.into(),
-//RS             build: build.into(),
-//RS             run: run.into(),
-//RS             target: target.into(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn differs_from(&self, other: &Self) -> bool {
-//RS         self != other
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.source.is_empty()
-//RS             && self.build.is_empty()
-//RS             && self.run.is_empty()
-//RS             && self.target.is_empty()
-//RS     }
-//RS }
-//RS 
-//RS /// Compact reason relation retained beside an existing evidence record.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct DerivationRecord {
-//RS     pub id: String,
-//RS     pub subject: String,
-//RS     pub claim: String,
-//RS     pub producer: String,
-//RS     pub method: DerivationMethod,
-//RS     pub rule: String,
-//RS     pub premises: Vec<String>,
-//RS     pub identity: DerivationIdentity,
-//RS     pub assumptions: Vec<String>,
-//RS     pub disposition: DerivationDisposition,
-//RS     pub observation: Option<DerivationObservation>,
-//RS     /// Typed producer payload, interned with this canonical relation.
-//RS     pub payload: Option<DerivationPayload>,
-//RS }
-//RS 
-//RS impl DerivationRecord {
-//RS     pub fn new(
-//RS         subject: impl Into<String>,
-//RS         claim: impl Into<String>,
-//RS         producer: impl Into<String>,
-//RS         method: DerivationMethod,
-//RS         rule: impl Into<String>,
-//RS         premises: impl IntoIterator<Item = String>,
-//RS         identity: DerivationIdentity,
-//RS     ) -> Self {
-//RS         let subject = subject.into();
-//RS         let claim = claim.into();
-//RS         let producer = producer.into();
-//RS         let rule = rule.into();
-//RS         let mut premises = premises.into_iter().collect::<Vec<_>>();
-//RS         premises.sort();
-//RS         premises.dedup();
-//RS         let mut record = Self {
-//RS             id: String::new(),
-//RS             subject,
-//RS             claim,
-//RS             producer,
-//RS             method,
-//RS             rule,
-//RS             premises,
-//RS             identity,
-//RS             assumptions: Vec::new(),
-//RS             disposition: DerivationDisposition::Current,
-//RS             observation: None,
-//RS             payload: None,
-//RS         };
-//RS         record.id = record.canonical_id();
-//RS         record
-//RS     }
-//RS 
-//RS     pub fn with_assumptions(mut self, assumptions: impl IntoIterator<Item = String>) -> Self {
-//RS         self.assumptions = assumptions.into_iter().collect();
-//RS         self.assumptions.sort();
-//RS         self.assumptions.dedup();
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_disposition(mut self, disposition: DerivationDisposition) -> Self {
-//RS         self.disposition = disposition;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_observation(mut self, observation: DerivationObservation) -> Self {
-//RS         self.observation = (!observation.is_empty()).then_some(observation);
-//RS         self
-//RS     }
-//RS 
-//RS     /// Mark a retained reason stale when any source/build/run/target input
-//RS     /// changes. No other disposition is silently promoted back to current.
-//RS     pub fn invalidate_if_identity_changed(&mut self, current: &DerivationIdentity) -> bool {
-//RS         if self.disposition == DerivationDisposition::Current
-//RS             && self.identity.differs_from(current)
-//RS         {
-//RS             self.disposition = DerivationDisposition::Stale;
-//RS             return true;
-//RS         }
-//RS         false
-//RS     }
-//RS 
-//RS     fn canonical_id(&self) -> String {
-//RS         let payload_identity = self
-//RS             .payload
-//RS             .as_ref()
-//RS             .map(DerivationPayload::identity)
-//RS             .unwrap_or_default();
-//RS         derivation_token(&[
-//RS             &self.subject,
-//RS             &self.claim,
-//RS             &self.producer,
-//RS             self.method.as_str(),
-//RS             &self.rule,
-//RS             &self.premises.join("\0"),
-//RS             &self.identity.source,
-//RS             &self.identity.build,
-//RS             &self.identity.run,
-//RS             &self.identity.target,
-//RS             &payload_identity,
-//RS         ])
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         if self.id != self.canonical_id() {
-//RS             return Err(format!("derivation {} has a non-canonical identity", self.id));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Attach the typed payload selected by the authoritative producer.
-//RS     /// Payload identity participates in the interned id, so a changed plan
-//RS     /// cannot masquerade as the previous checked relation.
-//RS     pub fn with_payload(mut self, payload: DerivationPayload) -> Self {
-//RS         self.payload = Some(payload);
-//RS         self.id = self.canonical_id();
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn reference(&self) -> DerivationRef {
-//RS         DerivationRef {
-//RS             id: self.id.clone(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn to_json(&self) -> String {
-//RS         let premises = self
-//RS             .premises
-//RS             .iter()
-//RS             .map(|value| format!("\"{}\"", json_escape(value)))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let assumptions = self
-//RS             .assumptions
-//RS             .iter()
-//RS             .map(|value| format!("\"{}\"", json_escape(value)))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let observation = self.observation.as_ref().map_or_else(
-//RS             || "null".to_string(),
-//RS             |value| {
-//RS                 format!(
-//RS                     "{{\"counterexample\":{},\"event\":{}}}",
-//RS                     value
-//RS                         .counterexample_id
-//RS                         .as_deref()
-//RS                         .map(|id| format!("\"{}\"", json_escape(id)))
-//RS                         .unwrap_or_else(|| "null".to_string()),
-//RS                     value
-//RS                         .event_id
-//RS                         .as_deref()
-//RS                         .map(|id| format!("\"{}\"", json_escape(id)))
-//RS                         .unwrap_or_else(|| "null".to_string())
-//RS                 )
-//RS             },
-//RS         );
-//RS         let payload = self
-//RS             .payload
-//RS             .as_ref()
-//RS             .map(DerivationPayload::to_json)
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         format!(
-//RS             "{{\"assumptions\":[{}],\"claim\":\"{}\",\"disposition\":\"{}\",\"id\":\"{}\",\"identity\":{{\"build\":\"{}\",\"run\":\"{}\",\"source\":\"{}\",\"target\":\"{}\"}},\"method\":\"{}\",\"observation\":{},\"payload\":{},\"premises\":[{}],\"producer\":\"{}\",\"rule\":\"{}\",\"subject\":\"{}\"}}",
-//RS             assumptions,
-//RS             json_escape(&self.claim),
-//RS             self.disposition.as_str(),
-//RS             json_escape(&self.id),
-//RS             json_escape(&self.identity.build),
-//RS             json_escape(&self.identity.run),
-//RS             json_escape(&self.identity.source),
-//RS             json_escape(&self.identity.target),
-//RS             self.method.as_str(),
-//RS             observation,
-//RS             payload,
-//RS             premises,
-//RS             json_escape(&self.producer),
-//RS             json_escape(&self.rule),
-//RS             json_escape(&self.subject),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Interned link carried by an evidence record.  The payload lives once on
-//RS /// `EvidenceReport::derivations`; views should resolve this id rather than copy
-//RS /// a proof tree.
-//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub struct DerivationRef {
-//RS     pub id: String,
-//RS }
-//RS 
-//RS impl DerivationRef {
-//RS     pub fn new(id: impl Into<String>) -> Self {
-//RS         Self { id: id.into() }
-//RS     }
-//RS }
-//RS 
-//RS fn derivation_token(parts: &[&str]) -> String {
-//RS     let mut first = 0xcbf29ce484222325u64;
-//RS     let mut second = 0x9e3779b185ebca87u64;
-//RS     for part in parts {
-//RS         let length = (part.len() as u64).to_be_bytes();
-//RS         for byte in length.iter().chain(part.as_bytes()) {
-//RS             first ^= u64::from(*byte);
-//RS             first = first.wrapping_mul(0x100000001b3);
-//RS             second ^= first.rotate_left(17) ^ u64::from(*byte);
-//RS             second = second.wrapping_mul(0x9e3779b185ebca87);
-//RS         }
-//RS     }
-//RS     format!("{first:016x}{second:016x}")
-//RS }
-//RS 
-//RS fn json_escape(value: &str) -> String {
-//RS     value
-//RS         .replace('\\', "\\\\")
-//RS         .replace('"', "\\\"")
-//RS         .replace('\n', "\\n")
-//RS         .replace('\r', "\\r")
-//RS         .replace('\t', "\\t")
-//RS }
-// END-PORT-PENDING 0065 crates/jet-foundation/src/FactsDerivation.rs:1-420
+// Derivation records extend the canonical Foundation owners; no second record model.
+use JetFoundation.Derivations.[DerivationIdentity, DerivationObservation, DerivationPayload, DerivationRecord, derivation_identity, derivation_record, derivation_record_id, derivation_record_with_payload, derivation_record_reference, derivation_record_invalidate_if_identity_changed, derivation_record_json, derivation_payload_json, derivation_method_raw, derivation_disposition_text]
+use JetFoundation.MIR.[MIRDerivationMethod, MIRDerivationDisposition, MIRDerivationRef, MIRFrameSchedule]
 
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:12
+// DerivationMethod is canonical MIR.jet::MIRDerivationMethod (same variants/order).
+impl MIRDerivationMethod {
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:21
+    pub fn as_str(self) -> String Never! { derivation_method_raw(self) }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:31
+    pub fn from_str(value: String) -> MIRDerivationMethod? Never! {
+        if value == {
+            "static_derivation" -> Val(.StaticDerivation)
+            "formal_proof" -> Val(.FormalProof)
+            "recorded_execution" -> Val(.RecordedExecution)
+            "sampled_agreement" -> Val(.SampledAgreement)
+            "external_assumption" -> Val(.ExternalAssumption)
+            else -> None
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:48
+// DerivationDisposition is canonical MIR.jet::MIRDerivationDisposition.
+impl MIRDerivationDisposition {
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:60
+    pub fn as_str(self) -> String Never! { derivation_disposition_text(self) }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:73
+    pub fn from_str(value: String) -> MIRDerivationDisposition? Never! {
+        if value == {
+            "current" -> Val(.Current)
+            "stale" -> Val(.Stale)
+            "expired" -> Val(.Expired)
+            "redacted" -> Val(.Redacted)
+            "unavailable" -> Val(.Unavailable)
+            "unsupported" -> Val(.Unsupported)
+            "budget_exhausted" -> Val(.BudgetExhausted)
+            "unknown" -> Val(.Unknown)
+            else -> None
+        }
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:87
+    pub fn is_current(self) -> Bool Never! { self == .Current }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:91
+    pub fn is_unknown(self) -> Bool Never! { self == .Unknown }
+}
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:98
+// DerivationObservation fields are owned by Derivations.jet:11.
+impl DerivationObservation {
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:104
+    pub fn event(event_id: String) -> DerivationObservation Never! {
+        DerivationObservation{event_id: Val(event_id), counterexample_id: None}
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:111
+    pub fn counterexample(counterexample_id: String) -> DerivationObservation Never! {
+        DerivationObservation{event_id: None, counterexample_id: Val(counterexample_id)}
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:118
+    pub fn is_empty(self) -> Bool Never! { self.event_id == None && self.counterexample_id == None }
+}
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:129
+// DerivationIdentity fields are owned by Derivations.jet:4.
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:140
+// DerivationPayload is owned by Derivations.jet:16 (typed MIR frame schedule).
+impl DerivationPayload {
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:145
+    pub fn kind(self) -> String Never! { if self == { .FrameSchedule(_) -> "jet_frame_schedule" } }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:151
+    pub fn frame_schedule(self) -> MIRFrameSchedule? Never! {
+        if self == { .FrameSchedule(schedule) -> Val(schedule) }
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:157
+    fn identity(self) -> String Never! { derivation_payload_json(self) }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:165
+    pub fn to_json(self) -> String Never! { derivation_payload_json(self) }
+}
+impl DerivationIdentity {
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:175
+    pub fn new(source: String, build: String, run: String, target: String) -> DerivationIdentity Never! {
+        derivation_identity(source, build, run, target)
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:189
+    pub fn differs_from(self, other: DerivationIdentity) -> Bool Never! {
+        self.source != other.source || self.build != other.build || self.run != other.run || self.target != other.target
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:193
+    pub fn is_empty(self) -> Bool Never! {
+        self.source.is_empty() && self.build.is_empty() && self.run.is_empty() && self.target.is_empty()
+    }
+}
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:203
+// DerivationRecord fields are owned by Derivations.jet:18.
+impl DerivationRecord {
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:220
+    pub fn new(subject: String, claim: String, producer: String, method: MIRDerivationMethod, rule: String, premises: ^[String], identity: DerivationIdentity) -> DerivationRecord Never! {
+        values := ^premises
+        &values.sort()
+        &values.dedup()
+        record := DerivationRecord{id: "", subject: subject, claim: claim, producer: producer, method: method, rule: rule, premises: ^values, identity: identity, assumptions: [], disposition: .Current, observation: None, payload: None}
+        record.id = derivation_record_id(record)
+        record
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:254
+    pub fn with_assumptions(self: ^DerivationRecord, assumptions: ^[String]) -> DerivationRecord Never! {
+        result := ^self
+        result.assumptions = ^assumptions
+        &result.assumptions.sort()
+        &result.assumptions.dedup()
+        result
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:261
+    pub fn with_disposition(self: ^DerivationRecord, disposition: MIRDerivationDisposition) -> DerivationRecord Never! {
+        result := ^self
+        result.disposition = disposition
+        result
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:266
+    pub fn with_observation(self: ^DerivationRecord, observation: DerivationObservation) -> DerivationRecord Never! {
+        result := ^self
+        result.observation = if observation.is_empty() { None } else { Val(observation) }
+        result
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:273
+    pub fn invalidate_if_identity_changed(self: &DerivationRecord, current: DerivationIdentity) -> Bool Never! {
+        derivation_record_invalidate_if_identity_changed(&self, current)
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:283
+    fn canonical_id(self) -> String Never! { derivation_record_id(self) }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:304
+    pub fn validate(self) Err! {
+        if self.id != self.canonical_id() -> return Err("derivation {self.id} has a non-canonical identity")
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:314
+    pub fn with_payload(self: ^DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
+        derivation_record_with_payload(^self, payload)
+    }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:320
+    pub fn reference(self) -> MIRDerivationRef Never! { derivation_record_reference(self) }
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:326
+    pub fn to_json(self) -> String Never! { derivation_record_json(self) }
+}
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:388
+// DerivationRef is canonical MIR.jet::MIRDerivationRef (id field).
+impl MIRDerivationRef {
+    // Rust: crates/jet-foundation/src/FactsDerivation.rs:393
+    pub fn new(id: String) -> MIRDerivationRef Never! { MIRDerivationRef{id: id} }
+}
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:398
+// derivation_token -> Derivations.jet::derivation_record_id / derivation_hash_frame /
+// derivation_hash_byte / derivation_hash_hex: length-framed dual wrapping U64 hashes.
+// Rust: crates/jet-foundation/src/FactsDerivation.rs:413
+// json_escape -> Derivations.jet::derivation_record_quote: same five replacements,
+// with surrounding quotes supplied by the JSON renderer.

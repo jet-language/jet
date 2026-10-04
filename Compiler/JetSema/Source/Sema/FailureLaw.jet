@@ -310,7 +310,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
             if function.key == demand.key -> present = true
         }
         if present -> next
-        conversion :: sema_prelude_error_conversion(demand.source, demand.site) ?? {
+        conversion := sema_prelude_error_conversion(demand.source, demand.site) ?? {
             complete = false
             next
         }
@@ -322,7 +322,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
             complete = false
             next
         }
-        checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+        checked :: sema_function_check(&conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references, sema_function_body_input(conversion, TFuncKind.TopLevel, false, environment))
         if !checked.complete || !sema_append_function(&functions, checked) -> complete = false
     }
     complete

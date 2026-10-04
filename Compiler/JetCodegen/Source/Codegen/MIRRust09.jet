@@ -1,0 +1,1804 @@
+// PORT-PENDING 2009 crates-jet-codegen-src-codegen-mirrust-slice-14401: crates/jet-codegen/src/Codegen/MIRRust.rs:14401-16200
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let Some(cursor) = vector.cursor else {
+//RS             return false;
+//RS         };
+//RS         let Some((start, end)) = self.canonical_counted_bounds(function, vector) else {
+//RS             return false;
+//RS         };
+//RS         let Some(exit) = row.exit else {
+//RS             return false;
+//RS         };
+//RS         let Some((outputs, loop_places)) =
+//RS             self.acceleration_output_writes(function, vector, cursor)
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let column_slots = self.acceleration_column_slots(vector);
+//RS         let use_column_copy = column.workload.column_copy_applicable()
+//RS             && column_slots.as_ref().is_some_and(|slots| !slots.is_empty());
+//RS         let Some(source) = self.acceleration_loop_source(
+//RS             function,
+//RS             vector,
+//RS             cursor,
+//RS             start,
+//RS             end,
+//RS             &outputs,
+//RS             &loop_places,
+//RS             parallel,
+//RS             column,
+//RS             column_slots.as_ref(),
+//RS             use_column_copy,
+//RS             exit,
+//RS             indent,
+//RS         ) else {
+//RS             return false;
+//RS         };
+//RS         out.push_str(&source);
+//RS         true
+//RS     }
+//RS 
+//RS     fn acceleration_loop_source(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         vector: &MirVectorFact,
+//RS         cursor: MirValueId,
+//RS         start: MirValueId,
+//RS         end: MirValueId,
+//RS         outputs: &[(MirPlaceId, MirValueId)],
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         parallel: &MirAccelerationFact,
+//RS         column: &MirAccelerationFact,
+//RS         column_slots: Option<&BTreeMap<(MirValueId, MirFieldId), usize>>,
+//RS         use_column_copy: bool,
+//RS         exit: MirBlockId,
+//RS         indent: usize,
+//RS     ) -> Option<String> {
+//RS         let pad = " ".repeat(indent);
+//RS         let start_expr = self.value_owned(start);
+//RS         let end_expr = self.value_owned(end);
+//RS         let function_key = format!("{:?}", function.key);
+//RS         let loop_header = vector.loop_header.0 as u32;
+//RS         let source_start = vector.span.start;
+//RS         let source_end = vector.span.end;
+//RS         let proof_parallel = parallel
+//RS             .proof
+//RS             .proves(AccelerationTransform::PooledParallelChunks);
+//RS         let proof_column = column
+//RS             .proof
+//RS             .proves(AccelerationTransform::TransientColumnCopy);
+//RS         let cross_mode_parity_parallel = vector.no_aliasing
+//RS             && vector.no_early_exit
+//RS             && vector.effect_free_body
+//RS             && vector.no_cross_iteration_dependencies
+//RS             && proof_parallel;
+//RS         let cross_mode_parity_column = vector.no_aliasing
+//RS             && vector.no_early_exit
+//RS             && vector.effect_free_body
+//RS             && vector.no_cross_iteration_dependencies
+//RS             && proof_column;
+//RS         let nested_reuse = column.workload.nested_reuse;
+//RS         let single_pass = column.workload.single_pass;
+//RS         // The gate asks whether the emitted binary runs under a release
+//RS         // profile, so the answer is decided by the emitted program itself.
+//RS         let release = "cfg!(not(debug_assertions))";
+//RS         let mut source = String::new();
+//RS         let _ = writeln!(
+//RS             source,
+//RS             "{pad}let __jet_accel_start = {start_expr};\n{pad}let __jet_accel_end = {end_expr};\n{pad}let __jet_accel_start_index = (__jet_accel_start as usize);\n{pad}let __jet_accel_range = (__jet_accel_start_index..(__jet_accel_end as usize));"
+//RS         );
+//RS         if use_column_copy {
+//RS             let Some(slots) = column_slots else {
+//RS                 return None;
+//RS             };
+//RS             for ((collection, field), slot) in slots {
+//RS                 let access = vector.accesses.iter().find(|access| {
+//RS                     access.field == Some(*field)
+//RS                         && access.column_index.is_some()
+//RS                         && matches!(
+//RS                             access.root,
+//RS                             MirVectorAccessRoot::Value(value) if value == *collection
+//RS                         )
+//RS                 })?;
+//RS                 let column_index = access.column_index?;
+//RS                 let collection =
+//RS                     self.borrowed_value_reference(function, *collection, MirAccess::Read);
+//RS                 let _ = writeln!(
+//RS                     source,
+//RS                     "{pad}let __jet_accel_typed_column_{slot} = ({collection}).project_column({column_index}usize, |__cell| __cell.jet_col_{}_ref().clone());",
+//RS                     self.field_name(*field)
+//RS                 );
+//RS             }
+//RS         }
+//RS         if use_column_copy {
+//RS             let Some(slots) = column_slots else {
+//RS                 return None;
+//RS             };
+//RS             let Some((sample_body, sample_result)) = self.acceleration_callback_body(
+//RS                 function,
+//RS                 vector,
+//RS                 cursor,
+//RS                 outputs,
+//RS                 loop_places,
+//RS                 "(__jet_accel_index as _)",
+//RS                 None,
+//RS                 indent + 16,
+//RS             ) else {
+//RS                 return None;
+//RS             };
+//RS             let Some((copied_body, copied_result)) = self.acceleration_callback_body(
+//RS                 function,
+//RS                 vector,
+//RS                 cursor,
+//RS                 outputs,
+//RS                 loop_places,
+//RS                 "(__jet_accel_index as _)",
+//RS                 Some(("__jet_accel_columns", "__jet_accel_offset", slots)),
+//RS                 indent + 20,
+//RS             ) else {
+//RS                 return None;
+//RS             };
+//RS             let Some((original_body, original_result)) = self.acceleration_callback_body(
+//RS                 function,
+//RS                 vector,
+//RS                 cursor,
+//RS                 outputs,
+//RS                 loop_places,
+//RS                 "(__jet_accel_index as _)",
+//RS                 None,
+//RS                 indent + 12,
+//RS             ) else {
+//RS                 return None;
+//RS             };
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}let (__jet_accel_column_sample, __jet_accel_column_decision) = if !{release} {{"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    let mut __jet_accel_input = JetAccelerationGateInput::deferred(__jet_accel_range.len(), {release});"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    __jet_accel_input.cross_mode_parity_proven = {cross_mode_parity_column};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    __jet_accel_input.nested_reuse = {nested_reuse};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    __jet_accel_input.single_pass = {single_pass};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    __jet_accel_input.proof_proven = {proof_column};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    (None, JetAccelerationGate::d_accel1().evaluate(JetAccelerationTransform::TransientColumnCopy, __jet_accel_input))"
+//RS             );
+//RS             let _ = writeln!(source, "{pad}}} else {{");
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    match jet_acceleration_first_chunk(__jet_accel_range.len(), |__jet_accel_sample_range| {{"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}        __jet_accel_sample_range.map(|__jet_accel_offset| {{"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            let __jet_accel_index = __jet_accel_start_index + __jet_accel_offset;"
+//RS             );
+//RS             source.push_str(&sample_body);
+//RS             let _ = writeln!(source, "{pad}            {sample_result}");
+//RS             let _ = writeln!(source, "{pad}        }}).collect::<Vec<_>>()");
+//RS             let _ = writeln!(source, "{pad}    }}) {{");
+//RS             let _ = writeln!(source, "{pad}        Some(__jet_accel_sample) => {{");
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            let __jet_accel_costs = JetAccelerationRuntimeCosts::once(__jet_accel_range.len());"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            let __jet_accel_input = JetAccelerationGateInput::measured(__jet_accel_range.len(), __jet_accel_sample.sample_items, __jet_accel_sample.sample_nanos, __jet_accel_costs, {release}, {cross_mode_parity_column}, {proof_column}, {nested_reuse}, {single_pass}, None);"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            let __jet_accel_decision = JetAccelerationGate::d_accel1().evaluate(JetAccelerationTransform::TransientColumnCopy, __jet_accel_input);"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            (Some(__jet_accel_sample), __jet_accel_decision)"
+//RS             );
+//RS             let _ = writeln!(source, "{pad}        }}");
+//RS             let _ = writeln!(source, "{pad}        None => {{");
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            let mut __jet_accel_input = JetAccelerationGateInput::deferred(__jet_accel_range.len(), {release});"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            __jet_accel_input.cross_mode_parity_proven = {cross_mode_parity_column};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            __jet_accel_input.nested_reuse = {nested_reuse};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            __jet_accel_input.single_pass = {single_pass};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            __jet_accel_input.proof_proven = {proof_column};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            (None, JetAccelerationGate::d_accel1().evaluate(JetAccelerationTransform::TransientColumnCopy, __jet_accel_input))"
+//RS             );
+//RS             let _ = writeln!(source, "{pad}        }}");
+//RS             let _ = writeln!(source, "{pad}    }}");
+//RS             let _ = writeln!(source, "{pad}}};");
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}jet_acceleration_publish({function_key}, {loop_header}, {source_start}, {source_end}, &__jet_accel_column_decision);"
+//RS             );
+//RS             let project = slots
+//RS                 .iter()
+//RS                 .map(|((_collection, _field), slot)| {
+//RS                     Some(format!(
+//RS                         "__jet_accel_typed_column_{slot}[(__jet_accel_source_index as usize)].clone()"
+//RS                     ))
+//RS                 })
+//RS                 .collect::<Option<Vec<_>>>()?;
+//RS             let project = if project.len() == 1 {
+//RS                 format!("({},)", project[0])
+//RS             } else {
+//RS                 format!("({},)", project.join(", "))
+//RS             };
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}let __jet_accel_results = jet_list_accel_column_range_map_with_sample("
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    __jet_accel_range.clone(),\n{pad}    __jet_accel_column_sample,\n{pad}    __jet_accel_column_decision.selected(),"
+//RS             );
+//RS             let _ = writeln!(source, "{pad}    |__jet_accel_source_index| {project},");
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    |__jet_accel_columns, __jet_accel_range| {{\n{pad}        let __jet_accel_block_start = __jet_accel_range.start;\n{pad}        __jet_accel_range.map(|__jet_accel_absolute| {{\n{pad}            let __jet_accel_offset = __jet_accel_absolute - __jet_accel_block_start;\n{pad}            let __jet_accel_index = __jet_accel_absolute;"
+//RS             );
+//RS             source.push_str(&copied_body);
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            {copied_result}\n{pad}        }}).collect()\n{pad}    }},"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}    |__jet_accel_source_range| {{\n{pad}        __jet_accel_source_range.map(|__jet_accel_index| {{"
+//RS             );
+//RS             source.push_str(&original_body);
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}            {original_result}\n{pad}        }}).collect()\n{pad}    }},\n{pad});"
+//RS             );
+//RS         } else {
+//RS             let Some((body, result)) = self.acceleration_callback_body(
+//RS                 function,
+//RS                 vector,
+//RS                 cursor,
+//RS                 outputs,
+//RS                 loop_places,
+//RS                 "(__jet_accel_index as _)",
+//RS                 None,
+//RS                 indent + 8,
+//RS             ) else {
+//RS                 return None;
+//RS             };
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}let (__jet_accel_results, __jet_accel_parallel_decision) = jet_list_accel_range_map(\n{pad}    __jet_accel_range.clone(),\n{pad}    std::thread::available_parallelism().map(|workers| workers.get()).unwrap_or(1),\n{pad}    {release},\n{pad}    {cross_mode_parity_parallel},\n{pad}    {proof_parallel},\n{pad}    None,\n{pad}    |__jet_accel_index| {{"
+//RS             );
+//RS             source.push_str(&body);
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}        {result}\n{pad}    }}\n{pad});\n{pad}jet_acceleration_publish({function_key}, {loop_header}, {source_start}, {source_end}, &__jet_accel_parallel_decision);"
+//RS             );
+//RS         }
+//RS         let _ = writeln!(
+//RS             source,
+//RS             "{pad}for (__jet_accel_offset, __jet_accel_result) in __jet_accel_results.into_iter().enumerate() {{\n{pad}    let __jet_accel_index = __jet_accel_start_index + __jet_accel_offset;"
+//RS         );
+//RS         let names = outputs
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(index, _)| format!("__jet_accel_output_{index}"))
+//RS             .collect::<Vec<_>>();
+//RS         let _ = writeln!(
+//RS             source,
+//RS             "{pad}    let ({},) = __jet_accel_result;",
+//RS             names.join(", ")
+//RS         );
+//RS         for (index, (place, _)) in outputs.iter().enumerate() {
+//RS             let write = self.acceleration_write_place_expr(
+//RS                 function,
+//RS                 *place,
+//RS                 "__jet_accel_index",
+//RS                 &names[index],
+//RS             )?;
+//RS             let _ = writeln!(source, "{pad}    {write};");
+//RS         }
+//RS         let _ = writeln!(source, "{pad}}}");
+//RS         self.set_pc(vector.loop_header, exit, &mut source, indent);
+//RS         Some(source)
+//RS     }
+//RS 
+//RS     fn acceleration_output_writes(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         vector: &MirVectorFact,
+//RS         cursor: MirValueId,
+//RS     ) -> Option<(Vec<(MirPlaceId, MirValueId)>, BTreeSet<MirPlaceId>)> {
+//RS         let mut outputs = Vec::new();
+//RS         let mut loop_places = BTreeSet::new();
+//RS         for block_id in &vector.body_blocks {
+//RS             let block = self.block_row(function, *block_id)?;
+//RS             if !matches!(block.terminator, MirTerminator::Jump { .. }) {
+//RS                 return None;
+//RS             }
+//RS             for instruction in &block.instructions {
+//RS                 let MirOperation::WritePlace { place, value } = &instruction.operation else {
+//RS                     continue;
+//RS                 };
+//RS                 let row = function
+//RS                     .places
+//RS                     .iter()
+//RS                     .find(|candidate| candidate.id == *place)?;
+//RS                 let cursor_index = row.projections.iter().enumerate().find_map(|(index, projection)| {
+//RS                     matches!(
+//RS                         projection,
+//RS                         MirProjection::Index { index: candidate, kind: MirIndexKind::FixedListProof, .. }
+//RS                             if self.canonical_cursor_value_matches(function, *candidate, cursor)
+//RS                     )
+//RS                     .then_some(index)
+//RS                 });
+//RS                 if let Some(index) = cursor_index {
+//RS                     if row.projections[..index]
+//RS                         .iter()
+//RS                         .any(|projection| matches!(projection, MirProjection::Index { .. }))
+//RS                         || row.projections[index + 1..]
+//RS                             .iter()
+//RS                             .any(|projection| !matches!(projection, MirProjection::Field { .. }))
+//RS                     {
+//RS                         return None;
+//RS                     }
+//RS                     outputs.push((*place, *value));
+//RS                 } else if row.projections.is_empty()
+//RS                     && self.acceleration_is_cursor_value(function, *value, cursor)
+//RS                 {
+//RS                     loop_places.insert(*place);
+//RS                 } else {
+//RS                     return None;
+//RS                 }
+//RS             }
+//RS         }
+//RS         (!outputs.is_empty()).then_some((outputs, loop_places))
+//RS     }
+//RS 
+//RS     fn acceleration_is_cursor_value(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS         cursor: MirValueId,
+//RS     ) -> bool {
+//RS         self.canonical_cursor_value_matches(function, value, cursor)
+//RS     }
+//RS     fn acceleration_column_slots(
+//RS         &self,
+//RS         vector: &MirVectorFact,
+//RS     ) -> Option<BTreeMap<(MirValueId, MirFieldId), usize>> {
+//RS         let mut slots = BTreeMap::new();
+//RS         for access in &vector.accesses {
+//RS             let (MirVectorAccessRoot::Value(collection), Some(field), Some(_)) =
+//RS                 (access.root, access.field, access.column_index)
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             if access.layout != MirVectorLayout::ColumnarDirect {
+//RS                 continue;
+//RS             }
+//RS             if !slots.contains_key(&(collection, field)) {
+//RS                 let slot = slots.len();
+//RS                 slots.insert((collection, field), slot);
+//RS             }
+//RS         }
+//RS         Some(slots)
+//RS     }
+//RS 
+//RS     fn acceleration_callback_body(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         vector: &MirVectorFact,
+//RS         cursor: MirValueId,
+//RS         outputs: &[(MirPlaceId, MirValueId)],
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         index_expr: &str,
+//RS         column_context: Option<(&str, &str, &BTreeMap<(MirValueId, MirFieldId), usize>)>,
+//RS         indent: usize,
+//RS     ) -> Option<(String, String)> {
+//RS         let mut defined = BTreeMap::new();
+//RS         let mut source = String::new();
+//RS         let mut values = Vec::with_capacity(outputs.len());
+//RS         for (_, value) in outputs {
+//RS             values.push(self.acceleration_value_expr(
+//RS                 function,
+//RS                 *value,
+//RS                 vector,
+//RS                 cursor,
+//RS                 loop_places,
+//RS                 index_expr,
+//RS                 column_context,
+//RS                 &mut defined,
+//RS                 &mut source,
+//RS                 indent,
+//RS             )?);
+//RS         }
+//RS         let result = format!("({},)", values.join(", "));
+//RS         Some((source, result))
+//RS     }
+//RS 
+//RS     fn acceleration_value_expr(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS         vector: &MirVectorFact,
+//RS         cursor: MirValueId,
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         index_expr: &str,
+//RS         column_context: Option<(&str, &str, &BTreeMap<(MirValueId, MirFieldId), usize>)>,
+//RS         defined: &mut BTreeMap<MirValueId, String>,
+//RS         source: &mut String,
+//RS         indent: usize,
+//RS     ) -> Option<String> {
+//RS         if let Some(name) = defined.get(&value) {
+//RS             return Some(name.clone());
+//RS         }
+//RS         let instruction = self.value_instruction(function, value)?;
+//RS         let expression = match &instruction.operation {
+//RS             MirOperation::Constant(constant) => {
+//RS                 self.constant_for_type(constant, self.value_type(function, value))
+//RS             }
+//RS             MirOperation::LoopRangeValue {
+//RS                 cursor: candidate, ..
+//RS             }
+//RS             | MirOperation::LoopIterValue {
+//RS                 cursor: candidate, ..
+//RS             } if *candidate == cursor => index_expr.to_string(),
+//RS             MirOperation::ReadPlace(_)
+//RS                 if self.canonical_cursor_value_matches(function, value, cursor) =>
+//RS             {
+//RS                 index_expr.to_string()
+//RS             }
+//RS             MirOperation::ReadPlace(place) => self.acceleration_place_expr(
+//RS                 function,
+//RS                 *place,
+//RS                 vector,
+//RS                 cursor,
+//RS                 loop_places,
+//RS                 index_expr,
+//RS                 column_context,
+//RS             )?,
+//RS             MirOperation::Copy { value, fact } => {
+//RS                 if *fact == MirCopyFact::ViewMaterialize {
+//RS                     return None;
+//RS                 }
+//RS                 self.acceleration_value_expr(
+//RS                     function,
+//RS                     *value,
+//RS                     vector,
+//RS                     cursor,
+//RS                     loop_places,
+//RS                     index_expr,
+//RS                     column_context,
+//RS                     defined,
+//RS                     source,
+//RS                     indent,
+//RS                 )?
+//RS             }
+//RS             MirOperation::TraitBox { .. } => return None,
+//RS             MirOperation::AttachTag { value, .. } => self
+//RS                 .acceleration_value_expr(
+//RS                     function,
+//RS                     *value,
+//RS                     vector,
+//RS                     cursor,
+//RS                     loop_places,
+//RS                     index_expr,
+//RS                     column_context,
+//RS                     defined,
+//RS                     source,
+//RS                     indent,
+//RS                 )?,
+//RS             MirOperation::Index {
+//RS                 base,
+//RS                 index,
+//RS                 kind: MirIndexKind::FixedListProof,
+//RS                 ..
+//RS             } if self.canonical_cursor_value_matches(function, *index, cursor)
+//RS                 && column_context.is_none() =>
+//RS             {
+//RS                 format!(
+//RS                     "({})[(({} ) as usize)].clone()",
+//RS                     self.value_borrow(*base),
+//RS                     index_expr
+//RS                 )
+//RS             }
+//RS             MirOperation::Field { base, field } => self.acceleration_field_expr(
+//RS                 function,
+//RS                 *base,
+//RS                 *field,
+//RS                 vector,
+//RS                 cursor,
+//RS                 loop_places,
+//RS                 index_expr,
+//RS                 column_context,
+//RS                 defined,
+//RS                 source,
+//RS                 indent,
+//RS             )?,
+//RS             MirOperation::Unary { op, value } => {
+//RS                 let operand = self.acceleration_value_expr(
+//RS                     function,
+//RS                     *value,
+//RS                     vector,
+//RS                     cursor,
+//RS                     loop_places,
+//RS                     index_expr,
+//RS                     column_context,
+//RS                     defined,
+//RS                     source,
+//RS                     indent,
+//RS                 )?;
+//RS                 self.unary(*op, operand, self.value_type(function, *value))
+//RS             }
+//RS             MirOperation::Binary {
+//RS                 op,
+//RS                 dispatch,
+//RS                 left,
+//RS                 right,
+//RS             } => {
+//RS                 let left = self.acceleration_value_expr(
+//RS                     function,
+//RS                     *left,
+//RS                     vector,
+//RS                     cursor,
+//RS                     loop_places,
+//RS                     index_expr,
+//RS                     column_context,
+//RS                     defined,
+//RS                     source,
+//RS                     indent,
+//RS                 )?;
+//RS                 let right = self.acceleration_value_expr(
+//RS                     function,
+//RS                     *right,
+//RS                     vector,
+//RS                     cursor,
+//RS                     loop_places,
+//RS                     index_expr,
+//RS                     column_context,
+//RS                     defined,
+//RS                     source,
+//RS                     indent,
+//RS                 )?;
+//RS                 self.acceleration_binary(*op, dispatch, left, right)
+//RS             }
+//RS             MirOperation::Semantic(MirSemanticOp::ColumnarRead {
+//RS                 base,
+//RS                 column,
+//RS                 column_index,
+//RS                 index,
+//RS                 ..
+//RS             }) if self.canonical_cursor_value_matches(function, *index, cursor) => {
+//RS                 if let Some((columns, offset, slots)) = column_context {
+//RS                     if let Some(slot) = slots.get(&(*base, *column)) {
+//RS                         format!("({columns}[{offset}].{slot}).clone()")
+//RS                     } else {
+//RS                         return None;
+//RS                     }
+//RS                 } else {
+//RS                     format!(
+//RS                         "({}).column({column_index})[(({} ) as usize)].clone().jet_col_{}()",
+//RS                         self.value_borrow(*base),
+//RS                         index_expr,
+//RS                         self.field_name(*column)
+//RS                     )
+//RS                 }
+//RS             }
+//RS             MirOperation::Parameter { .. } => self.value_owned(value),
+//RS             MirOperation::Capture { .. } => self.value_owned(value),
+//RS             MirOperation::Global { name } => self.global_expression(name),
+//RS             _ => return None,
+//RS         };
+//RS         let name = format!("__jet_accel_v{}", value.0);
+//RS         let ty = self.rust_type(self.value_type(function, value));
+//RS         let _ = writeln!(
+//RS             source,
+//RS             "{:indent$}let {name}: {ty} = {expression};",
+//RS             "",
+//RS             indent = indent
+//RS         );
+//RS         defined.insert(value, name.clone());
+//RS         Some(name)
+//RS     }
+//RS 
+//RS     fn acceleration_field_expr(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         base: MirValueId,
+//RS         field: MirFieldId,
+//RS         vector: &MirVectorFact,
+//RS         cursor: MirValueId,
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         index_expr: &str,
+//RS         column_context: Option<(&str, &str, &BTreeMap<(MirValueId, MirFieldId), usize>)>,
+//RS         defined: &mut BTreeMap<MirValueId, String>,
+//RS         source: &mut String,
+//RS         indent: usize,
+//RS     ) -> Option<String> {
+//RS         let base_instruction = self.value_instruction(function, base)?;
+//RS         if let MirOperation::Index {
+//RS             base: collection,
+//RS             index,
+//RS             kind: MirIndexKind::FixedListProof,
+//RS             ..
+//RS         } = &base_instruction.operation
+//RS         {
+//RS             if !self.canonical_cursor_value_matches(function, *index, cursor) {
+//RS                 return None;
+//RS             }
+//RS             if let Some((columns, offset, slots)) = column_context {
+//RS                 if let Some(slot) = slots.get(&(*collection, field)) {
+//RS                     return Some(format!("({columns}[{offset}].{slot}).clone()"));
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             if let Some(access) = vector.accesses.iter().find(|access| {
+//RS                 access.field == Some(field)
+//RS                     && matches!(
+//RS                         access.root,
+//RS                         MirVectorAccessRoot::Value(value) if value == *collection
+//RS                     )
+//RS             }) {
+//RS                 if access.layout == MirVectorLayout::ColumnarDirect {
+//RS                     let column = access.column_index?;
+//RS                     return Some(format!(
+//RS                         "({}).column({column})[(({} ) as usize)].clone().jet_col_{}()",
+//RS                         self.value_borrow(*collection),
+//RS                         index_expr,
+//RS                         self.field_name(field)
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             return Some(format!(
+//RS                 "({})[(({} ) as usize)].{}.clone()",
+//RS                 self.value_borrow(*collection),
+//RS                 index_expr,
+//RS                 self.field_name(field)
+//RS             ));
+//RS         }
+//RS         let base = self.acceleration_value_expr(
+//RS             function,
+//RS             base,
+//RS             vector,
+//RS             cursor,
+//RS             loop_places,
+//RS             index_expr,
+//RS             column_context,
+//RS             defined,
+//RS             source,
+//RS             indent,
+//RS         )?;
+//RS         Some(format!("({base}).{}.clone()", self.field_name(field)))
+//RS     }
+//RS     fn acceleration_place_expr(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         place_id: MirPlaceId,
+//RS         _vector: &MirVectorFact,
+//RS         cursor: MirValueId,
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         index_expr: &str,
+//RS         column_context: Option<(&str, &str, &BTreeMap<(MirValueId, MirFieldId), usize>)>,
+//RS     ) -> Option<String> {
+//RS         let place = function.places.iter().find(|place| place.id == place_id)?;
+//RS         if place.projections.is_empty() {
+//RS             if loop_places.contains(&place_id) {
+//RS                 return Some(index_expr.to_string());
+//RS             }
+//RS             return Some(self.place_read(function, place_id));
+//RS         }
+//RS         let index_pos = place.projections.iter().position(|projection| {
+//RS             matches!(
+//RS                 projection,
+//RS                 MirProjection::Index {
+//RS                     kind: MirIndexKind::FixedListProof,
+//RS                     index,
+//RS                     ..
+//RS                 } if self.canonical_cursor_value_matches(function, *index, cursor)
+//RS             )
+//RS         })?;
+//RS         if place.projections[..index_pos]
+//RS             .iter()
+//RS             .any(|projection| matches!(projection, MirProjection::Index { .. }))
+//RS             || place.projections[index_pos + 1..]
+//RS                 .iter()
+//RS                 .any(|projection| !matches!(projection, MirProjection::Field { .. }))
+//RS         {
+//RS             return None;
+//RS         }
+//RS         if column_context.is_some() {
+//RS             return None;
+//RS         }
+//RS         let base = self.place_base(
+//RS             function,
+//RS             &place.base,
+//RS             false,
+//RS             &place.projections[..index_pos],
+//RS         );
+//RS         let suffix = place.projections[index_pos + 1..]
+//RS             .iter()
+//RS             .map(|projection| match projection {
+//RS                 MirProjection::Field { field, .. } => Some(format!(".{}", self.field_name(*field))),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()?
+//RS             .join("");
+//RS         Some(format!(
+//RS             "({base})[(({} ) as usize)]{suffix}.clone()",
+//RS             index_expr
+//RS         ))
+//RS     }
+//RS 
+//RS     fn acceleration_binary(
+//RS         &self,
+//RS         op: MirBinaryOp,
+//RS         dispatch: &MirBinaryDispatch,
+//RS         left: String,
+//RS         right: String,
+//RS     ) -> String {
+//RS         match dispatch {
+//RS             MirBinaryDispatch::Primitive => self.binary(op, left, right),
+//RS             MirBinaryDispatch::Prelude { call, location } => {
+//RS                 let mut args = vec![left, right];
+//RS                 let extras = location
+//RS                     .as_ref()
+//RS                     .map(|location| {
+//RS                         vec![
+//RS                             format!("{:?}", self.source_file_path(location.file)),
+//RS                             format!("{}u32", location.line),
+//RS                         ]
+//RS                     })
+//RS                     .unwrap_or_default();
+//RS                 self.append_prelude_context(*call, &mut args, &extras);
+//RS                 let row = self.prelude_row(*call);
+//RS                 self.validate_prelude_count(row, args.len());
+//RS                 let args = args
+//RS                     .into_iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, arg)| {
+//RS                         if row.signature.borrow_mask[index]
+//RS                             || Self::canonical_math_borrow(&self.prelude_symbol(*call), index)
+//RS                         {
+//RS                             format!("&({arg})")
+//RS                         } else {
+//RS                             arg
+//RS                         }
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 format!("{}({args})", self.prelude_symbol(*call))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn acceleration_write_place_expr(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         place_id: MirPlaceId,
+//RS         index_expr: &str,
+//RS         value: &str,
+//RS     ) -> Option<String> {
+//RS         let place = function.places.iter().find(|place| place.id == place_id)?;
+//RS         let index_pos = place.projections.iter().position(|projection| {
+//RS             matches!(
+//RS                 projection,
+//RS                 MirProjection::Index {
+//RS                     kind: MirIndexKind::FixedListProof,
+//RS                     ..
+//RS                 }
+//RS             )
+//RS         })?;
+//RS         let base = self.place_base(function, &place.base, true, &place.projections[..index_pos]);
+//RS         let suffix = place.projections[index_pos + 1..]
+//RS             .iter()
+//RS             .map(|projection| match projection {
+//RS                 MirProjection::Field { field, .. } => Some(format!(".{}", self.field_name(*field))),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()?
+//RS             .join("");
+//RS         if suffix.is_empty() {
+//RS             return None;
+//RS         }
+//RS         Some(format!(
+//RS             "({base})[(({} ) as usize)]{suffix} = {value}",
+//RS             index_expr
+//RS         ))
+//RS     }
+//RS 
+//RS     fn emit_vector_block(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         block: &MirBasicBlock,
+//RS         out: &mut String,
+//RS         indent: usize,
+//RS     ) -> bool {
+//RS         if self.coverage_enabled() || function.is_scalar {
+//RS             return false;
+//RS         }
+//RS         let Some(fact) = function
+//RS             .optimization
+//RS             .vector_facts
+//RS             .iter()
+//RS             .find(|fact| fact.loop_header == block.id && fact.decision.is_eligible())
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         if block.instructions.iter().any(|instruction| {
+//RS             matches!(
+//RS                 &instruction.operation,
+//RS                 MirOperation::InitializeUninit { .. }
+//RS             )
+//RS         }) || fact
+//RS             .body_blocks
+//RS             .iter()
+//RS             .filter_map(|block_id| {
+//RS                 function
+//RS                     .blocks
+//RS                     .iter()
+//RS                     .find(|candidate| candidate.id == *block_id)
+//RS             })
+//RS             .flat_map(|block| block.instructions.iter())
+//RS             .any(|instruction| {
+//RS                 matches!(
+//RS                     &instruction.operation,
+//RS                     MirOperation::InitializeUninit { .. }
+//RS                 )
+//RS             })
+//RS         {
+//RS             return false;
+//RS         }
+//RS         match fact.rule {
+//RS             MirVectorRule::Elementwise | MirVectorRule::FieldAccess => {}
+//RS             MirVectorRule::ConditionalAccumulate => {
+//RS                 if !D_FRED1_FIXED_ORDER.is_canonical() {
+//RS                     panic!("MIR conditional vector emission requires canonical D-FRED1 order");
+//RS                 }
+//RS                 if self.vector_rmw_plan(function, fact).is_none() {
+//RS                     panic!("MIR conditional vector fact has no canonical accumulator plan");
+//RS                 }
+//RS             }
+//RS             MirVectorRule::EarlyExitSearch => {}
+//RS             MirVectorRule::Reduction => {
+//RS                 if !D_FRED1_FIXED_ORDER.is_canonical() {
+//RS                     panic!("MIR reduction vector emission requires canonical D-FRED1 order");
+//RS                 }
+//RS                 if fact.fixed_reduction.is_none() {
+//RS                     panic!("MIR reduction vector fact is missing its fixed reduction row");
+//RS                 }
+//RS             }
+//RS         }
+//RS         let Some(row) = function
+//RS             .optimization
+//RS             .loop_facts
+//RS             .iter()
+//RS             .find(|row| row.header == block.id)
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let Some(cursor) = fact.cursor else {
+//RS             return false;
+//RS         };
+//RS         let Some(width) = fact.lane_width else {
+//RS             return false;
+//RS         };
+//RS         let Some((start, end)) = self.canonical_counted_bounds(function, fact) else {
+//RS             return false;
+//RS         };
+//RS         let Some(exit) = fact
+//RS             .fixed_reduction
+//RS             .as_ref()
+//RS             .map(|fixed| fixed.exit)
+//RS             .or(row.exit)
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let source = match width {
+//RS             2 => self.vector_loop_source::<2>(function, fact, cursor, start, end, exit, indent),
+//RS             4 => self.vector_loop_source::<4>(function, fact, cursor, start, end, exit, indent),
+//RS             8 => self.vector_loop_source::<8>(function, fact, cursor, start, end, exit, indent),
+//RS             _ => None,
+//RS         };
+//RS         let Some(source) = source else {
+//RS             return false;
+//RS         };
+//RS         out.push_str(&source);
+//RS         true
+//RS     }
+//RS 
+//RS     fn vector_loop_source<const N: usize>(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         fact: &MirVectorFact,
+//RS         cursor: MirValueId,
+//RS         start: MirValueId,
+//RS         end: MirValueId,
+//RS         exit: MirBlockId,
+//RS         indent: usize,
+//RS     ) -> Option<String> {
+//RS         let mut loop_places = BTreeSet::new();
+//RS         for block_id in &fact.body_blocks {
+//RS             let block = self.block_row(function, *block_id)?;
+//RS             for instruction in &block.instructions {
+//RS                 let MirOperation::WritePlace { place, value } = &instruction.operation else {
+//RS                     continue;
+//RS                 };
+//RS                 if self.vector_is_loop_value(function, *value, cursor) {
+//RS                     loop_places.insert(*place);
+//RS                 }
+//RS             }
+//RS         }
+//RS         let rmw = if matches!(
+//RS             fact.rule,
+//RS             MirVectorRule::ConditionalAccumulate | MirVectorRule::Reduction
+//RS         ) {
+//RS             Some(
+//RS                 self.vector_rmw_plan(function, fact)
+//RS                     .unwrap_or_else(|| panic!("MIR vector fact has no canonical accumulator plan")),
+//RS             )
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let condition = if fact.rule == MirVectorRule::ConditionalAccumulate {
+//RS             Some(self.vector_condition(function, fact)?)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let early = if fact.rule == MirVectorRule::EarlyExitSearch {
+//RS             Some(self.vector_early_return(function, fact)?)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let chunk = self.vector_chunk_source::<N>(
+//RS             function,
+//RS             fact,
+//RS             cursor,
+//RS             &loop_places,
+//RS             rmw.as_ref(),
+//RS             condition,
+//RS             early.as_ref(),
+//RS             "__jet_vec_index",
+//RS             "__jet_vec_start",
+//RS             indent + 4,
+//RS         )?;
+//RS         let tail = self.vector_chunk_source::<1>(
+//RS             function,
+//RS             fact,
+//RS             cursor,
+//RS             &loop_places,
+//RS             rmw.as_ref(),
+//RS             condition,
+//RS             early.as_ref(),
+//RS             "__jet_vec_index",
+//RS             "__jet_vec_start",
+//RS             indent + 4,
+//RS         )?;
+//RS         let pad = " ".repeat(indent);
+//RS         let mut out = String::new();
+//RS         for (collection, field, column, slot) in self.vector_column_slots(fact) {
+//RS             let collection = self.borrowed_value_reference(function, collection, MirAccess::Read);
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{pad}let __jet_vec_column_{slot} = ({collection}).project_column({column}usize, |__cell| __cell.jet_col_{}_ref().clone());",
+//RS                 self.field_name(field)
+//RS             );
+//RS         }
+//RS         let start = self.value_owned(start);
+//RS         let end = self.value_owned(end);
+//RS         let _ = writeln!(out, "{pad}let __jet_vec_start = {start};");
+//RS         let _ = writeln!(out, "{pad}let mut __jet_vec_index = __jet_vec_start;");
+//RS         let _ = writeln!(out, "{pad}let __jet_vec_end = {end};");
+//RS         if let Some((place, _, seed)) = rmw.as_ref() {
+//RS             let row = function
+//RS                 .places
+//RS                 .iter()
+//RS                 .find(|candidate| candidate.id == *place)?;
+//RS             let ty = self.rust_type(&row.ty);
+//RS             let seed = self.vector_seed_expr(function, *seed);
+//RS             let _ = writeln!(out, "{pad}let __jet_vec_seed: {ty} = {seed};");
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{pad}let mut __jet_vec_acc: [{ty}; 8] = jet_simd_seed_fixed(__jet_vec_seed);"
+//RS             );
+//RS             let _ = writeln!(out, "{pad}let mut __jet_vec_seen = false;");
+//RS         }
+//RS         let default_int_range = self.vector_default_int_range(function, fact);
+//RS         let (chunk_condition, chunk_advance, tail_condition, tail_advance) = if default_int_range {
+//RS             let width = format!("{}jet_std::jet_int_from_i64({N})", self.config.root_prefix);
+//RS             (
+//RS                 format!(
+//RS                     "{}jet_std::jet_int_compare(__jet_vec_index, __jet_vec_end) < 0 \
+//RS                      && {}jet_std::jet_int_compare({}jet_std::jet_int_add(__jet_vec_index, {width}), __jet_vec_end) <= 0",
+//RS                     self.config.root_prefix,
+//RS                     self.config.root_prefix,
+//RS                     self.config.root_prefix,
+//RS                 ),
+//RS                 format!(
+//RS                     "{}jet_std::jet_int_add(__jet_vec_index, {width})",
+//RS                     self.config.root_prefix
+//RS                 ),
+//RS                 format!(
+//RS                     "{}jet_std::jet_int_compare(__jet_vec_index, __jet_vec_end) < 0",
+//RS                     self.config.root_prefix
+//RS                 ),
+//RS                 format!(
+//RS                     "{}jet_std::jet_int_add(__jet_vec_index, {}jet_std::jet_int_from_i64(1))",
+//RS                     self.config.root_prefix,
+//RS                     self.config.root_prefix,
+//RS                 ),
+//RS             )
+//RS         } else {
+//RS             (
+//RS                 format!("__jet_vec_index < __jet_vec_end && __jet_vec_index.abs_diff(__jet_vec_end) >= {N}"),
+//RS                 format!("__jet_vec_index + {N}"),
+//RS                 "__jet_vec_index < __jet_vec_end".to_string(),
+//RS                 "__jet_vec_index + 1".to_string(),
+//RS             )
+//RS         };
+//RS         let _ = writeln!(out, "{pad}while {chunk_condition} {{");
+//RS         out.push_str(&chunk);
+//RS         let _ = writeln!(out, "{pad}    __jet_vec_index = {chunk_advance};");
+//RS         let _ = writeln!(out, "{pad}}}");
+//RS         let _ = writeln!(out, "{pad}while {tail_condition} {{");
+//RS         out.push_str(&tail);
+//RS         let _ = writeln!(out, "{pad}    __jet_vec_index = {tail_advance};");
+//RS         let _ = writeln!(out, "{pad}}}");
+//RS         if let Some((place, _, _)) = rmw {
+//RS             let row = function
+//RS                 .places
+//RS                 .iter()
+//RS                 .find(|candidate| candidate.id == place)?;
+//RS             let ty = self.rust_type(&row.ty);
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{pad}let __jet_vec_result: {ty} = if __jet_vec_seen {{ jet_simd_finish_fixed(&__jet_vec_acc) }} else {{ __jet_vec_seed }};"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 out,
+//RS                 "{pad}{};",
+//RS                 self.write_place_expr(function, place, None, "__jet_vec_result")
+//RS             );
+//RS         }
+//RS         self.set_pc(fact.loop_header, exit, &mut out, indent);
+//RS         Some(out)
+//RS     }
+//RS 
+//RS     fn vector_chunk_source<const N: usize>(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         fact: &MirVectorFact,
+//RS         _cursor: MirValueId,
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         rmw: Option<&(MirPlaceId, MirValueId, MirValueId)>,
+//RS         condition: Option<MirValueId>,
+//RS         early: Option<&(MirValueId, MirValueId, bool)>,
+//RS         index_name: &str,
+//RS         start_name: &str,
+//RS         indent: usize,
+//RS     ) -> Option<String> {
+//RS         let mut defined = BTreeSet::new();
+//RS         let mut source = String::new();
+//RS         let pad = " ".repeat(indent);
+//RS         for block_id in &fact.body_blocks {
+//RS             let block = self.block_row(function, *block_id)?;
+//RS             for instruction in &block.instructions {
+//RS                 if fact
+//RS                     .fixed_reduction
+//RS                     .as_ref()
+//RS                     .is_some_and(|fixed| !fixed.source_operations.contains(&instruction.id))
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 match &instruction.operation {
+//RS                     MirOperation::WritePlace { place, value } => {
+//RS                         if loop_places.contains(place)
+//RS                             || rmw.is_some_and(|(target, _, _)| target == place)
+//RS                         {
+//RS                             continue;
+//RS                         }
+//RS                         let expression = self.vector_value_expr(
+//RS                             function,
+//RS                             *value,
+//RS                             fact,
+//RS                             index_name,
+//RS                             &defined,
+//RS                             loop_places,
+//RS                             N,
+//RS                         )?;
+//RS                         source.push_str(&self.vector_store(
+//RS                             function,
+//RS                             *place,
+//RS                             fact,
+//RS                             &expression,
+//RS                             index_name,
+//RS                             N,
+//RS                         )?);
+//RS                     }
+//RS                     MirOperation::ScopeEnter { .. } | MirOperation::ScopeExit { .. } => {}
+//RS                     operation => {
+//RS                         let Some(result) = instruction.result else {
+//RS                             if !matches!(
+//RS                                 operation,
+//RS                                 MirOperation::LoopRangeValue { .. }
+//RS                                     | MirOperation::LoopIterValue { .. }
+//RS                             ) {
+//RS                                 continue;
+//RS                             }
+//RS                             return None;
+//RS                         };
+//RS                         let expression = self.vector_value_expr(
+//RS                             function,
+//RS                             result,
+//RS                             fact,
+//RS                             index_name,
+//RS                             &defined,
+//RS                             loop_places,
+//RS                             N,
+//RS                         )?;
+//RS                         let ty = self.rust_type(self.value_type(function, result));
+//RS                         let _ = writeln!(
+//RS                             source,
+//RS                             "{pad}let __jet_vec_v{}: [{ty}; {N}] = {expression};",
+//RS                             result.0
+//RS                         );
+//RS                         defined.insert(result);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             match &block.terminator {
+//RS                 MirTerminator::Jump { .. } => {}
+//RS                 MirTerminator::Branch {
+//RS                     condition: branch_condition,
+//RS                     ..
+//RS                 } if fact.rule == MirVectorRule::ConditionalAccumulate
+//RS                     && Some(*branch_condition) == condition => {}
+//RS                 MirTerminator::Branch { condition, .. }
+//RS                     if fact.rule == MirVectorRule::EarlyExitSearch
+//RS                         && early.is_some_and(|&(value, _, _)| value == *condition) => {}
+//RS                 _ => {
+//RS                     if !matches!(
+//RS                         fact.rule,
+//RS                         MirVectorRule::ConditionalAccumulate | MirVectorRule::EarlyExitSearch
+//RS                     ) {
+//RS                         return None;
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         let mut required = BTreeSet::new();
+//RS         if let Some(condition) = condition {
+//RS             required.insert(condition);
+//RS         }
+//RS         if let Some((condition, return_value, _)) = early {
+//RS             required.insert(*condition);
+//RS             required.insert(*return_value);
+//RS         }
+//RS         for value in required {
+//RS             if defined.contains(&value) {
+//RS                 continue;
+//RS             }
+//RS             let expression = self.vector_value_expr(
+//RS                 function,
+//RS                 value,
+//RS                 fact,
+//RS                 index_name,
+//RS                 &defined,
+//RS                 loop_places,
+//RS                 N,
+//RS             )?;
+//RS             let ty = self.rust_type(self.value_type(function, value));
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}let __jet_vec_v{}: [{ty}; {N}] = {expression};",
+//RS                 value.0
+//RS             );
+//RS             defined.insert(value);
+//RS         }
+//RS         if let Some(condition) = condition {
+//RS             let mask = self.vector_array_name(condition);
+//RS             let Some((_, addend, _)) = rmw else {
+//RS                 return None;
+//RS             };
+//RS             let addend = self.vector_array_name(*addend);
+//RS             let lane = self.fixed_reduction_lane_expr(function, fact, index_name, start_name);
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}jet_simd_accumulate_masked_fixed(&mut __jet_vec_acc, &{addend}, &{mask}, {lane});"
+//RS             );
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}if {mask}.iter().any(|selected| *selected) {{ __jet_vec_seen = true; }}"
+//RS             );
+//RS         } else if let Some((_, addend, _)) = rmw {
+//RS             let addend = self.vector_array_name(*addend);
+//RS             let lane = self.fixed_reduction_lane_expr(function, fact, index_name, start_name);
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}jet_simd_accumulate_fixed(&mut __jet_vec_acc, &{addend}, {lane});"
+//RS             );
+//RS             source.push_str(&format!("{pad}__jet_vec_seen = true;\n"));
+//RS         }
+//RS         if let Some((condition, return_value, early_on_then)) = early {
+//RS             let condition = self.vector_array_name(*condition);
+//RS             let mask = if *early_on_then {
+//RS                 condition
+//RS             } else {
+//RS                 format!("core::array::from_fn(|lane| !{condition}[lane])")
+//RS             };
+//RS             let value = self.vector_array_name(*return_value);
+//RS             let _ = writeln!(
+//RS                 source,
+//RS                 "{pad}if let Some(__jet_vec_lane) = {mask}.iter().position(|value| *value) {{"
+//RS             );
+//RS             let _ = writeln!(source, "{pad}    return {value}[__jet_vec_lane];");
+//RS             let _ = writeln!(source, "{pad}}}");
+//RS         }
+//RS         Some(source)
+//RS     }
+//RS     fn vector_column_slots(
+//RS         &self,
+//RS         fact: &MirVectorFact,
+//RS     ) -> Vec<(MirValueId, MirFieldId, usize, usize)> {
+//RS         let mut slots = BTreeMap::new();
+//RS         for access in &fact.accesses {
+//RS             let (MirVectorAccessRoot::Value(collection), Some(field), Some(column)) =
+//RS                 (access.root, access.field, access.column_index)
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             if access.layout != MirVectorLayout::ColumnarDirect {
+//RS                 continue;
+//RS             }
+//RS             let slot = slots.len();
+//RS             slots.entry((collection, field)).or_insert((column, slot));
+//RS         }
+//RS         slots
+//RS             .into_iter()
+//RS             .map(|((collection, field), (column, slot))| (collection, field, column, slot))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn vector_column_slot(
+//RS         &self,
+//RS         fact: &MirVectorFact,
+//RS         collection: MirValueId,
+//RS         field: MirFieldId,
+//RS     ) -> Option<usize> {
+//RS         self.vector_column_slots(fact).into_iter().find_map(
+//RS             |(candidate, candidate_field, _, slot)| {
+//RS                 (candidate == collection && candidate_field == field).then_some(slot)
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     fn vector_default_int_type(ty: &MirType) -> bool {
+//RS         match ty.kind() {
+//RS             // Exact Int is an owned node, not a machine-vector lane.
+//RS             MirTypeKind::InlineRange { base, .. }
+//RS             | MirTypeKind::Tagged { inner: base, .. }
+//RS             | MirTypeKind::Quantity { base, .. } => Self::vector_default_int_type(base),
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn vector_default_int_range(&self, function: &MirFunction, fact: &MirVectorFact) -> bool {
+//RS         let Some(cursor) = fact.cursor else {
+//RS             return false;
+//RS         };
+//RS         function
+//RS             .blocks
+//RS             .iter()
+//RS             .flat_map(|block| block.instructions.iter())
+//RS             .find_map(|instruction| {
+//RS                 let MirOperation::LoopRangeInit { start, .. } = &instruction.operation else {
+//RS                     return None;
+//RS                 };
+//RS                 (instruction.result == Some(cursor))
+//RS                     .then(|| Self::vector_default_int_type(self.value_type(function, *start)))
+//RS             })
+//RS             .unwrap_or(false)
+//RS     }
+//RS 
+//RS     fn vector_index_expr(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         fact: &MirVectorFact,
+//RS         index_name: &str,
+//RS         lane_name: &str,
+//RS     ) -> String {
+//RS         if self.vector_default_int_range(function, fact) {
+//RS             format!(
+//RS                 "{}jet_std::jet_int_add(({index_name}), ({lane_name}))",
+//RS                 self.config.root_prefix
+//RS             )
+//RS         } else {
+//RS             format!("({index_name}) + ({lane_name})")
+//RS         }
+//RS     }
+//RS 
+//RS     fn vector_index_usize_expr(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         fact: &MirVectorFact,
+//RS         index_name: &str,
+//RS         lane_name: &str,
+//RS     ) -> String {
+//RS         let index = self.vector_index_expr(function, fact, index_name, lane_name);
+//RS         if self.vector_default_int_range(function, fact) {
+//RS             format!(
+//RS                 "{}jet_std::jet_int_to_i64({index}).expect(\"vector index exceeds host range\") as usize",
+//RS                 self.config.root_prefix
+//RS             )
+//RS         } else {
+//RS             format!("({index}) as usize")
+//RS         }
+//RS     }
+//RS 
+//RS     fn fixed_reduction_lane_expr(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         fact: &MirVectorFact,
+//RS         index_name: &str,
+//RS         start_name: &str,
+//RS     ) -> String {
+//RS         let order = D_FRED1_FIXED_ORDER;
+//RS         if !order.is_canonical() {
+//RS             panic!("MIR reduction vector emission requires canonical D-FRED1 order");
+//RS         }
+//RS         if self.vector_default_int_range(function, fact) {
+//RS             return format!(
+//RS                 "jet_simd_fixed_lane_from_int::<{}>({index_name}, {start_name}, {}jet_std::jet_int_sub, {}jet_std::jet_int_to_i64)",
+//RS                 order.lanes,
+//RS                 self.config.root_prefix,
+//RS                 self.config.root_prefix,
+//RS             );
+//RS         }
+//RS         format!(
+//RS             "(({index_name}).wrapping_sub({start_name}) as usize) % {}",
+//RS             order.lanes
+//RS         )
+//RS     }
+//RS 
+//RS     fn vector_value_expr(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS         fact: &MirVectorFact,
+//RS         index_name: &str,
+//RS         defined: &BTreeSet<MirValueId>,
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         width: usize,
+//RS     ) -> Option<String> {
+//RS         if defined.contains(&value) {
+//RS             return Some(self.vector_array_name(value));
+//RS         }
+//RS         let instruction = self.value_instruction(function, value)?;
+//RS         match &instruction.operation {
+//RS             MirOperation::Constant(constant) => Some(format!(
+//RS                 "[{}; {width}]",
+//RS                 self.constant_for_type(constant, self.value_type(function, value))
+//RS             )),
+//RS             MirOperation::LoopRangeValue { cursor, .. }
+//RS             | MirOperation::LoopIterValue { cursor, .. }
+//RS                 if fact
+//RS                     .cursor
+//RS                     .is_some_and(|fact_cursor| *cursor == fact_cursor) =>
+//RS             {
+//RS                 let index = self.vector_index_expr(function, fact, index_name, "lane as _");
+//RS                 Some(format!("core::array::from_fn(|lane| {index})"))
+//RS             }
+//RS             MirOperation::ReadPlace(place)
+//RS                 if fact.cursor == Some(value)
+//RS                     && self.canonical_cursor_read_place(function, value) == Some(*place) =>
+//RS             {
+//RS                 let index = self.vector_index_expr(function, fact, index_name, "lane as _");
+//RS                 Some(format!("core::array::from_fn(|lane| {index})"))
+//RS             }
+//RS             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
+//RS                 self.vector_place_load(function, *place, fact, index_name, loop_places, width)
+//RS             }
+//RS             MirOperation::Copy { value, fact: copy_fact } => {
+//RS                 if *copy_fact == MirCopyFact::ViewMaterialize {
+//RS                     None
+//RS                 } else {
+//RS                     self.vector_value_expr(
+//RS                         function,
+//RS                         *value,
+//RS                         fact,
+//RS                         index_name,
+//RS                         defined,
+//RS                         loop_places,
+//RS                         width,
+//RS                     )
+//RS                 }
+//RS             }
+//RS             MirOperation::Move { value } | MirOperation::AttachTag { value, .. } => {
+//RS                 self.vector_value_expr(
+//RS                     function,
+//RS                     *value,
+//RS                     fact,
+//RS                     index_name,
+//RS                     defined,
+//RS                     loop_places,
+//RS                     width,
+//RS                 )
+//RS             }
+//RS             MirOperation::TraitBox { .. } => None,
+//RS             MirOperation::Index {
+//RS                 base, index, kind, ..
+//RS             } if fact.cursor.is_some_and(|cursor| {
+//RS                 self.canonical_cursor_value_matches(function, *index, cursor)
+//RS             }) && *kind == MirIndexKind::FixedListProof =>
+//RS             {
+//RS                 self.vector_index_load(function, *base, fact, index_name, width)
+//RS             }
+//RS             MirOperation::Field { base, field } => self.vector_field_load(
+//RS                 function,
+//RS                 *base,
+//RS                 *field,
+//RS                 fact,
+//RS                 index_name,
+//RS                 defined,
+//RS                 loop_places,
+//RS                 width,
+//RS             ),
+//RS             MirOperation::Binary {
+//RS                 op, left, right, ..
+//RS             } => self.vector_binary(
+//RS                 function,
+//RS                 *op,
+//RS                 *left,
+//RS                 *right,
+//RS                 fact,
+//RS                 index_name,
+//RS                 defined,
+//RS                 loop_places,
+//RS                 width,
+//RS             ),
+//RS             MirOperation::Unary { op, value } => {
+//RS                 let default_int = Self::vector_default_int_type(self.value_type(function, *value));
+//RS                 let value = self.vector_value_expr(
+//RS                     function,
+//RS                     *value,
+//RS                     fact,
+//RS                     index_name,
+//RS                     defined,
+//RS                     loop_places,
+//RS                     width,
+//RS                 )?;
+//RS                 let body = match op {
+//RS                     MirUnaryOp::Neg if default_int => {
+//RS                         format!(
+//RS                             "{}jet_std::jet_int_neg({value}[lane])",
+//RS                             self.config.root_prefix
+//RS                         )
+//RS                     }
+//RS                     MirUnaryOp::Neg => format!("-{value}[lane]"),
+//RS                     MirUnaryOp::Not => format!("!{value}[lane]"),
+//RS                 };
+//RS                 Some(format!("core::array::from_fn(|lane| {body})"))
+//RS             }
+//RS             MirOperation::Semantic(MirSemanticOp::ColumnarRead {
+//RS                 base,
+//RS                 column,
+//RS                 column_index,
+//RS                 index,
+//RS                 ..
+//RS             }) if fact.cursor.is_some_and(|cursor| {
+//RS                 self.canonical_cursor_value_matches(function, *index, cursor)
+//RS             }) =>
+//RS             {
+//RS                 let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
+//RS                 if let Some(slot) = self.vector_column_slot(fact, *base, *column) {
+//RS                     Some(format!(
+//RS                         "core::array::from_fn(|lane| __jet_vec_column_{slot}[{index}].clone())"
+//RS                     ))
+//RS                 } else {
+//RS                     Some(format!(
+//RS                         "core::array::from_fn(|lane| ({}) .column({column_index})[{index}].clone().jet_col_{}())",
+//RS                         self.value_borrow(*base),
+//RS                         self.field_name(*column)
+//RS                     ))
+//RS                 }
+//RS             }
+//RS             MirOperation::Parameter { .. }
+//RS             | MirOperation::Capture { .. }
+//RS             | MirOperation::Global { .. } => Some(format!(
+//RS                 "[{}; {width}]",
+//RS                 self.operation_expression(function, &instruction.operation, Some(value), None)
+//RS             )),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn vector_binary(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         op: MirBinaryOp,
+//RS         left: MirValueId,
+//RS         right: MirValueId,
+//RS         fact: &MirVectorFact,
+//RS         index_name: &str,
+//RS         defined: &BTreeSet<MirValueId>,
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         width: usize,
+//RS     ) -> Option<String> {
+//RS         let left_expr = self.vector_value_expr(
+//RS             function,
+//RS             left,
+//RS             fact,
+//RS             index_name,
+//RS             defined,
+//RS             loop_places,
+//RS             width,
+//RS         )?;
+//RS         let right_expr = self.vector_value_expr(
+//RS             function,
+//RS             right,
+//RS             fact,
+//RS             index_name,
+//RS             defined,
+//RS             loop_places,
+//RS             width,
+//RS         )?;
+//RS         let left_name = self.vector_array_name(left);
+//RS         let right_name = self.vector_array_name(right);
+//RS         let left_expr = format!("{{ let {left_name} = {left_expr}; {left_name} }}");
+//RS         let right_expr = format!("{{ let {right_name} = {right_expr}; {right_name} }}");
+//RS         let left_default_int = Self::vector_default_int_type(self.value_type(function, left));
+//RS         let right_default_int = Self::vector_default_int_type(self.value_type(function, right));
+//RS         if op.is_comparison() {
+//RS             let compare = match op {
+//RS                 MirBinaryOp::Eq => "Eq",
+//RS                 MirBinaryOp::Ne => "Ne",
+//RS                 MirBinaryOp::Lt => "Lt",
+//RS                 MirBinaryOp::Gt => "Gt",
+//RS                 MirBinaryOp::Le => "Le",
+//RS                 MirBinaryOp::Ge => "Ge",
+//RS                 _ => return None,
+//RS             };
+//RS             if left_default_int || right_default_int {
+//RS                 if !left_default_int || !right_default_int {
+//RS                     return None;
+//RS                 }
+//RS                 return Some(format!(
+//RS                     "jet_simd_compare_int_array(&{left_expr}, &{right_expr}, JetSimdCompareOp::{compare}, {}jet_std::jet_int_is_inline, {}jet_std::jet_int_compare)",
+//RS                     self.config.root_prefix,
+//RS                     self.config.root_prefix,
+//RS                 ));
+//RS             }
+//RS             return Some(format!(
+//RS                 "jet_simd_compare_array(&{left_expr}, &{right_expr}, JetSimdCompareOp::{compare})"
+//RS             ));
+//RS         }
+//RS         if left_default_int || right_default_int {
+//RS             if !left_default_int || !right_default_int {
+//RS                 return None;
+//RS             }
+//RS             let helper = match op {
+//RS                 MirBinaryOp::Add => "jet_int_add",
+//RS                 MirBinaryOp::Sub => "jet_int_sub",
+//RS                 MirBinaryOp::Mul => "jet_int_mul",
+//RS                 // Int division carries source-location arguments and must
+//RS                 // remain on the scalar MIR path.
+//RS                 MirBinaryOp::Div => return None,
+//RS                 _ => return None,
+//RS             };
+//RS             return Some(format!(
+//RS                 "core::array::from_fn(|lane| {}jet_std::{helper}({left_expr}[lane], {right_expr}[lane]))",
+//RS                 self.config.root_prefix
+//RS             ));
+//RS         }
+//RS         let helper = match (self.value_type(function, left).kind(), width, op) {
+//RS             (MirTypeKind::Float32, 4, MirBinaryOp::Add) => "jet_simd_f32x4_add_array",
+//RS             (MirTypeKind::Float32, 4, MirBinaryOp::Sub) => "jet_simd_f32x4_sub_array",
+//RS             (MirTypeKind::Float32, 4, MirBinaryOp::Mul) => "jet_simd_f32x4_mul_array",
+//RS             (MirTypeKind::Float32, 4, MirBinaryOp::Div) => "jet_simd_f32x4_div_array",
+//RS             (MirTypeKind::Float32, 8, MirBinaryOp::Add) => "jet_simd_f32x8_add_array",
+//RS             (MirTypeKind::Float32, 8, MirBinaryOp::Sub) => "jet_simd_f32x8_sub_array",
+//RS             (MirTypeKind::Float32, 8, MirBinaryOp::Mul) => "jet_simd_f32x8_mul_array",
+//RS             (MirTypeKind::Float32, 8, MirBinaryOp::Div) => "jet_simd_f32x8_div_array",
+//RS             (MirTypeKind::Float, 2, MirBinaryOp::Add) => "jet_simd_f64x2_add_array",
+//RS             (MirTypeKind::Float, 2, MirBinaryOp::Sub) => "jet_simd_f64x2_sub_array",
+//RS             (MirTypeKind::Float, 2, MirBinaryOp::Mul) => "jet_simd_f64x2_mul_array",
+//RS             (MirTypeKind::Float, 2, MirBinaryOp::Div) => "jet_simd_f64x2_div_array",
+//RS             (MirTypeKind::Float, 4, MirBinaryOp::Add) => "jet_simd_f64x4_add_array",
+//RS             (MirTypeKind::Float, 4, MirBinaryOp::Sub) => "jet_simd_f64x4_sub_array",
+//RS             (MirTypeKind::Float, 4, MirBinaryOp::Mul) => "jet_simd_f64x4_mul_array",
+//RS             (MirTypeKind::Float, 4, MirBinaryOp::Div) => "jet_simd_f64x4_div_array",
+//RS             (_, _, MirBinaryOp::Add) => "jet_simd_add_array",
+//RS             (_, _, MirBinaryOp::Sub) => "jet_simd_sub_array",
+//RS             (_, _, MirBinaryOp::Mul) => "jet_simd_mul_array",
+//RS             (_, _, MirBinaryOp::Div) => "jet_simd_div_array",
+//RS             (_, _, MirBinaryOp::And) => {
+//RS                 return Some(format!(
+//RS                     "core::array::from_fn(|lane| {left_expr}[lane] && {right_expr}[lane])"
+//RS                 ))
+//RS             }
+//RS             (_, _, MirBinaryOp::Or) => {
+//RS                 return Some(format!(
+//RS                     "core::array::from_fn(|lane| {left_expr}[lane] || {right_expr}[lane])"
+//RS                 ))
+//RS             }
+//RS             _ => return None,
+//RS         };
+//RS         Some(format!("{helper}(&{left_expr}, &{right_expr})"))
+//RS     }
+//RS 
+//RS     fn vector_place_load(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         place_id: MirPlaceId,
+//RS         fact: &MirVectorFact,
+//RS         index_name: &str,
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         width: usize,
+//RS     ) -> Option<String> {
+//RS         let place = function.places.iter().find(|place| place.id == place_id)?;
+//RS         if place.projections.is_empty() {
+//RS             let index = self.vector_index_expr(function, fact, index_name, "lane as _");
+//RS             if loop_places.contains(&place_id) {
+//RS                 return Some(format!("core::array::from_fn(|lane| {index})"));
+//RS             }
+//RS             return Some(format!(
+//RS                 "[{}; {width}]",
+//RS                 self.place_read(function, place_id)
+//RS             ));
+//RS         }
+//RS         let index_pos = place.projections.iter().position(|projection| {
+//RS             matches!(
+//RS                 projection,
+//RS                 MirProjection::Index { index, kind, .. }
+//RS                     if fact.cursor.is_some_and(|cursor| {
+//RS                         self.canonical_cursor_value_matches(function, *index, cursor)
+//RS                     }) && *kind == MirIndexKind::FixedListProof
+//RS             )
+//RS         })?;
+//RS         if place.projections[..index_pos]
+//RS             .iter()
+//RS             .any(|projection| matches!(projection, MirProjection::Index { .. }))
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let base = self.place_base(
+//RS             function,
+//RS             &place.base,
+//RS             false,
+//RS             &place.projections[..index_pos],
+//RS         );
+//RS         let suffix = &place.projections[index_pos + 1..];
+//RS         let field = suffix
+//RS             .iter()
+//RS             .try_fold(String::new(), |mut field, projection| {
+//RS                 let MirProjection::Field { field: id, .. } = projection else {
+//RS                     return None;
+//RS                 };
+//RS                 field.push('.');
+//RS                 field.push_str(&self.field_name(*id));
+//RS                 Some(field)
+//RS             })?;
+//RS         let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
+//RS         Some(format!(
+//RS             "core::array::from_fn(|lane| (({base})[{index}]{field}).clone())"
+//RS         ))
+//RS     }
+//RS     fn vector_index_load(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         base: MirValueId,
+//RS         fact: &MirVectorFact,
+//RS         index_name: &str,
+//RS         _width: usize,
+//RS     ) -> Option<String> {
+//RS         let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
+//RS         Some(format!(
+//RS             "core::array::from_fn(|lane| ({}[{index}].clone()))",
+//RS             self.value_borrow(base)
+//RS         ))
+//RS     }
+//RS 
+//RS     fn vector_field_load(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         base: MirValueId,
+//RS         field: MirFieldId,
+//RS         fact: &MirVectorFact,
+//RS         index_name: &str,
+//RS         defined: &BTreeSet<MirValueId>,
+//RS         loop_places: &BTreeSet<MirPlaceId>,
+//RS         width: usize,
+//RS     ) -> Option<String> {
+//RS         let base_instruction = self.value_instruction(function, base)?;
+//RS         if let MirOperation::Index {
+//RS             base: collection,
+//RS             index,
+//RS             kind: MirIndexKind::FixedListProof,
+//RS             ..
+//RS         } = &base_instruction.operation
+//RS         {
+//RS             if !fact.cursor.is_some_and(|cursor| {
+//RS                 self.canonical_cursor_value_matches(function, *index, cursor)
+//RS             }) {
+//RS                 return None;
+//RS             }
+//RS             let access = fact.accesses.iter().find(|access| {
+//RS                 access.field == Some(field)
+//RS                     && matches!(
+//RS                         access.root,
+//RS                         MirVectorAccessRoot::Value(value) if value == *collection
+//RS                     )
+//RS             })?;
+//RS             if access.layout == MirVectorLayout::ColumnarDirect {
+//RS                 let column = access.column_index?;
+//RS                 let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
+//RS                 if let Some(slot) = self.vector_column_slot(fact, *collection, field) {
+//RS                     return Some(format!(
+//RS                         "core::array::from_fn(|lane| __jet_vec_column_{slot}[{index}].clone())"
+//RS                     ));
+//RS                 }
+//RS                 return Some(format!(
+//RS                     "core::array::from_fn(|lane| ({}) .column({column})[{index}].clone().jet_col_{}())",
+//RS                     self.value_borrow(*collection),
+//RS                     self.field_name(field)
+//RS                 ));
+//RS             }
+//RS             let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
+//RS             return Some(format!(
+//RS                 "core::array::from_fn(|lane| ({}[{index}].{}).clone())",
+//RS                 self.value_borrow(*collection),
+//RS                 self.field_name(field)
+//RS             ));
+//RS         }
+//RS         let base = self.vector_value_expr(
+//RS             function,
+//RS             base,
+//RS             fact,
+//RS             index_name,
+//RS             defined,
+//RS             loop_places,
+//RS             width,
+//RS         )?;
+//RS         Some(format!(
+//RS             "core::array::from_fn(|lane| ({}[lane].{}).clone())",
+//RS             base,
+//RS             self.field_name(field)
+//RS         ))
+// END-PORT-PENDING 2009 crates/jet-codegen/src/Codegen/MIRRust.rs:14401-16200
+

@@ -1,0 +1,89 @@
+use jet_foundation.[is_money_like_name, CtFraction, JetInt]
+// Rust: crates/jet-foundation/src/Numeric.rs:93
+struct CountingAllocator {}
+// Rust: crates/jet-foundation/src/Numeric.rs:96
+// GATE #4494: native TLS and global allocation instrumentation, per-thread count.
+thread_local THREAD_ALLOCATIONS: Cell<Int> = Cell.new(0)
+impl CountingAllocator.GlobalAlloc {
+    // Rust: crates/jet-foundation/src/Numeric.rs:100
+    fn alloc(self, layout: Layout) -> Ptr<U8> {
+        _ :: THREAD_ALLOCATIONS.try_with((count) -> &count.set(count.get() + 1))
+        System.alloc(layout)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:105
+    fn dealloc(self, pointer: Ptr<U8>, layout: Layout) { System.dealloc(pointer, layout) }
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:111
+#GlobalAllocator
+const COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator{}
+// Rust: crates/jet-foundation/src/Numeric.rs:113
+fn thread_allocations() -> Int { THREAD_ALLOCATIONS.with((count) -> count.get()) }
+// Rust: crates/jet-foundation/src/Numeric.rs:118
+#Test("total_is_not_assumed_to_mean_money") {
+    assert(!is_money_like_name("total"))
+    assert(is_money_like_name("total_price"))
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:124
+#Test("fractions_use_decimal_display_only_when_finite") {
+    assert(CtFraction.new(I64{7}, I64{2}).unwrap().to_string_rep() == "3.5")
+    assert(CtFraction.new(I64{-1}, I64{8}).unwrap().to_string_rep() == "-0.125")
+    assert(CtFraction.new(I64{1}, I64{3}).unwrap().to_string_rep() == "1/3")
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:134
+#Test("jet_int_inline_arithmetic_does_not_allocate") {
+    min :: JetInt.inline_min()
+    max :: JetInt.inline_max()
+    operands :: [I64]{-(I64{1} << 30), I64{-65_537}, I64{-1}, I64{0}, I64{1}, I64{2}, I64{65_536}, (I64{1} << 30) - I64{1}}
+    edges :: [(I64, I64)]{(max, I64{0}), (min, I64{0}), (max, min), (max, I64{-1}), (min, I64{1}), (min, I64{-1}), (max, I64{1})}
+    before :: thread_allocations()
+    loop left in operands {
+        loop right in operands {
+            left_int :: JetInt.from_i64(black_box(left))
+            right_int :: JetInt.from_i64(black_box(right))
+            sum :: left_int.add(right_int).expect("inline sum")
+            product :: (~left_int).mul(right_int).expect("inline product")
+            assert(sum.is_inline() && sum.to_raw() == left + right)
+            assert(product.is_inline() && product.to_raw() == left * right)
+            assert(left_int.compare(right_int) == left.compare(right))
+            drop(black_box((^sum, ^product)))
+        }
+    }
+    loop (left, right) in edges {
+        left_int :: JetInt.from_i64(black_box(left))
+        right_int :: JetInt.from_i64(black_box(right))
+        if left + right >= min && left + right <= max {
+            sum :: left_int.add(right_int).expect("inline edge sum")
+            assert(sum.is_inline() && sum.to_raw() == left + right)
+        }
+        if left.checked_mul(right) == .Val(product) {
+            if product >= min && product <= max {
+                carried :: left_int.mul(right_int).expect("inline edge product")
+                assert(carried.is_inline() && carried.to_raw() == product)
+            }
+        }
+        assert(left_int.compare(right_int) == left.compare(right))
+    }
+    assert(thread_allocations() == before, "inline exact Int arithmetic allocated")
+    loop value in [I64]{max, max + I64{1}, min, min - I64{1}, I64.max, I64.min} {
+        carried :: JetInt.from_i64(value)
+        assert(carried.is_inline() == (value >= min && value <= max), "{value}")
+        assert(carried.to_i64() == Val(value), "{value}")
+        assert(carried.to_string_rep() == value.to_string(), "{value}")
+        assert(I64.try_from(~carried) == Ok(value), "{value}")
+    }
+    above :: JetInt.from_i64(max).add(JetInt.from_i64(I64{1})).unwrap()
+    assert(!above.is_inline())
+    assert(above.to_string_rep() == "4611686018427387904")
+    back :: above.add(JetInt.from_i64(I64{-1})).unwrap()
+    assert(back.is_inline() && back.to_raw() == max)
+    below :: JetInt.from_i64(min).add(JetInt.from_i64(I64{-1})).unwrap()
+    assert(!below.is_inline())
+    assert(below.to_string_rep() == "-4611686018427387905")
+    back_below :: below.add(JetInt.from_i64(I64{1})).unwrap()
+    assert(back_below.is_inline() && back_below.to_raw() == min)
+    squared :: JetInt.from_i64(I64{1} << 31).mul(JetInt.from_i64(I64{1} << 31)).unwrap()
+    assert(!squared.is_inline())
+    assert(squared.to_string_rep() == "4611686018427387904")
+    promoted :: JetInt.from_i64(I64.max).add(JetInt.from_i64(I64{1})).unwrap()
+    assert(promoted.to_string_rep() == "9223372036854775808")
+}

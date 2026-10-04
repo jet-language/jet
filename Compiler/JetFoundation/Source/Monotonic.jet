@@ -1,11 +1,9 @@
-// PORT-PENDING 0078 crates-jet-foundation-src-monotonic: crates/jet-foundation/src/Monotonic.rs:1-7
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // The compiler/runtime seam owns this source so every in-process adapter calls
-//RS // one epoch. Foundation has no resident scheduler; the absent provider keeps
-//RS // this carrier independent while AOT/JIT define the scheduler-backed hook.
-//RS fn jet_scheduler_world_monotonic_now_ns() -> Option<i64> {
-//RS     None
-//RS }
-//RS include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
-// END-PORT-PENDING 0078 crates/jet-foundation/src/Monotonic.rs:1-7
+// Rust: crates/jet-foundation/src/Monotonic.rs:1
+// Foundation has no resident scheduler. The shared monotonic carrier checks the
+// controlled provider first and otherwise samples the one process epoch.
+// Rust: crates/jet-foundation/src/Monotonic.rs:7
+// The included implementation is owned by the canonical Core time module.
+use core.time.runtime.kernel_time_monotonic.[JetMonotonicProvider, jet_time_monotonic_provider_set, jet_time_monotonic_now_ns]
 
+// Rust: crates/jet-foundation/src/Monotonic.rs:4
+fn jet_scheduler_world_monotonic_now_ns() -> I64? Never! { None }

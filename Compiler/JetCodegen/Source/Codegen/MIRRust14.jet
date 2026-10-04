@@ -1,0 +1,1804 @@
+// PORT-PENDING 2014 crates-jet-codegen-src-codegen-mirrust-slice-23401: crates/jet-codegen/src/Codegen/MIRRust.rs:23401-25200
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS                 })
+//RS                 .collect(),
+//RS         )
+//RS     }
+//RS 
+//RS     fn compute_transform_result(
+//RS         &self,
+//RS         member: &str,
+//RS         result_type: &MirType,
+//RS         result: &str,
+//RS     ) -> String {
+//RS         let result_enum = self.compute_runtime_name("JetComputeCurriedResult");
+//RS         match member {
+//RS             "gradient" => {
+//RS                 let gradients = self.compute_gradient(result_type, "__jet_gradients");
+//RS                 format!(
+//RS                     "match {result} {{ {result_enum}::Gradient(__jet_gradients) => {gradients}, \
+//RS                      _ => unreachable!(\"MIR compute.gradient result shape mismatch\") }}"
+//RS                 )
+//RS             }
+//RS             "value_and_gradient" => {
+//RS                 let MirTypeKind::Tuple(fields) = result_type.kind() else {
+//RS                     panic!("MIR compute.value_and_gradient result is not a tuple");
+//RS                 };
+//RS                 let values = fields
+//RS                     .iter()
+//RS                     .map(|(name, value_type)| match name.as_str() {
+//RS                         "value" => "__jet_value".to_string(),
+//RS                         "gradients" => self.compute_gradient(value_type, "__jet_gradients"),
+//RS                         other => panic!(
+//RS                             "MIR compute.value_and_gradient has unknown result field `{other}`"
+//RS                         ),
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 let values = self.compute_tuple(values);
+//RS                 format!(
+//RS                     "match {result} {{ \
+//RS                      {result_enum}::ValueAndGradient {{ value: __jet_value, gradients: __jet_gradients }} => {values}, \
+//RS                      _ => unreachable!(\"MIR compute.value_and_gradient result shape mismatch\") }}"
+//RS                 )
+//RS             }
+//RS             "vjp" => {
+//RS                 let gradient_type = match result_type.kind() {
+//RS                     MirTypeKind::Apply { name, args }
+//RS                         if name.name == "VJPRun" && args.len() == 1 =>
+//RS                     {
+//RS                         &args[0]
+//RS                     }
+//RS                     _ => panic!("MIR compute.vjp result is not VJPRun"),
+//RS                 };
+//RS                 let gradient = self.compute_gradient(gradient_type, "__jet_pull_gradients");
+//RS                 let gradient_for_grads =
+//RS                     self.compute_gradient(gradient_type, "__jet_grads_gradients");
+//RS                 let call = self.compute_runtime_name("jet_compute_call_curried_or_panic");
+//RS                 let input = self.compute_runtime_name("JetComputeInputPack");
+//RS                 let handle = self.compute_runtime_name("JetComputeHandle");
+//RS                 let tensor = self.compute_runtime_name("JetTensor");
+//RS                 let vjp_run = self.compute_runtime_name("JetComputeVjpRun");
+//RS                 format!(
+//RS                     "match {result} {{ \
+//RS                      {result_enum}::Vjp {{ value: __jet_value, pull: __jet_pull_raw, grads: __jet_grads_raw }} => {{ \
+//RS                          let __jet_pull = {handle}::new(__jet_pull_raw); \
+//RS                          let __jet_grads = {handle}::new(__jet_grads_raw); \
+//RS                          {vjp_run} {{ \
+//RS                              value: __jet_value, \
+//RS                              pull: std::rc::Rc::new(move |__jet_seed: &{tensor}| {{ \
+//RS                                  let __jet_pull_result = {call}(__jet_pull.raw(), \
+//RS                                      {input}::new(vec![__jet_seed.clone()], Vec::new()), \
+//RS                                      \"core.compute.vjp.pull\"); \
+//RS                                  match __jet_pull_result {{ \
+//RS                                      {result_enum}::Gradient(__jet_pull_gradients) => {gradient}, \
+//RS                                      _ => unreachable!(\"MIR compute.vjp pull result shape mismatch\") \
+//RS                                  }} \
+//RS                              }}), \
+//RS                              grads: std::rc::Rc::new(move || {{ \
+//RS                                  let __jet_grads_result = {call}(__jet_grads.raw(), \
+//RS                                      {input}::new(Vec::new(), Vec::new()), \
+//RS                                      \"core.compute.vjp.grads\"); \
+//RS                                  match __jet_grads_result {{ \
+//RS                                      {result_enum}::Gradient(__jet_grads_gradients) => {gradient_for_grads}, \
+//RS                                      _ => unreachable!(\"MIR compute.vjp grads result shape mismatch\") \
+//RS                                  }} \
+//RS                              }}) \
+//RS                          }} \
+//RS                      }}, \
+//RS                      _ => unreachable!(\"MIR compute.vjp result shape mismatch\") }}"
+//RS                 )
+//RS             }
+//RS             "jvp" => {
+//RS                 let MirTypeKind::Tuple(fields) = result_type.kind() else {
+//RS                     panic!("MIR compute.jvp result is not a tuple");
+//RS                 };
+//RS                 let values = fields
+//RS                     .iter()
+//RS                     .map(|(name, _)| match name.as_str() {
+//RS                         "value" => "__jet_value".to_string(),
+//RS                         "tangent" => "__jet_tangent".to_string(),
+//RS                         other => panic!("MIR compute.jvp has unknown result field `{other}`"),
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 let values = self.compute_tuple(values);
+//RS                 format!(
+//RS                     "match {result} {{ \
+//RS                      {result_enum}::Jvp {{ value: __jet_value, tangent: __jet_tangent }} => {values}, \
+//RS                      _ => unreachable!(\"MIR compute.jvp result shape mismatch\") }}"
+//RS                 )
+//RS             }
+//RS             other => panic!("MIR compute adapter has unknown member `{other}`"),
+//RS         }
+//RS     }
+//RS 
+//RS     fn compute_call(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         route: MirPreludeCallId,
+//RS         member: &str,
+//RS         args: &[MirCallArg],
+//RS         type_args: &[MirType],
+//RS         result_type: Option<&MirType>,
+//RS     ) -> String {
+//RS         let [callable_type] = type_args else {
+//RS             panic!("MIR compute.{member} needs one callable type argument");
+//RS         };
+//RS         let Some(result_type) = result_type else {
+//RS             panic!("MIR compute.{member} has no checked result type");
+//RS         };
+//RS         if args.len() < 2 {
+//RS             panic!("MIR compute.{member} needs a callable and target list");
+//RS         }
+//RS         let (parameters, return_type, send_callable) = match callable_type.kind() {
+//RS             MirTypeKind::Fn(signature) => {
+//RS                 (signature.params.as_slice(), signature.ret.as_deref(), false)
+//RS             }
+//RS             MirTypeKind::SendFn { params, ret, .. } => (params.as_slice(), ret.as_deref(), true),
+//RS             other => panic!(
+//RS                 "MIR compute.{member} callable has non-function type {}",
+//RS                 other.display_name()
+//RS             ),
+//RS         };
+//RS         let output = return_type
+//RS             .unwrap_or_else(|| panic!("MIR compute.{member} callable has no return type"));
+//RS         let output = match output.kind() {
+//RS             MirTypeKind::Result { ok, .. } => ok.as_ref(),
+//RS             _ => output,
+//RS         };
+//RS         let callable = match args[0].access {
+//RS             MirAccess::Read => format!(
+//RS                 "({}).clone()",
+//RS                 self.borrowed_value_reference(function, args[0].value, MirAccess::Read)
+//RS             ),
+//RS             MirAccess::Move => self.value_move(args[0].value),
+//RS             MirAccess::Write => {
+//RS                 panic!("MIR compute.{member} callable cannot be a write argument")
+//RS             }
+//RS         };
+//RS         let callable_borrow_mask = self.callable_borrow_mask(callable_type);
+//RS         let call_args = parameters
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(index, _)| {
+//RS                 if callable_borrow_mask.get(index).copied().unwrap_or(false) {
+//RS                     format!("&__jet_compute_inputs[{index}]")
+//RS                 } else {
+//RS                     format!("__jet_compute_inputs[{index}].clone()")
+//RS                 }
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let base_call = if send_callable || self.history_runtime_metadata_enabled() {
+//RS             format!("(__jet_compute_callable)({})", call_args.join(", "))
+//RS         } else {
+//RS             self.fn_value_call("__jet_compute_callable.clone()".to_string(), &call_args)
+//RS         };
+//RS         let checked_output =
+//RS             return_type.is_some_and(|ty| matches!(ty.kind(), MirTypeKind::Result { .. }));
+//RS         let base_value = if checked_output {
+//RS             let error = match return_type.map(MirType::kind) {
+//RS                 Some(MirTypeKind::Result { err, .. })
+//RS                     if err.nominal_name() == Some(jet_foundation::Syntax::TYPE_ERR) =>
+//RS                 {
+//RS                     "__jet_compute_error"
+//RS                 }
+//RS                 _ => "__jet_compute_error.jet_show()",
+//RS             };
+//RS             format!(
+//RS                 "match {base_call} {{ \
+//RS                  Ok(__jet_compute_value) => __jet_compute_value, \
+//RS                  Err(__jet_compute_error) => return Err({}::Unsupported(format!(\
+//RS                      \"autodiff callable failed: {{}}\", {error}))) \
+//RS                  }}",
+//RS                 self.compute_runtime_name("JetComputeError")
+//RS             )
+//RS         } else {
+//RS             base_call
+//RS         };
+//RS         let base = format!(
+//RS             "{{ let __jet_compute_callable = {callable}; \
+//RS              {}::new({}usize, move |__jet_compute_inputs: &[{}]| {{ \
+//RS                  let __jet_compute_value = {base_value}; \
+//RS                  Ok({}) \
+//RS              }}) }}",
+//RS             self.compute_runtime_name("JetComputeBase"),
+//RS             parameters.len(),
+//RS             self.compute_runtime_name("JetTensor"),
+//RS             self.compute_base_result(output, "__jet_compute_value")
+//RS         );
+//RS         let target = format!(
+//RS             "({}).iter().map(|value| {}jet_std::jet_int_owned_to_i64(value).expect(\"checked autodiff target index\")).collect::<Vec<_>>()",
+//RS             self.value_borrow(args.last().unwrap().value),
+//RS             self.config.root_prefix,
+//RS         );
+//RS         let kind = match member {
+//RS             "gradient" => "Gradient",
+//RS             "value_and_gradient" => "ValueAndGradient",
+//RS             "vjp" => "Vjp",
+//RS             "jvp" => "Jvp",
+//RS             other => panic!("MIR compute adapter has unknown member `{other}`"),
+//RS         };
+//RS         let kind = format!(
+//RS             "{}::{kind}",
+//RS             self.compute_runtime_name("JetComputeTransformKind")
+//RS         );
+//RS         let plan = format!(
+//RS             "{}({base}, {kind}, &{target}, {})",
+//RS             self.prelude_symbol(route),
+//RS             self.compute_result_shape(output)
+//RS         );
+//RS         let handle = self.compute_runtime_name("JetComputeHandle");
+//RS         let call = self.compute_runtime_name("jet_compute_call_curried_or_panic");
+//RS         let input = self.compute_runtime_name("JetComputeInputPack");
+//RS         if let MirTypeKind::Fn(signature) = result_type.kind() {
+//RS             let ret = signature
+//RS                 .ret
+//RS                 .as_deref()
+//RS                 .unwrap_or_else(|| panic!("MIR compute.{member} transform has no return type"));
+//RS             let parameters = signature
+//RS                 .params
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, ty)| {
+//RS                     let conventions = signature
+//RS                         .call_metadata
+//RS                         .as_ref()
+//RS                         .map(|metadata| metadata.conventions.as_slice());
+//RS                     let access = Self::callable_parameter_access(conventions, index);
+//RS                     format!(
+//RS                         "__jet_compute_arg_{index}: {}",
+//RS                         self.callable_parameter_type(ty, access)
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             let values = signature
+//RS                 .params
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, ty)| {
+//RS                     let conventions = signature
+//RS                         .call_metadata
+//RS                         .as_ref()
+//RS                         .map(|metadata| metadata.conventions.as_slice());
+//RS                     let access = Self::callable_parameter_access(conventions, index);
+//RS                     if self.callable_parameter_borrowed(ty, access) {
+//RS                         format!("(*__jet_compute_arg_{index}).clone()")
+//RS                     } else {
+//RS                         format!("__jet_compute_arg_{index}")
+//RS                     }
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             let call = format!(
+//RS                 "{call}(__jet_compute_handle.raw(), {input}::from_flat(vec![{}]), {:?})",
+//RS                 values.join(", "),
+//RS                 format!("core.compute.{member}")
+//RS             );
+//RS             let result = self.compute_transform_result(member, ret, "__jet_compute_result");
+//RS             let closure = format!(
+//RS                 "move |{}| {{ let __jet_compute_result = {call}; {result} }}",
+//RS                 parameters.join(", ")
+//RS             );
+//RS             let carrier = if self.history_runtime_metadata_enabled() {
+//RS                 format!("Box::new({closure})")
+//RS             } else {
+//RS                 format!("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))")
+//RS             };
+//RS             return format!("{{ let __jet_compute_handle = {handle}::new({plan}); {carrier} }}");
+//RS         }
+//RS         let values = args[1..args.len() - 1]
+//RS             .iter()
+//RS             .map(|arg| self.call_arg_for_function(function, arg, false))
+//RS             .collect::<Vec<_>>();
+//RS         let call = format!(
+//RS             "{call}(__jet_compute_handle.raw(), {input}::from_flat(vec![{}]), {:?})",
+//RS             values.join(", "),
+//RS             format!("core.compute.{member}")
+//RS         );
+//RS         let result = self.compute_transform_result(member, result_type, "__jet_compute_result");
+//RS         format!(
+//RS             "{{ let __jet_compute_handle = {handle}::new({plan}); \
+//RS                let __jet_compute_result = {call}; \
+//RS                {result} }}"
+//RS         )
+//RS     }
+//RS 
+//RS     fn source_math_call(
+//RS         &self,
+//RS         caller: &MirFunction,
+//RS         call: MirCoreCallId,
+//RS         args: &[MirCallArg],
+//RS         type_args: &[MirType],
+//RS         result: Option<MirValueId>,
+//RS     ) -> Option<String> {
+//RS         let row = self.core_row(call);
+//RS         if row.module != "core.math"
+//RS             || row.aot_direct
+//RS             || !matches!(
+//RS                 row.member.as_str(),
+//RS                 "checked_abs"
+//RS                     | "checked_neg"
+//RS                     | "checked_add"
+//RS                     | "checked_sub"
+//RS                     | "checked_mul"
+//RS                     | "checked_div"
+//RS                     | "checked_rem"
+//RS                     | "checked_pow"
+//RS                     | "saturating_add"
+//RS                     | "saturating_mul"
+//RS                     | "int_pow"
+//RS                     | "sum_int"
+//RS                     | "prod_int"
+//RS                     | "abs_diff"
+//RS                     | "div_mod"
+//RS                     | "div_rem"
+//RS             )
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let target = self
+//RS             .program
+//RS             .functions
+//RS             .iter()
+//RS             .find(|candidate| {
+//RS                 candidate.module == row.module
+//RS                     && candidate.name == row.member
+//RS                     && matches!(&candidate.form, MirFunctionForm::TopLevel)
+//RS             })
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "MIR Core call `{}.{}` is routed through Jet source but has no source function",
+//RS                     row.module, row.member
+//RS                 )
+//RS             });
+//RS         if target.id == caller.id {
+//RS             panic!(
+//RS                 "MIR Core call `{}.{}` selected its own Jet source function",
+//RS                 row.module, row.member
+//RS             );
+//RS         }
+//RS         if args.len() != target.params.len() {
+//RS             panic!(
+//RS                 "MIR Core call `{}.{}` has {} arguments for its Jet source function's {} parameters",
+//RS                 row.module,
+//RS                 row.member,
+//RS                 args.len(),
+//RS                 target.params.len()
+//RS             );
+//RS         }
+//RS         let callee = MirCallee::User(target.id);
+//RS         let emitted = self.call(caller, &callee, args, type_args);
+//RS         Some(self.call_result_expression(caller, &callee, result, emitted))
+//RS     }
+//RS 
+//RS     fn core_call(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirCoreCallId,
+//RS         route: MirPreludeCallId,
+//RS         args: &[MirCallArg],
+//RS         type_args: &[MirType],
+//RS         _data_plan: Option<&MirDataPlan>,
+//RS         result_type: Option<&MirType>,
+//RS         location: Option<&MirPanicLoc>,
+//RS     ) -> String {
+//RS         let route_row = self.prelude_row(route);
+//RS         let row = self
+//RS             .program
+//RS             .core_calls
+//RS             .iter()
+//RS             .find(|row| row.id == call)
+//RS             .unwrap_or_else(|| panic!("MIR Core call {:?} has no canonical row", call));
+//RS         if row.module == "core.testing" && row.member == "histories" {
+//RS             return self.history_call_expression(
+//RS                 function,
+//RS                 args,
+//RS                 type_args,
+//RS                 &route_row.signature.borrow_mask,
+//RS             );
+//RS         }
+//RS         if row.module == "core.compute"
+//RS             && matches!(
+//RS                 row.member.as_str(),
+//RS                 "gradient" | "value_and_gradient" | "vjp" | "jvp"
+//RS             )
+//RS         {
+//RS             return self.compute_call(function, route, &row.member, args, type_args, result_type);
+//RS         }
+//RS         if row.module == "core.args" && matches!(row.member.as_str(), "decode" | "merge") {
+//RS             return self.cli_shape_core_call(function, row.member.as_str(), args, type_args);
+//RS         }
+//RS         // D-JSON3 / #2510: the typed form shares the one generated `Decode`
+//RS         // engine on computed text; the untyped lenient route keeps its own row.
+//RS         if row.module == "core.encoding.json" && row.member == "decode" && !type_args.is_empty() {
+//RS             return self.call_symbol_for_function(
+//RS                 function,
+//RS                 format!("{}jet_enc_json_decode", self.config.root_prefix),
+//RS                 args,
+//RS                 type_args,
+//RS                 Some(&route_row.signature.borrow_mask),
+//RS             );
+//RS         }
+//RS         // D-SHAPE-ONE1=A: env decoding reads the canonical env names of T's
+//RS         // fields; the map rides as one extra slice argument after prefix/file/allow.
+//RS         if row.module == "core.sys" && row.member == "decode" {
+//RS             let [target] = type_args else {
+//RS                 panic!("MIR core.sys.decode has no checked type argument");
+//RS             };
+//RS             let names = self.shape_name_map(target, ShapeProjectionKind::Env, "core.sys.decode");
+//RS             let values = args
+//RS                 .iter()
+//RS                 .map(|arg| self.call_arg_for_function(function, arg, true))
+//RS                 .collect::<Vec<_>>();
+//RS             return format!(
+//RS                 "{}jet_std_env_decode::<{}>({}, {names})",
+//RS                 self.config.root_prefix,
+//RS                 self.rust_type(target),
+//RS                 values.join(", ")
+//RS             );
+//RS         }
+//RS         // D-SHAPE-ONE1=A: DB decoding applies the checked Db→Json names to
+//RS         // the row carrier, then uses the one typed DataTree decoder. The
+//RS         // carrier helper is generic so JIT/interpreter hosts can share it
+//RS         // without importing AOT's decoder trait.
+//RS         if row.module == "core.db" && row.member == "decode" {
+//RS             let [target] = type_args else {
+//RS                 panic!("MIR core.db.decode has no checked type argument");
+//RS             };
+//RS             let names = self.shape_name_map(target, ShapeProjectionKind::Db, "core.db.decode");
+//RS             let values = args
+//RS                 .iter()
+//RS                 .map(|arg| self.call_arg_for_function(function, arg, true))
+//RS                 .collect::<Vec<_>>();
+//RS             let root = &self.config.root_prefix;
+//RS             let target_ty = self.rust_type(target);
+//RS             return format!(
+//RS                 "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::DataTree::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::DataTree::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::DataTree::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::DataTree::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::DataTree::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::DataTree::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
+//RS                 values.join(", ")
+//RS             );
+//RS         }
+//RS         // D-WEBQUERY1: the checked callback carries JetErr, while the
+//RS         // current AOT query kernel still accepts text failures. Keep this
+//RS         // one explicit narrowing seam until that kernel carrier widens.
+//RS         if row.module == "core.web.query" && row.member == "live" {
+//RS             let mut values = args
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, arg)| {
+//RS                     self.call_arg_for_function(
+//RS                         function,
+//RS                         arg,
+//RS                         route_row
+//RS                             .signature
+//RS                             .borrow_mask
+//RS                             .get(index)
+//RS                             .copied()
+//RS                             .unwrap_or(false),
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             let callback_arg = args
+//RS                 .last()
+//RS                 .unwrap_or_else(|| panic!("MIR core.web.query.live has no callback"));
+//RS             let callback_is_fn = !self.history_runtime_metadata_enabled()
+//RS                 && matches!(
+//RS                     self.value_type(function, callback_arg.value).kind(),
+//RS                     MirTypeKind::Fn(_)
+//RS                 );
+//RS             let callback = values
+//RS                 .pop()
+//RS                 .unwrap_or_else(|| panic!("MIR core.web.query.live has no callback"));
+//RS             let callback_invocation = if callback_is_fn {
+//RS                 self.fn_value_call(callback, &[])
+//RS             } else {
+//RS                 format!("({callback})()")
+//RS             };
+//RS             values.push(format!(
+//RS                 "move || {callback_invocation}.map_err(|__error| {}jet_err_message(&__error))",
+//RS                 self.config.root_prefix
+//RS             ));
+//RS             let generic = if type_args.is_empty() {
+//RS                 String::new()
+//RS             } else {
+//RS                 format!(
+//RS                     "::<{}>",
+//RS                     type_args
+//RS                         .iter()
+//RS                         .map(|ty| self.rust_type(ty))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ")
+//RS                 )
+//RS             };
+//RS             return format!(
+//RS                 "{}{generic}({})",
+//RS                 self.prelude_symbol(route),
+//RS                 values.join(", ")
+//RS             );
+//RS         }
+//RS         if row.module == "core.mem"
+//RS             && matches!(row.member.as_str(), "volatile_read" | "volatile_write")
+//RS         {
+//RS             let values = args
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, arg)| {
+//RS                     self.call_arg_for_function(
+//RS                         function,
+//RS                         arg,
+//RS                         route_row
+//RS                             .signature
+//RS                             .borrow_mask
+//RS                             .get(index)
+//RS                             .copied()
+//RS                             .unwrap_or(false),
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>();
+//RS             return match row.member.as_str() {
+//RS                 "volatile_read" => format!(
+//RS                     "jet_mem::jet_sentry_volatile_read(({}), \"valid_ptr\")",
+//RS                     values.first().unwrap_or_else(|| {
+//RS                         panic!("MIR core.mem.volatile_read has no pointer argument")
+//RS                     })
+//RS                 ),
+//RS                 "volatile_write" => format!(
+//RS                     "jet_mem::jet_sentry_volatile_write(({}), {}, \"valid_ptr\")",
+//RS                     values.first().unwrap_or_else(|| {
+//RS                         panic!("MIR core.mem.volatile_write has no pointer argument")
+//RS                     }),
+//RS                     values.get(1).unwrap_or_else(|| {
+//RS                         panic!("MIR core.mem.volatile_write has no value argument")
+//RS                     }),
+//RS                 ),
+//RS                 _ => unreachable!(),
+//RS             };
+//RS         }
+//RS         // `cbor.parse(bytes)` omits its options; the Prelude kernel always
+//RS         // takes them. Pass the safe default explicitly, the same default the
+//RS         // JIT's one-argument symbol applies.
+//RS         if row.module == "core.encoding.cbor" && row.member == "parse" && args.len() == 1 {
+//RS             let bytes = self.call_arg_for_function(
+//RS                 function,
+//RS                 &args[0],
+//RS                 route_row.signature.borrow_mask.first().copied().unwrap_or(true),
+//RS             );
+//RS             return format!(
+//RS                 "{}({bytes}, {}jet_std::CBOROptions::safe())",
+//RS                 self.prelude_symbol(route),
+//RS                 self.config.root_prefix
+//RS             );
+//RS         }
+//RS         let emitted = self.core_call_symbol_for_function(
+//RS             function,
+//RS             row,
+//RS             &route_row,
+//RS             self.prelude_symbol(route),
+//RS             args,
+//RS             type_args,
+//RS             location,
+//RS         );
+//RS         self.core_int_result(row, emitted, result_type)
+//RS     }
+//RS 
+//RS     /// A Core row's `Int` results cross the kernel boundary by one registry
+//RS     /// fact (`MirCoreCall::native_int_result`): a raw-machine-word row widens
+//RS     /// each `Int` leaf from `i64`; every other row already returns the owned
+//RS     /// exact carrier and passes through unchanged.
+//RS     fn core_int_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+//RS         if !row.native_int_result {
+//RS             return emitted;
+//RS         }
+//RS         ty.and_then(|ty| self.native_int_widening(&emitted, ty, NativeIntSource::MachineWord))
+//RS             .unwrap_or(emitted)
+//RS     }
+//RS 
+//RS     /// Narrow a Jet value into a native host slot (record field or enum
+//RS     /// payload): the inverse of `native_int_result` for `Int` leaves under
+//RS     /// Option/Result/List. The generic helper lets the Prelude's declared Rust
+//RS     /// slot (`i64` or the owned exact Int) choose the target.
+//RS     fn native_int_input(
+//RS         &self,
+//RS         value: &str,
+//RS         ty: &MirType,
+//RS         location: Option<&MirPanicLoc>,
+//RS     ) -> Option<String> {
+//RS         match ty.kind() {
+//RS             MirTypeKind::Tagged {
+//RS                 marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+//RS                 ..
+//RS             } => None,
+//RS             MirTypeKind::Int => {
+//RS                 let (source_file, source_line) = location
+//RS                     .map(|location| {
+//RS                         (
+//RS                             self.source_file_path(location.file).to_string(),
+//RS                             location.line,
+//RS                         )
+//RS                     })
+//RS                     .unwrap_or_else(|| ("<mir>".to_string(), 0));
+//RS                 Some(format!(
+//RS                     "{root}jet_std::jet_int_owned_into_native({value}).unwrap_or_else(|_| {root}jet_arithmetic_stop({source_file:?}, {source_line}u32, \"native Int argument exceeds host range\"))",
+//RS                     root = self.config.root_prefix,
+//RS                 ))
+//RS             }
+//RS             MirTypeKind::InlineRange { base, .. }
+//RS             | MirTypeKind::Tagged { inner: base, .. }
+//RS             | MirTypeKind::Quantity { base, .. } => self.native_int_input(value, base, location),
+//RS             MirTypeKind::Option(inner) => self
+//RS                 .native_int_input("__jet_value", inner, location)
+//RS                 .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
+//RS             MirTypeKind::Result { ok, err } => {
+//RS                 let ok = self.native_int_input("__jet_value", ok, location);
+//RS                 let err = self.native_int_input("__jet_error", err, location);
+//RS                 match (ok, err) {
+//RS                     (Some(ok), Some(err)) => Some(format!(
+//RS                         "({value}).map(|__jet_value| {ok}).map_err(|__jet_error| {err})"
+//RS                     )),
+//RS                     (Some(ok), None) => Some(format!("({value}).map(|__jet_value| {ok})")),
+//RS                     (None, Some(err)) => Some(format!("({value}).map_err(|__jet_error| {err})")),
+//RS                     (None, None) => None,
+//RS                 }
+//RS             }
+//RS             MirTypeKind::List(inner) => self
+//RS                 .native_int_input("__jet_value", inner, location)
+//RS                 .map(|inner| {
+//RS                     format!("({value}).into_iter().map(|__jet_value| {inner}).collect::<Vec<_>>()")
+//RS                 }),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn native_int_result(&self, value: &str, ty: &MirType) -> Option<String> {
+//RS         self.native_int_widening(value, ty, NativeIntSource::DeclaredSlot)
+//RS     }
+//RS 
+//RS     fn native_int_widening(&self, value: &str, ty: &MirType, source: NativeIntSource) -> Option<String> {
+//RS         match ty.kind() {
+//RS             MirTypeKind::Tagged {
+//RS                 marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+//RS                 ..
+//RS             } => None,
+//RS             MirTypeKind::Int => Some(match source {
+//RS                 NativeIntSource::DeclaredSlot => format!(
+//RS                     "{}jet_std::jet_int_owned_from_native_result({value})",
+//RS                     self.config.root_prefix,
+//RS                 ),
+//RS                 NativeIntSource::MachineWord => format!(
+//RS                     "{}jet_std::jet_int_owned_from_i64({value})",
+//RS                     self.config.root_prefix,
+//RS                 ),
+//RS             }),
+//RS             MirTypeKind::InlineRange { base, .. }
+//RS             | MirTypeKind::Tagged { inner: base, .. }
+//RS             | MirTypeKind::Quantity { base, .. } => self.native_int_widening(value, base, source),
+//RS             MirTypeKind::Option(inner) => self
+//RS                 .native_int_widening("__jet_value", inner, source)
+//RS                 .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
+//RS             MirTypeKind::Result { ok, err } => {
+//RS                 let ok = self.native_int_widening("__jet_value", ok, source);
+//RS                 let err = self.native_int_widening("__jet_error", err, source);
+//RS                 match (ok, err) {
+//RS                     (Some(ok), Some(err)) => Some(format!(
+//RS                         "({value}).map(|__jet_value| {ok}).map_err(|__jet_error| {err})"
+//RS                     )),
+//RS                     (Some(ok), None) => Some(format!("({value}).map(|__jet_value| {ok})")),
+//RS                     (None, Some(err)) => Some(format!("({value}).map_err(|__jet_error| {err})")),
+//RS                     (None, None) => None,
+//RS                 }
+//RS             }
+//RS             MirTypeKind::Tuple(fields) => {
+//RS                 let mut needs_conversion = false;
+//RS                 let values = fields
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, (_, field))| {
+//RS                         let original = format!("__jet_value.{index}");
+//RS                         if let Some(converted) = self.native_int_widening(&original, field, source) {
+//RS                             needs_conversion = true;
+//RS                             converted
+//RS                         } else {
+//RS                             original
+//RS                         }
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 needs_conversion.then(|| {
+//RS                     let values = if values.len() == 1 {
+//RS                         format!("{},", values[0])
+//RS                     } else {
+//RS                         values.join(", ")
+//RS                     };
+//RS                     format!("{{ let __jet_value = {value}; ({values}) }}")
+//RS                 })
+//RS             }
+//RS             MirTypeKind::List(inner) => self.native_int_widening("__jet_value", inner, source).map(|inner| {
+//RS                 format!("({value}).into_iter().map(|__jet_value| {inner}).collect::<Vec<_>>()")
+//RS             }),
+//RS             // A native count map (`JetMap<K, i64>`) widens its values once. No
+//RS             // registry row returns one as a raw machine word, so the declared
+//RS             // Rust slot alone selects this conversion.
+//RS             MirTypeKind::Map { value: inner, .. }
+//RS                 if source == NativeIntSource::DeclaredSlot
+//RS                     && matches!(inner.kind(), MirTypeKind::Int) =>
+//RS             {
+//RS                 Some(format!(
+//RS                     "{}jet_std::jet_int_map_owned_from_native_result({value})",
+//RS                     self.config.root_prefix,
+//RS                 ))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-CORE-PATH1: Core path-capable signatures admit `Path` alongside
+//RS     /// `String`, while their shared native kernels consume the String carrier.
+//RS     fn core_call_path_argument(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         arg: &MirCallArg,
+//RS         declared: Option<&crate::AST::Type>,
+//RS     ) -> bool {
+//RS         self.value_type(function, arg.value).nominal_name() == Some("Path")
+//RS             && declared.is_some_and(|ty| match ty {
+//RS                 crate::AST::Type::Named(name) => name == "Path",
+//RS                 crate::AST::Type::Union(members) => members.iter().any(
+//RS                     |member| matches!(member, crate::AST::Type::Named(name) if name == "Path"),
+//RS                 ),
+//RS                 _ => false,
+//RS             })
+//RS     }
+//RS 
+//RS     fn core_call_symbol_for_function(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         row: &MirCoreCall,
+//RS         route_row: &MirPreludeCall,
+//RS         symbol: String,
+//RS         args: &[MirCallArg],
+//RS         type_args: &[MirType],
+//RS         location: Option<&MirPanicLoc>,
+//RS     ) -> String {
+//RS         if self.exact_prelude_adapter(&symbol).is_some() {
+//RS             return self.call_symbol_for_function(
+//RS                 function,
+//RS                 symbol,
+//RS                 args,
+//RS                 type_args,
+//RS                 Some(&route_row.signature.borrow_mask),
+//RS             );
+//RS         }
+//RS         // Core event factories are generic on the native receiver type, not
+//RS         // on the associated `new` method (`JetEvent::<T>::new()` rather than
+//RS         // `JetEvent::new::<T>()`). Keep this at the native call seam so every
+//RS         // event tier receives the same valid Rust spelling. The symbol can
+//RS         // already carry an owner application when a route was specialized.
+//RS         let event_factory = (row.module == "core.event"
+//RS             && matches!(
+//RS                 row.member.as_str(),
+//RS                 "new" | "async_result" | "hook" | "decision_hook"
+//RS             ))
+//RS             || symbol.rsplit_once("::").is_some_and(|(owner, method)| {
+//RS                 matches!(method, "new" | "async_result" | "hook" | "decision_hook")
+//RS                     && owner
+//RS                         .rsplit_once("::")
+//RS                         .map(|(_, owner)| owner)
+//RS                         .and_then(|owner| owner.split('<').next())
+//RS                         .is_some_and(|owner| {
+//RS                             matches!(
+//RS                                 owner,
+//RS                                 "JetEvent" | "JetAsyncEvent" | "JetHook" | "JetDecisionHook"
+//RS                             )
+//RS                         })
+//RS             });
+//RS         let stream_query = row.module == "core.data"
+//RS             && row.member == "query"
+//RS             && args.first().is_some_and(|arg| {
+//RS                 matches!(
+//RS                     self.value_type(function, arg.value).kind(),
+//RS                     MirTypeKind::Apply { name, .. } if name.name == "DataStream"
+//RS                 )
+//RS             });
+//RS         let rendered_type_args = type_args
+//RS             .iter()
+//RS             .map(|ty| self.rust_type(ty))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let symbol = if stream_query {
+//RS             format!("{}jet_data_query_stream", self.config.root_prefix)
+//RS         } else if event_factory && !type_args.is_empty() {
+//RS             let (owner, method) = symbol
+//RS                 .rsplit_once("::")
+//RS                 .expect("core event factory symbol has an associated method");
+//RS             let owner = owner
+//RS                 .split('<')
+//RS                 .next()
+//RS                 .expect("core event factory owner is non-empty");
+//RS             let method = method.split("::<").next().unwrap_or(method);
+//RS             format!("{owner}::<{rendered_type_args}>::{method}")
+//RS         } else if rendered_type_args.is_empty() {
+//RS             symbol
+//RS         } else {
+//RS             format!("{symbol}::<{rendered_type_args}>")
+//RS         };
+//RS         let signature = crate::Sema::core_call_signature(&row.module, &row.member);
+//RS         let args = args
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(index, arg)| {
+//RS                 // A DataStream query consumes the one-shot stream even though
+//RS                 // the list query row shares the same checked Core signature.
+//RS                 let borrowed = if stream_query && index == 0 {
+//RS                     false
+//RS                 } else if row.module == "core.ui" && row.member == "box" {
+//RS                     false
+//RS                 } else {
+//RS                     route_row
+//RS                         .signature
+//RS                         .borrow_mask
+//RS                         .get(index)
+//RS                         .copied()
+//RS                         .unwrap_or(false)
+//RS                 };
+//RS                 // `core.reactive.signal` constructs `JetSignal<JetInt>` directly.
+//RS                 // Keep its checked Int on the exact carrier; the other native
+//RS                 // Int routes below intentionally narrow to host `i64`.
+//RS                 let exact_int_carrier = row.module == "core.reactive" && row.member == "signal";
+//RS                 let native_int = !exact_int_carrier
+//RS                     && row.module == "core.tasks"
+//RS                     && row.member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD
+//RS                     && index == 0
+//RS                     && !borrowed
+//RS                     && matches!(
+//RS                         self.value_type(function, arg.value).kind(),
+//RS                         MirTypeKind::Int
+//RS                     );
+//RS                 if native_int {
+//RS                     let value = self.call_arg_for_function(function, arg, false);
+//RS                     return self.native_int_argument(value, location);
+//RS                 }
+//RS                 let declared = signature
+//RS                     .as_ref()
+//RS                     .and_then(|(params, _)| params.get(index))
+//RS                     .map(|(_, ty)| ty);
+//RS                 if exact_int_carrier {
+//RS                     let value = self.call_arg_for_function(function, arg, false);
+//RS                     if let Some(value) = self.exact_int_argument(function, arg.value, value) {
+//RS                         return value;
+//RS                     }
+//RS                 }
+//RS                 let native_int = match declared {
+//RS                     Some(crate::AST::Type::Int)
+//RS                         if !exact_int_carrier
+//RS                             && matches!(
+//RS                                 self.value_type(function, arg.value).kind(),
+//RS                                 MirTypeKind::Int
+//RS                             ) =>
+//RS                     {
+//RS                         let value = self.native_int_argument(
+//RS                             self.call_arg_for_function(function, arg, true),
+//RS                             location,
+//RS                         );
+//RS                         Some(if borrowed {
+//RS                             format!("&({value})")
+//RS                         } else {
+//RS                             value
+//RS                         })
+//RS                     }
+//RS                     Some(crate::AST::Type::List(inner))
+//RS                         if matches!(inner.as_ref(), crate::AST::Type::Int) =>
+//RS                     {
+//RS                         let values = format!(
+//RS                             "({}).iter().map(|__jet_value| {}).collect::<Vec<_>>()",
+//RS                             self.call_arg_for_function(function, arg, true),
+//RS                             self.native_int_argument("__jet_value".to_string(), location),
+//RS                         );
+//RS                         Some(if borrowed {
+//RS                             format!("&({values})")
+//RS                         } else {
+//RS                             values
+//RS                         })
+//RS                     }
+//RS                     _ => None,
+//RS                 };
+//RS                 if let Some(value) = native_int {
+//RS                     return value;
+//RS                 }
+//RS                 let path_argument = self.core_call_path_argument(function, arg, declared);
+//RS                 let value = if path_argument {
+//RS                     let mut arg = arg.clone();
+//RS                     // The checked union admits Path, but the native kernel
+//RS                     // receives the carrier String rather than a union value.
+//RS                     arg.widen_to_union = None;
+//RS                     self.call_arg_for_function(function, &arg, borrowed)
+//RS                 } else {
+//RS                     self.call_arg_for_function(function, arg, borrowed)
+//RS                 };
+//RS                 // Jet Option values are JetOutcome carriers. A non-direct
+//RS                 // Core row with a formal Option parameter names a native
+//RS                 // function-specific ABI, so project that carrier once here.
+//RS                 let native_option = !borrowed
+//RS                     && !row.aot_direct
+//RS                     && declared.is_some_and(|ty| matches!(ty, crate::AST::Type::Option(_)))
+//RS                     && matches!(
+//RS                         self.value_type(function, arg.value).kind(),
+//RS                         MirTypeKind::Option(_)
+//RS                     );
+//RS                 if native_option {
+//RS                     return format!("({value}).ok()");
+//RS                 }
+//RS                 if !path_argument {
+//RS                     return value;
+//RS                 }
+//RS                 let path = format!("({value}).inner.to_string_lossy().into_owned()");
+//RS                 if borrowed {
+//RS                     format!("&{path}")
+//RS                 } else {
+//RS                     path
+//RS                 }
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         format!("{symbol}({args})")
+//RS     }
+//RS 
+//RS     /// D-SHAPE-PROJECT1=A: `args.decode<T>()` and `T.merge(flags, settings)`
+//RS     /// build T's builder spec from the same `MirCliInput` rows the entry uses
+//RS     /// (`cli_spec_expr`), so `--help` and diagnostics are byte-identical.
+//RS     fn cli_shape_core_call(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         member: &str,
+//RS         args: &[MirCallArg],
+//RS         type_args: &[MirType],
+//RS     ) -> String {
+//RS         let root = &self.config.root_prefix;
+//RS         let [target] = type_args else {
+//RS             panic!("MIR core.args.{member} has no checked type argument");
+//RS         };
+//RS         let def = self
+//RS             .program
+//RS             .types
+//RS             .iter()
+//RS             .find(|def| Some(def.id) == target.identity)
+//RS             .unwrap_or_else(|| panic!("MIR core.args.{member} target type has no definition row"));
+//RS         let cli = def.cli.as_ref().unwrap_or_else(|| {
+//RS             panic!(
+//RS                 "MIR core.args.{member} target `{}` carries no #CLI shape",
+//RS                 def.name
+//RS             )
+//RS         });
+//RS         let program = format!(
+//RS             "&{root}jet_args_source_program_name(__jet_argv.first().map(String::as_str).unwrap_or(\"\"))"
+//RS         );
+//RS         let mut spec = self.cli_spec_expr(
+//RS             &cli.inputs,
+//RS             cli.description.as_deref(),
+//RS             cli.standard,
+//RS             cli.version.as_deref(),
+//RS             &program,
+//RS         );
+//RS         for command in &cli.commands {
+//RS             let command_spec = self.cli_spec_expr(
+//RS                 &command.inputs,
+//RS                 command.description.as_deref(),
+//RS                 false,
+//RS                 None,
+//RS                 &program,
+//RS             );
+//RS             spec = format!(
+//RS                 "{root}jet_args_subcommand({spec}, &{:?}.to_string(), &{:?}.to_string(), {command_spec})",
+//RS                 command.name,
+//RS                 command.description.clone().unwrap_or_default()
+//RS             );
+//RS         }
+//RS         let target_ty = self.rust_type(target);
+//RS         let names = self.shape_name_map(target, ShapeProjectionKind::Args, "core.args");
+//RS         let values = args
+//RS             .iter()
+//RS             .map(|arg| self.call_arg_for_function(function, arg, true))
+//RS             .collect::<Vec<_>>();
+//RS         match member {
+//RS             "decode" => format!(
+//RS                 "{{ let __jet_argv = {root}jet_std_io_args(); let __jet_spec = {spec}; {root}jet_args_decode::<{target_ty}>(&__jet_spec, &__jet_argv, {names}) }}"
+//RS             ),
+//RS             _ => format!(
+//RS                 "{{ let __jet_argv = {root}jet_std_io_args(); let __jet_spec = {spec}; {root}jet_config_merge::<{target_ty}>(&__jet_spec, &__jet_argv, {names}, {}) }}",
+//RS                 values.join(", ")
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Render `&[(selected source name, JSON decode key)]` for every
+//RS     /// non-skipped field of `target` from its canonical `ShapeFieldNames`.
+//RS     /// Every projection uses its selected name; adapters never recase fields.
+//RS     fn shape_name_map(&self, target: &MirType, kind: ShapeProjectionKind, member: &str) -> String {
+//RS         let def = self
+//RS             .program
+//RS             .types
+//RS             .iter()
+//RS             .find(|def| Some(def.id) == target.identity)
+//RS             .unwrap_or_else(|| panic!("MIR {member} target type has no definition row"));
+//RS         let MirTypeDefKind::Struct { fields, .. } = &def.kind else {
+//RS             panic!("MIR {member} target `{}` is not a struct", def.name);
+//RS         };
+//RS         let pairs = fields
+//RS             .iter()
+//RS             .filter(|field| !field.skip && !field.computed)
+//RS             .map(|field| {
+//RS                 let source = field
+//RS                     .shape_names
+//RS                     .name_for(kind)
+//RS                     .expect("checked MIR field is missing its shape name");
+//RS                 let key = field
+//RS                     .shape_names
+//RS                     .name_for(ShapeProjectionKind::Json)
+//RS                     .expect("checked MIR field is missing its JSON shape name");
+//RS                 format!("({source:?}, {key:?})")
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         format!("&[{}]", pairs.join(", "))
+//RS     }
+//RS 
+//RS     fn index(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         base: MirValueId,
+//RS         index: MirValueId,
+//RS         kind: jet_foundation::MIR::MirIndexKind,
+//RS         access: MirAccess,
+//RS         location: MirPanicLoc,
+//RS         context: &MirPanicContext,
+//RS     ) -> String {
+//RS         if matches!(
+//RS             (kind, access),
+//RS             (
+//RS                 jet_foundation::MIR::MirIndexKind::List
+//RS                     | jet_foundation::MIR::MirIndexKind::FixedListProof,
+//RS                 MirAccess::Read
+//RS             )
+//RS         ) && self.is_columnar_list(self.value_type(function, base))
+//RS         {
+//RS             let base = self.borrowed_value_reference(function, base, MirAccess::Read);
+//RS             let index = self.index_operand(function, index, location);
+//RS             let file = format!("{:?}", self.source_file_path(location.file));
+//RS             return format!("({base}).gather_at({index}, {file}, {}u32)", location.line);
+//RS         }
+//RS         let base = match access {
+//RS             MirAccess::Read | MirAccess::Write => {
+//RS                 self.borrowed_value_reference(function, base, access)
+//RS             }
+//RS             MirAccess::Move => panic!("MIR index move has no checked Prelude route"),
+//RS         };
+//RS         let index = if matches!(kind, jet_foundation::MIR::MirIndexKind::Map) {
+//RS             self.value_borrow(index)
+//RS         } else {
+//RS             self.index_operand(function, index, location)
+//RS         };
+//RS         self.index_expression(call, base, index, location, Some(context))
+//RS     }
+//RS 
+//RS     fn index_operand(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         index: MirValueId,
+//RS         location: MirPanicLoc,
+//RS     ) -> String {
+//RS         let mut ty = self.value_type(function, index);
+//RS         loop {
+//RS             match ty.kind() {
+//RS                 MirTypeKind::InlineRange { base, .. }
+//RS                 | MirTypeKind::Tagged { inner: base, .. }
+//RS                 | MirTypeKind::Quantity { base, .. } => ty = base,
+//RS                 MirTypeKind::Int => {
+//RS                     // A materialized index keeps the value it had when it was
+//RS                     // computed. Forwarding to its source place would let a
+//RS                     // deferred element read observe a later write, as in
+//RS                     // `v :: xs[self.at]` followed by `self.at += 1`.
+//RS                     let value = if self.direct_borrow_only(function, index) {
+//RS                         self.borrowed_value_reference(function, index, MirAccess::Read)
+//RS                     } else {
+//RS                         self.value_slot_reference(index, false)
+//RS                     };
+//RS                     let file = self.source_file_path(location.file);
+//RS                     let root = &self.config.root_prefix;
+//RS                     return format!(
+//RS                         "{root}jet_std::jet_int_owned_to_i64({value}).unwrap_or_else(|_| {root}jet_arithmetic_stop({file:?}, {}u32, \"index exceeds host range\"))",
+//RS                         location.line
+//RS                     );
+//RS                 }
+//RS                 _ => return self.value_owned(index),
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn index_expression(
+//RS         &self,
+//RS         call: MirPreludeCallId,
+//RS         base: String,
+//RS         index: String,
+//RS         location: MirPanicLoc,
+//RS         context: Option<&MirPanicContext>,
+//RS     ) -> String {
+//RS         let args = self.index_arguments(call, base, index, location, context);
+//RS         self.prelude_call_args_exact(call, &args)
+//RS     }
+//RS 
+//RS     fn index_arguments(
+//RS         &self,
+//RS         call: MirPreludeCallId,
+//RS         base: String,
+//RS         index: String,
+//RS         location: MirPanicLoc,
+//RS         context: Option<&MirPanicContext>,
+//RS     ) -> Vec<String> {
+//RS         let route = self.prelude_row(call);
+//RS         let file = format!("{:?}", self.source_file_path(location.file));
+//RS         let line = format!("{}u32", location.line);
+//RS         let mut args = vec![base, index, file, line];
+//RS         let context_values = context
+//RS             .map(|context| {
+//RS                 vec![
+//RS                     format!("{:?}", context.function),
+//RS                     format!("{:?}", context.source_line),
+//RS                     format!("{}u32", location.column),
+//RS                     format!("{}u32", context.caret),
+//RS                 ]
+//RS             })
+//RS             .unwrap_or_default();
+//RS         let additional = route
+//RS             .signature
+//RS             .arity
+//RS             .checked_sub(args.len())
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "MIR index route {:?} has fewer arguments than its base/index location prefix",
+//RS                     call
+//RS                 )
+//RS             });
+//RS         if additional > context_values.len() {
+//RS             panic!(
+//RS                 "MIR index route {:?} requires {} context arguments but MIR supplied {}",
+//RS                 call,
+//RS                 additional,
+//RS                 context_values.len()
+//RS             );
+//RS         }
+//RS         args.extend(context_values.into_iter().take(additional));
+//RS         args
+//RS     }
+//RS 
+//RS     fn slice(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         base: MirValueId,
+//RS         start: MirValueId,
+//RS         end: MirValueId,
+//RS         range: Option<MirValueId>,
+//RS         location: jet_foundation::MIR::MirPanicLoc,
+//RS     ) -> String {
+//RS         let row = self.prelude_row(call);
+//RS         let file = format!("{:?}", self.source_file_path(location.file));
+//RS         let line = format!("{}u32", location.line);
+//RS         let base = if row.signature.borrow_mask.first().copied().unwrap_or(false) {
+//RS             self.borrowed_value_reference(function, base, MirAccess::Read)
+//RS         } else {
+//RS             self.value_owned(base)
+//RS         };
+//RS         let args = match range {
+//RS             Some(range) => {
+//RS                 let range = if row.signature.borrow_mask.get(1).copied().unwrap_or(false) {
+//RS                     self.value_borrow(range)
+//RS                 } else {
+//RS                     self.value_owned(range)
+//RS                 };
+//RS                 vec![base, range, file, line]
+//RS             }
+//RS             None => vec![
+//RS                 base,
+//RS                 self.native_int_argument(self.value_owned(start), Some(&location)),
+//RS                 self.native_int_argument(self.value_owned(end), Some(&location)),
+//RS                 file,
+//RS                 line,
+//RS             ],
+//RS         };
+//RS         self.prelude_call_args_exact(call, &args)
+//RS     }
+//RS 
+//RS     fn prelude_call_args_exact(&self, call: MirPreludeCallId, args: &[String]) -> String {
+//RS         let arity = self.prelude_row(call).signature.arity;
+//RS         if arity != args.len() {
+//RS             panic!(
+//RS                 "MIR Prelude call {:?} expects {} arguments, adapter supplied {}",
+//RS                 call,
+//RS                 arity,
+//RS                 args.len()
+//RS             );
+//RS         }
+//RS         self.prelude_call_args(call, args)
+//RS     }
+//RS 
+//RS     fn source_file_path(&self, id: jet_foundation::MIR::MirSourceFileId) -> &str {
+//RS         self.program
+//RS             .source_files
+//RS             .iter()
+//RS             .find(|row| row.id == id)
+//RS             .map(|row| row.path.as_str())
+//RS             .unwrap_or_else(|| panic!("MIR source file ID {:?} has no row", id))
+//RS     }
+//RS 
+//RS     fn validate_pattern_capture_index(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         matched: MirValueId,
+//RS         index: usize,
+//RS     ) {
+//RS         let instruction = self
+//RS             .value_instruction(function, matched)
+//RS             .unwrap_or_else(|| panic!("MIR pattern match value {:?} has no producer", matched));
+//RS         let valid = match &instruction.operation {
+//RS             MirOperation::Semantic(MirSemanticOp::TextPatternMatch { parts, .. }) => parts
+//RS                 .iter()
+//RS                 .filter_map(|part| match part {
+//RS                     MirTextPatternPart::Literal(_) => None,
+//RS                     MirTextPatternPart::Hole { kind, .. } => {
+//RS                         match kind {
+//RS                             MirTextHoleKind::Text
+//RS                             | MirTextHoleKind::Int
+//RS                             | MirTextHoleKind::Float
+//RS                             | MirTextHoleKind::Bool
+//RS                             | MirTextHoleKind::InlineRange { .. } => {}
+//RS                         }
+//RS                         Some(())
+//RS                     }
+//RS                 })
+//RS                 .nth(index),
+//RS             MirOperation::Semantic(MirSemanticOp::CursorTakePattern { parts, .. }) => parts
+//RS                 .iter()
+//RS                 .filter_map(|part| match part {
+//RS                     MirTextPatternPart::Literal(_) => None,
+//RS                     MirTextPatternPart::Hole { kind, .. } => {
+//RS                         match kind {
+//RS                             MirTextHoleKind::Text
+//RS                             | MirTextHoleKind::Int
+//RS                             | MirTextHoleKind::Float
+//RS                             | MirTextHoleKind::Bool
+//RS                             | MirTextHoleKind::InlineRange { .. } => {}
+//RS                         }
+//RS                         Some(())
+//RS                     }
+//RS                 })
+//RS                 .nth(index),
+//RS             MirOperation::Semantic(MirSemanticOp::BinaryPatternMatch { parts, .. })
+//RS             | MirOperation::Semantic(MirSemanticOp::ReaderTakePattern { parts, .. }) => parts
+//RS                 .iter()
+//RS                 .filter_map(|part| match part {
+//RS                     MirBinaryPatternPart::Literal(_) => None,
+//RS                     MirBinaryPatternPart::Bits { width, little, .. } => {
+//RS                         let _ = (width, little);
+//RS                         Some(())
+//RS                     }
+//RS                     MirBinaryPatternPart::Rest { .. } => Some(()),
+//RS                 })
+//RS                 .nth(index),
+//RS             _ => None,
+//RS         };
+//RS         if valid.is_none() {
+//RS             panic!("MIR pattern capture index {index} has no descriptor");
+//RS         }
+//RS     }
+//RS 
+//RS     fn pattern_capture(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         matched: MirValueId,
+//RS         index: usize,
+//RS         result: Option<MirValueId>,
+//RS     ) -> String {
+//RS         result.expect("MIR pattern capture has no result value");
+//RS         self.validate_pattern_capture_index(function, matched, index);
+//RS         format!(
+//RS             "({}).as_ref().unwrap_or_else(|_| unreachable!(\"MIR pattern capture unavailable\")).{index}.clone()",
+//RS             self.value_slot_reference(matched, false),
+//RS         )
+//RS     }
+//RS 
+//RS     fn pattern_capture_value(&self, ty: &MirType, capture: &str) -> String {
+//RS         match ty.kind() {
+//RS             MirTypeKind::String => format!(
+//RS                 "match {capture} {{ JetPatternCapture::Text(value) => value, _ => unreachable!(\"MIR text capture type mismatch\") }}"
+//RS             ),
+//RS             MirTypeKind::Char => format!(
+//RS                 "match {capture} {{ JetPatternCapture::Text(value) => {{ let mut chars = value.chars(); match (chars.next(), chars.next()) {{ (Some(value), None) => value, _ => unreachable!(\"MIR char capture contains more than one scalar\") }} }}, _ => unreachable!(\"MIR char capture type mismatch\") }}"
+//RS             ),
+//RS             MirTypeKind::Int
+//RS             | MirTypeKind::IntN { .. }
+//RS             | MirTypeKind::InlineRange { .. }
+//RS             | MirTypeKind::Measure(_) => format!(
+//RS                 "match {capture} {{ JetPatternCapture::Int(value) => value as {}, _ => unreachable!(\"MIR integer capture type mismatch\") }}",
+//RS                 self.rust_type(ty)
+//RS             ),
+//RS             MirTypeKind::Float | MirTypeKind::Float32 => format!(
+//RS                 "match {capture} {{ JetPatternCapture::Float(value) => value as {}, _ => unreachable!(\"MIR float capture type mismatch\") }}",
+//RS                 self.rust_type(ty)
+//RS             ),
+//RS             MirTypeKind::Bool => format!(
+//RS                 "match {capture} {{ JetPatternCapture::Bool(value) => value, _ => unreachable!(\"MIR bool capture type mismatch\") }}"
+//RS             ),
+//RS             MirTypeKind::List(inner) => match inner.kind() {
+//RS                 MirTypeKind::IntN {
+//RS                     signed: false,
+//RS                     bits: 8,
+//RS                 } => format!(
+//RS                     "match {capture} {{ JetPatternCapture::Bytes(value) => value, _ => unreachable!(\"MIR byte capture type mismatch\") }}"
+//RS                 ),
+//RS                 MirTypeKind::Int
+//RS                 | MirTypeKind::Float
+//RS                 | MirTypeKind::Bool
+//RS                 | MirTypeKind::String
+//RS                 | MirTypeKind::Char
+//RS                 | MirTypeKind::List(_)
+//RS                 | MirTypeKind::Map { .. }
+//RS                 | MirTypeKind::Shared(_)
+//RS                 | MirTypeKind::Option(_)
+//RS                 | MirTypeKind::Result { .. }
+//RS                 | MirTypeKind::Fn(_)
+//RS                 | MirTypeKind::SendFn { .. }
+//RS                 | MirTypeKind::Apply { .. }
+//RS                 | MirTypeKind::TraitObject(_)
+//RS                 | MirTypeKind::Tuple(_)
+//RS                 | MirTypeKind::FixedList { .. }
+//RS                 | MirTypeKind::IntN { .. }
+//RS                 | MirTypeKind::InlineRange { .. }
+//RS                 | MirTypeKind::Tagged { .. }
+//RS                 | MirTypeKind::Quantity { .. }
+//RS                 | MirTypeKind::Float32
+//RS                 | MirTypeKind::Union(_)
+//RS                 | MirTypeKind::Measure(_) => {
+//RS                     panic!("MIR list pattern capture is not a binary rest carrier")
+//RS                 }
+//RS             },
+//RS             MirTypeKind::Apply { name, .. } if name.name == jet_foundation::Syntax::TYPE_BYTES => format!(
+//RS                 "match {capture} {{ JetPatternCapture::Bytes(value) => <{}JetByteBuffer as From<Vec<u8>>>::from(value), _ => unreachable!(\"MIR byte capture type mismatch\") }}",
+//RS                 self.config.root_prefix,
+//RS             ),
+//RS             MirTypeKind::Map { .. }
+//RS             | MirTypeKind::Shared(_)
+//RS             | MirTypeKind::Option(_)
+//RS             | MirTypeKind::Result { .. }
+//RS             | MirTypeKind::Fn(_)
+//RS             | MirTypeKind::SendFn { .. }
+//RS             | MirTypeKind::Apply { .. }
+//RS             | MirTypeKind::TraitObject(_)
+//RS             | MirTypeKind::Tuple(_)
+//RS             | MirTypeKind::FixedList { .. }
+//RS             | MirTypeKind::Tagged { .. }
+//RS             | MirTypeKind::Union(_)
+//RS             | MirTypeKind::Quantity { .. } => {
+//RS                 panic!("MIR pattern capture result type is not sema-admitted")
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn pattern_match_result(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         result: Option<MirValueId>,
+//RS         scan: &str,
+//RS     ) -> String {
+//RS         let result = result.expect("MIR pattern match has no result value");
+//RS         let payload = self
+//RS             .value_type(function, result)
+//RS             .option_inner()
+//RS             .expect("MIR pattern match does not return Option");
+//RS         let MirTypeKind::Tuple(fields) = payload.kind() else {
+//RS             panic!("MIR pattern match does not carry typed captures");
+//RS         };
+//RS         let tuple = if fields.is_empty() {
+//RS             "|_| ()".to_string()
+//RS         } else {
+//RS             let captures = fields
+//RS                 .iter()
+//RS                 .map(|(_, ty)| {
+//RS                     self.pattern_capture_value(
+//RS                         ty,
+//RS                         "__jet_captures.next().expect(\"MIR pattern capture is missing\")",
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             format!("|__jet_captures| {{ let mut __jet_captures = __jet_captures.into_iter(); ({captures},) }}")
+//RS         };
+//RS         format!(
+//RS             "({scan}).map({tuple}).ok_or({}JetAbsent)",
+//RS             self.config.root_prefix
+//RS         )
+//RS     }
+//RS 
+//RS     fn conversion(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS         parameters: &[MirValueId],
+//RS         target: &MirType,
+//RS         conversion: &MirConversion,
+//RS     ) -> String {
+//RS         match conversion {
+//RS             MirConversion::Transparent => {
+//RS                 if !parameters.is_empty() {
+//RS                     panic!("transparent MIR conversion has parameters");
+//RS                 }
+//RS                 self.transparent_conversion(function, value, target)
+//RS             }
+//RS             MirConversion::NumericCast => {
+//RS                 let source = self.value_type(function, value);
+//RS                 let value = self.value_owned(value);
+//RS                 if matches!(source.kind(), MirTypeKind::Int) {
+//RS                     if matches!(target.kind(), MirTypeKind::Int) {
+//RS                         return value;
+//RS                     }
+//RS                     if target.is_float() {
+//RS                         return format!(
+//RS                             "{}jet_std::jet_int_owned_to_f64(&({value})) as {}",
+//RS                             self.config.root_prefix,
+//RS                             self.rust_type(target),
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 if matches!(target.kind(), MirTypeKind::Int) {
+//RS                     let Some((signed, bits)) = source.fixed_int() else {
+//RS                         panic!("MIR numeric cast to exact Int requires a fixed integer");
+//RS                     };
+//RS                     // Fixed widths through 32 bits are already representable by
+//RS                     // the native exact-Int carrier. Keep this widening inline;
+//RS                     // consulting the BigInt constructor in every byte loop body
+//RS                     // defeats the borrowed cursor's allocation-free path.
+//RS                     if bits <= 32 {
+//RS                         return format!(
+//RS                             "jet_foundation::Numeric::JetInt::from_i64(({value}) as i64)"
+//RS                         );
+//RS                     }
+//RS                     let scalar = if signed { "i64" } else { "u64" };
+//RS                     format!(
+//RS                         "{}jet_std::jet_int_owned_from_{scalar}(({value}) as {scalar})",
+//RS                         self.config.root_prefix,
+//RS                     )
+//RS                 } else {
+//RS                     format!("({value}) as {}", self.rust_type(target))
+//RS                 }
+//RS             }
+//RS             MirConversion::SendFn => {
+//RS                 if !parameters.is_empty() {
+//RS                     panic!("SendFn MIR conversion has parameters");
+//RS                 }
+//RS                 if !matches!(target.kind(), MirTypeKind::SendFn { .. }) {
+//RS                     panic!("SendFn MIR conversion target is not a SendFn carrier");
+//RS                 }
+//RS                 if !matches!(
+//RS                     self.value_type(function, value).kind(),
+//RS                     MirTypeKind::SendFn { .. }
+//RS                 ) {
+//RS                     panic!("SendFn MIR conversion source is not a SendFn carrier");
+//RS                 }
+//RS                 self.value_move(value)
+//RS             }
+//RS             MirConversion::Prelude {
+//RS                 call,
+//RS                 location,
+//RS                 fallibility,
+//RS             } => {
+//RS                 if matches!(
+//RS                     self.prelude_row(*call).member.as_str(),
+//RS                     "checked_widen"
+//RS                         | "int_try_from"
+//RS                         | "fixed_try_from"
+//RS                         | "inline_range"
+//RS                         | "int_checked_fixed"
+//RS                         | "float_to_int"
+//RS                         | "float_narrow"
+//RS                 ) {
+//RS                     self.numeric_conversion(
+//RS                         function,
+//RS                         value,
+//RS                         parameters,
+//RS                         target,
+//RS                         *call,
+//RS                         location,
+//RS                         fallibility,
+//RS                     )
+//RS                 } else {
+//RS                     let mut args = Vec::with_capacity(parameters.len() + 3);
+//RS                     args.push(self.value_owned(value));
+//RS                     args.extend(
+//RS                         parameters
+//RS                             .iter()
+//RS                             .map(|parameter| self.value_owned(*parameter)),
+//RS                     );
+//RS                     let extras = vec![
+//RS                         format!("{:?}", self.source_file_path(location.file)),
+//RS                         format!("{}u32", location.line),
+//RS                     ];
+//RS                     self.append_prelude_context(*call, &mut args, &extras);
+//RS                     self.prelude_call_args(*call, &args)
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn numeric_conversion(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS         parameters: &[MirValueId],
+//RS         target: &MirType,
+//RS         call: MirPreludeCallId,
+//RS         location: &MirPanicLoc,
+//RS         fallibility: &MirCallFallibility,
+//RS     ) -> String {
+//RS         let source = self.value_type(function, value);
+//RS         let member = self.prelude_row(call).member.as_str();
+//RS         let expected = match member {
+//RS             "checked_widen" if source.fixed_int().is_some() => 2,
+//RS             "checked_widen" => 1,
+//RS             "int_try_from" => 1,
+//RS             "fixed_try_from" => 2,
+//RS             "inline_range" => 2,
+//RS             "int_checked_fixed" => 1,
+//RS             "float_to_int" => 1,
+//RS             "float_narrow" => 0,
+//RS             _ => panic!("MIR Prelude call {:?} is not a numeric conversion", call),
+//RS         };
+//RS         if parameters.len() != expected {
+//RS             panic!(
+//RS                 "MIR numeric conversion {member:?} has {} parameters, expected {expected}",
+//RS                 parameters.len()
+//RS             );
+//RS         }
+//RS         let symbol = self.prelude_symbol(call);
+//RS         let adapter = self
+//RS             .exact_prelude_adapter(&symbol)
+//RS             .filter(|_| matches!(source.kind(), MirTypeKind::Int));
+//RS         let input = if adapter.is_some() {
+//RS             self.value_slot_reference(value, false)
+//RS         } else {
+//RS             self.value_owned(value)
+//RS         };
+//RS         let mut args = match member {
+//RS             "checked_widen" => {
+//RS                 let mut args = Vec::with_capacity(5);
+//RS                 if source.fixed_int().is_some() {
+//RS                     args.push(format!("({input}) as u64"));
+//RS                     args.push(self.numeric_conversion_parameter(parameters, 0, member));
+//RS                     args.push(self.numeric_conversion_parameter(parameters, 1, member));
+//RS                 } else {
+//RS                     args.push(input);
+//RS                     args.push(self.numeric_conversion_parameter(parameters, 0, member));
+//RS                 }
+//RS                 args
+//RS             }
+//RS             "int_try_from" => vec![
+//RS                 input,
+//RS                 self.numeric_conversion_parameter(parameters, 0, member),
+//RS             ],
+//RS             "fixed_try_from" => vec![
+//RS                 format!("({input}) as u64"),
+//RS                 self.numeric_conversion_parameter(parameters, 0, member),
+//RS                 self.numeric_conversion_parameter(parameters, 1, member),
+//RS             ],
+//RS             "inline_range" => vec![
+//RS                 if adapter.is_some() {
+//RS                     input
+//RS                 } else {
+//RS                     format!("({input}) as i64")
+//RS                 },
+//RS                 self.numeric_conversion_parameter(parameters, 0, member),
+//RS                 self.numeric_conversion_parameter(parameters, 1, member),
+//RS             ],
+//RS             "int_checked_fixed" => vec![
+//RS                 input,
+//RS                 self.numeric_conversion_parameter(parameters, 0, member),
+//RS             ],
+//RS             "float_to_int" => vec![
+//RS                 format!("({input}) as f64"),
+//RS                 self.numeric_conversion_parameter(parameters, 0, member),
+//RS             ],
+//RS             "float_narrow" => vec![format!("({input}) as f64")],
+//RS             _ => panic!("MIR Prelude call {:?} is not a numeric conversion", call),
+//RS         };
+//RS         if matches!(member, "checked_widen" | "int_checked_fixed") {
+//RS             let extras = vec![
+//RS                 format!("{:?}", self.source_file_path(location.file)),
+//RS                 format!("{}u32", location.line),
+//RS             ];
+//RS             self.append_prelude_context(call, &mut args, &extras);
+//RS         }
+//RS         self.validate_prelude_count(self.prelude_row(call), args.len());
+//RS         let symbol = adapter
+//RS             .map(|(symbol, _)| format!("{}{symbol}", self.config.root_prefix))
+//RS             .unwrap_or(symbol);
+//RS         let emitted = format!("{symbol}({})", args.join(", "));
+//RS         self.numeric_conversion_result(&emitted, target, fallibility)
+//RS     }
+//RS 
+//RS     fn numeric_conversion_parameter(
+//RS         &self,
+//RS         parameters: &[MirValueId],
+//RS         index: usize,
+//RS         member: &str,
+//RS     ) -> String {
+//RS         parameters
+//RS             .get(index)
+//RS             .map(|parameter| self.value_owned(*parameter))
+//RS             .unwrap_or_else(|| {
+//RS                 panic!("MIR numeric conversion {member:?} is missing parameter {index}")
+//RS             })
+//RS     }
+//RS 
+//RS     fn numeric_conversion_result(
+//RS         &self,
+//RS         emitted: &str,
+//RS         target: &MirType,
+//RS         fallibility: &MirCallFallibility,
+//RS     ) -> String {
+//RS         match fallibility {
+//RS             MirCallFallibility::Infallible => self.numeric_conversion_value(emitted, target, false),
+//RS             MirCallFallibility::Failure(MirFailureCarrier::Result { success, .. }) => {
+//RS                 let Some((ok, _error)) = target.result_parts() else {
+//RS                     panic!("MIR numeric conversion Result carrier has a non-Result target");
+//RS                 };
+//RS                 if !ok.same_checked_type(success) {
+//RS                     panic!("MIR numeric conversion Result carrier disagrees with its target");
+//RS                 }
+//RS                 let success = self.numeric_conversion_value("__jet_conversion_value", ok, true);
+//RS                 format!(
+//RS                     "match {emitted} {{ \
+//RS                         Ok(__jet_conversion_value) => Ok({success}), \
+//RS                         Err(__jet_conversion_error) => Err(__jet_conversion_error.into()) \
+//RS                     }}"
+//RS                 )
+//RS             }
+//RS             MirCallFallibility::Failure(carrier) => {
+//RS                 panic!(
+//RS                     "MIR numeric conversion has unsupported failure carrier {:?}",
+//RS                     carrier
+//RS                 )
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn numeric_conversion_value(
+//RS         &self,
+//RS         raw: &str,
+//RS         target: &MirType,
+//RS         result_success: bool,
+//RS     ) -> String {
+//RS         fn exact_int_carrier(ty: &MirType) -> bool {
+//RS             match ty.kind() {
+//RS                 MirTypeKind::Int => true,
+//RS                 MirTypeKind::InlineRange { base, .. }
+//RS                 | MirTypeKind::Tagged { inner: base, .. }
+//RS                 | MirTypeKind::Quantity { base, .. } => exact_int_carrier(base),
+//RS                 _ => false,
+//RS             }
+//RS         }
+//RS 
+//RS         let base = self.distinct_base(target);
+//RS         let base_ty = base.unwrap_or(target);
+//RS         let cast = if result_success && exact_int_carrier(base_ty) {
+//RS             format!(
+//RS                 "{}jet_std::jet_int_owned_from_i128(({raw}) as i128)",
+//RS                 self.config.root_prefix
+//RS             )
+//RS         } else {
+//RS             format!("({raw}) as {}", self.rust_type(base_ty))
+//RS         };
+//RS         if base.is_some() {
+//RS             format!("{}({cast})", self.rust_type(target))
+//RS         } else {
+//RS             cast
+//RS         }
+//RS     }
+//RS 
+//RS     fn transparent_conversion(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         value: MirValueId,
+//RS         target: &MirType,
+//RS     ) -> String {
+//RS         let source = self.value_type(function, value);
+//RS         let value = self.value_owned(value);
+//RS         let target_distinct = self.is_distinct_type(target);
+//RS         let source_distinct = self.is_distinct_type(source);
+//RS         match (source_distinct, target_distinct) {
+//RS             (false, true) => format!("{}({value})", self.rust_type(target)),
+//RS             (true, false) => format!("({value}).0"),
+//RS             (true, true) | (false, false) => {
+//RS                 panic!("MIR transparent conversion is not a distinct representation pair")
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn is_distinct_type(&self, ty: &MirType) -> bool {
+//RS         let Some(id) = ty.identity else {
+//RS             return false;
+//RS         };
+//RS         self.program
+//RS             .types
+//RS             .iter()
+//RS             .find(|def| def.id == id)
+//RS             .is_some_and(|def| matches!(&def.kind, MirTypeDefKind::Distinct { .. }))
+//RS     }
+//RS     fn distinct_base(&self, ty: &MirType) -> Option<&MirType> {
+//RS         let id = ty.nominal_id()?;
+//RS         self.program
+//RS             .types
+//RS             .iter()
+//RS             .find(|def| def.id == id)
+//RS             .and_then(|def| match &def.kind {
+//RS                 MirTypeDefKind::Distinct { base, .. } => Some(base),
+//RS                 _ => None,
+//RS             })
+//RS     }
+//RS 
+//RS     fn loop_range_init(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS 
+//RS         start: MirValueId,
+//RS         end: MirValueId,
+//RS         step: Option<MirValueId>,
+//RS         exclusive: bool,
+//RS         location: MirPanicLoc,
+//RS     ) -> String {
+//RS         let (step, has_step) = step
+//RS             .map(|value| {
+//RS                 (
+//RS                     self.index_operand(function, value, location),
+//RS                     "true".to_string(),
+//RS                 )
+//RS             })
+//RS             .unwrap_or_else(|| ("0".to_string(), "false".to_string()));
+//RS         self.prelude_call_args_exact(
+//RS             call,
+//RS             &[
+//RS                 self.index_operand(function, start, location),
+//RS                 self.index_operand(function, end, location),
+//RS                 step,
+//RS                 has_step,
+//RS                 exclusive.to_string(),
+//RS             ],
+//RS         )
+//RS     }
+//RS     #[allow(dead_code)]
+//RS     fn byte_loop_collection(&self, function: &MirFunction, value: MirValueId) -> bool {
+//RS         self.value_type(function, value)
+//RS             .list_element()
+//RS             .is_some_and(|element| {
+//RS                 matches!(
+//RS                     element.kind(),
+//RS                     MirTypeKind::IntN {
+//RS                         signed: false,
+//RS                         bits: 8,
+//RS                     }
+//RS                 )
+//RS             })
+//RS     }
+//RS 
+//RS     fn byte_loop_cursor(&self, function: &MirFunction, value: MirValueId) -> bool {
+//RS         self.value_type(function, value).nominal_name() == Some("ByteIterCursor")
+//RS     }
+//RS     fn loop_iter_init(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         collection: MirValueId,
+//RS         step: Option<MirValueId>,
+//RS         by_value: bool,
+//RS         source_kind: &MirLoopSourceKind,
+//RS         location: MirPanicLoc,
+//RS     ) -> String {
+//RS         let byte_loop = !by_value
+//RS             && matches!(source_kind, MirLoopSourceKind::Plain)
+//RS             && self.byte_loop_collection(function, collection);
+//RS         let shared_slice = !by_value
+// END-PORT-PENDING 2014 crates/jet-codegen/src/Codegen/MIRRust.rs:23401-25200
+

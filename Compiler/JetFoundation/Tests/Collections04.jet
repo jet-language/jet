@@ -1,0 +1,13 @@
+use JetFoundation.Collections04.JetInt
+
+// Rust: crates/jet-foundation/src/Numeric.rs:3449
+#Test("sum_and_product_preserve_exact_values_and_identities") {
+    sum :: JetInt.sum([JetInt.from_i64(I64.MAX), JetInt.from_i64(1)].into_iter())
+    assert(sum.to_string_rep() == "9223372036854775808")
+    product :: JetInt.product([JetInt.from_i64(I64.MAX), JetInt.from_i64(2)].into_iter())
+    assert(product.to_string_rep() == "18446744073709551614")
+    empty_sum :: JetInt.sum([JetInt]{}.into_iter())
+    assert(empty_sum.to_string_rep() == "0")
+    empty_product :: JetInt.product([JetInt]{}.into_iter())
+    assert(empty_product.to_string_rep() == "1")
+}

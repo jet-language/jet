@@ -1,1797 +1,1058 @@
-// PORT-PENDING 0079 crates-jet-foundation-src-numeric-slice-1: crates/jet-foundation/src/Numeric.rs:1-1793
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-INTBIG1 / D-DECIMAL1: arbitrary-precision default `Int` and base-10 `Decimal`.
-//RS //! Shared name/method tables for sema and codegen.
-//RS 
-//RS use crate::JSONNumber::{json_decimal_lexeme, json_decimal_small, json_exact_integer_text};
-//RS use crate::Syntax;
-//RS use crate::AST::{Expr, Marker, Type};
-//RS 
-//RS pub const MONEY_LINT_NAMES: &[&str] = &["price", "cost", "amount", "fee", "balance", "tax"];
-//RS use crate::Outcome::{jet_alloc_error, AllocError};
-//RS use std::alloc::{alloc, dealloc, Layout};
-//RS use std::cell::Cell;
-//RS use std::fmt;
-//RS use std::ptr::{self, NonNull};
-//RS use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
-//RS 
-//RS pub fn is_decimal_type_name(name: &str) -> bool {
-//RS     name == Syntax::TYPE_DECIMAL
-//RS }
-//RS 
-//RS pub fn type_is_decimal(ty: &Type) -> bool {
-//RS     matches!(ty, Type::Named(n) if is_decimal_type_name(n))
-//RS }
-//RS 
-//RS pub fn is_exact_type_name(name: &str) -> bool {
-//RS     matches!(name, Syntax::TYPE_DECIMAL | Syntax::TYPE_FRACTION)
-//RS }
-//RS 
-//RS pub fn exact_type_from_name(name: &str) -> Option<Type> {
-//RS     is_exact_type_name(name).then(|| Type::Named(name.to_string()))
-//RS }
-//RS 
-//RS /// D-SHAPE-CONVERT1=A: exact-number conversion routing. The returned owner
-//RS /// and function name describe the shared precise carrier that performs the
-//RS /// conversion; source-owned `to_*` spellings never enter this table.
-//RS pub fn precise_conversion_route(
-//RS     target_name: &str,
-//RS     source_name: &str,
-//RS ) -> Option<(&'static str, &'static str)> {
-//RS     match (target_name, source_name) {
-//RS         (Syntax::TYPE_DECIMAL, "Int") => Some((Syntax::TYPE_DECIMAL, "from_int")),
-//RS         (Syntax::TYPE_DECIMAL, "Float") => Some((Syntax::TYPE_DECIMAL, "from_float")),
-//RS         (Syntax::TYPE_DECIMAL, Syntax::TYPE_FRACTION) => {
-//RS             Some((Syntax::TYPE_DECIMAL, "from_fraction"))
-//RS         }
-//RS         (Syntax::TYPE_FRACTION, "Int") => Some((Syntax::TYPE_FRACTION, "from_int")),
-//RS         (Syntax::TYPE_FRACTION, "Float") => Some((Syntax::TYPE_FRACTION, "from_float")),
-//RS         (Syntax::TYPE_FRACTION, Syntax::TYPE_DECIMAL) => {
-//RS             Some((Syntax::TYPE_FRACTION, "from_decimal"))
-//RS         }
-//RS         ("Float", Syntax::TYPE_DECIMAL) => Some((Syntax::TYPE_DECIMAL, "to_float")),
-//RS         ("Float", Syntax::TYPE_FRACTION) => Some((Syntax::TYPE_FRACTION, "to_float")),
-//RS         ("Int", Syntax::TYPE_DECIMAL) => Some((Syntax::TYPE_DECIMAL, "to_int")),
-//RS         ("Int", Syntax::TYPE_FRACTION) => Some((Syntax::TYPE_FRACTION, "to_int")),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Return the exact conversion result shape. Exact-number conversions are
-//RS /// explicit and total for representable values; an impossible conversion
-//RS /// stops loudly at runtime rather than rounding or changing the type.
-//RS pub fn precise_conversion_return(
-//RS     target: &Type,
-//RS     method: &str,
-//RS     nargs: usize,
-//RS ) -> Option<Option<Type>> {
-//RS     if nargs != 1 {
-//RS         return None;
-//RS     }
-//RS     let source_name = Syntax::numeric_conversion_source(method)?;
-//RS     let target_name = match target {
-//RS         Type::Int => "Int",
-//RS         Type::Float => "Float",
-//RS         Type::Named(name) if is_exact_type_name(name) => name.as_str(),
-//RS         _ => return None,
-//RS     };
-//RS     precise_conversion_route(target_name, source_name).map(|_| Some(target.clone()))
-//RS }
-//RS 
-//RS pub fn is_money_like_name(name: &str) -> bool {
-//RS     let lower = name.to_ascii_lowercase();
-//RS     MONEY_LINT_NAMES.iter().any(|m| lower.contains(m))
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{is_money_like_name, CtFraction, JetInt};
-//RS     use std::alloc::{GlobalAlloc, Layout, System};
-//RS     use std::cell::Cell;
-//RS     use std::hint::black_box;
-//RS 
-//RS     // Counts heap allocations per thread, so concurrently running tests cannot
-//RS     // disturb a measurement window on the test's own thread.
-//RS     struct CountingAllocator;
-//RS 
-//RS     thread_local! {
-//RS         static THREAD_ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
-//RS     }
-//RS 
-//RS     unsafe impl GlobalAlloc for CountingAllocator {
-//RS         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-//RS             let _ = THREAD_ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
-//RS             unsafe { System.alloc(layout) }
-//RS         }
-//RS 
-//RS         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-//RS             unsafe { System.dealloc(ptr, layout) }
-//RS         }
-//RS     }
-//RS 
-//RS     #[global_allocator]
-//RS     static COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator;
-//RS 
-//RS     fn thread_allocations() -> usize {
-//RS         THREAD_ALLOCATIONS.with(Cell::get)
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn total_is_not_assumed_to_mean_money() {
-//RS         assert!(!is_money_like_name("total"));
-//RS         assert!(is_money_like_name("total_price"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn fractions_use_decimal_display_only_when_finite() {
-//RS         assert_eq!(CtFraction::new(7, 2).unwrap().to_string_rep(), "3.5");
-//RS         assert_eq!(CtFraction::new(-1, 8).unwrap().to_string_rep(), "-0.125");
-//RS         assert_eq!(CtFraction::new(1, 3).unwrap().to_string_rep(), "1/3");
-//RS     }
-//RS 
-//RS     /// D-INTBIG1 (#1436): exact `Int` arithmetic on machine-word values stays
-//RS     /// in the inline carrier with no heap traffic, and values crossing the
-//RS     /// ~63-bit spill boundary in either direction round-trip exactly.
-//RS     #[test]
-//RS     fn jet_int_inline_arithmetic_does_not_allocate() {
-//RS         let min = JetInt::inline_min();
-//RS         let max = JetInt::inline_max();
-//RS         let operands = [-(1_i64 << 30), -65_537, -1, 0, 1, 2, 65_536, (1_i64 << 30) - 1];
-//RS         let edges = [(max, 0), (min, 0), (max, min), (max, -1), (min, 1), (min, -1), (max, 1)];
-//RS 
-//RS         let before = thread_allocations();
-//RS         for &left in &operands {
-//RS             for &right in &operands {
-//RS                 let left_int = JetInt::from_i64(black_box(left));
-//RS                 let right_int = JetInt::from_i64(black_box(right));
-//RS                 let sum = left_int.add(&right_int).expect("inline sum");
-//RS                 let product = left_int.clone().mul(&right_int).expect("inline product");
-//RS                 assert!(sum.is_inline() && sum.to_raw() == left + right);
-//RS                 assert!(product.is_inline() && product.to_raw() == left * right);
-//RS                 assert!(left_int.compare(&right_int) == left.cmp(&right));
-//RS                 drop(black_box((sum, product)));
-//RS             }
-//RS         }
-//RS         for &(left, right) in &edges {
-//RS             let left_int = JetInt::from_i64(black_box(left));
-//RS             let right_int = JetInt::from_i64(black_box(right));
-//RS             if (min..=max).contains(&(left + right)) {
-//RS                 let sum = left_int.add(&right_int).expect("inline edge sum");
-//RS                 assert!(sum.is_inline() && sum.to_raw() == left + right);
-//RS             }
-//RS             if let Some(product) = left.checked_mul(right).filter(|value| (min..=max).contains(value)) {
-//RS                 let carried = left_int.mul(&right_int).expect("inline edge product");
-//RS                 assert!(carried.is_inline() && carried.to_raw() == product);
-//RS             }
-//RS             assert!(left_int.compare(&right_int) == left.cmp(&right));
-//RS         }
-//RS         assert_eq!(thread_allocations(), before, "inline exact Int arithmetic allocated");
-//RS 
-//RS         for value in [max, max + 1, min, min - 1, i64::MAX, i64::MIN] {
-//RS             let carried = JetInt::from_i64(value);
-//RS             assert_eq!(carried.is_inline(), (min..=max).contains(&value), "{value}");
-//RS             assert_eq!(carried.to_i64(), Some(value), "{value}");
-//RS             assert_eq!(carried.to_string_rep(), value.to_string(), "{value}");
-//RS             assert_eq!(i64::try_from(carried.clone()), Ok(value), "{value}");
-//RS         }
-//RS 
-//RS         let above = JetInt::from_i64(max).add(&JetInt::from_i64(1)).unwrap();
-//RS         assert!(!above.is_inline());
-//RS         assert_eq!(above.to_string_rep(), "4611686018427387904");
-//RS         let back = above.add(&JetInt::from_i64(-1)).unwrap();
-//RS         assert!(back.is_inline() && back.to_raw() == max);
-//RS 
-//RS         let below = JetInt::from_i64(min).add(&JetInt::from_i64(-1)).unwrap();
-//RS         assert!(!below.is_inline());
-//RS         assert_eq!(below.to_string_rep(), "-4611686018427387905");
-//RS         let back = below.add(&JetInt::from_i64(1)).unwrap();
-//RS         assert!(back.is_inline() && back.to_raw() == min);
-//RS 
-//RS         let squared = JetInt::from_i64(1 << 31).mul(&JetInt::from_i64(1 << 31)).unwrap();
-//RS         assert!(!squared.is_inline());
-//RS         assert_eq!(squared.to_string_rep(), "4611686018427387904");
-//RS 
-//RS         let promoted = JetInt::from_i64(i64::MAX).add(&JetInt::from_i64(1)).unwrap();
-//RS         assert_eq!(promoted.to_string_rep(), "9223372036854775808");
-//RS     }
-//RS }
-//RS 
-//RS /// D-DECIMAL1: `#[allow(float_money)]` suppresses the default-on money lint.
-//RS pub fn allows_float_money(markers: &[Marker]) -> bool {
-//RS     markers.iter().any(|m| {
-//RS         m.name == "allow"
-//RS             && m.expr_args()
-//RS                 .any(|a| matches!(a, Expr::Ident(s, _) if s == "float_money"))
-//RS     })
-//RS }
-//RS 
-//RS pub fn decimal_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let decimal = || Type::Named(Syntax::TYPE_DECIMAL.to_string());
-//RS     match (method, nargs) {
-//RS         ("add" | "sub" | "mul", 1) => Some(Some(decimal())),
-//RS         ("div", 1) => Some(Some(Type::Named(Syntax::TYPE_FRACTION.to_string()))),
-//RS         ("round" | "floor" | "ceil", 0) => Some(Some(decimal())),
-//RS         ("equal", 1) => Some(Some(Type::Bool)),
-//RS         ("compare", 1) => Some(Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))),
-//RS         ("to_string", 0) => Some(Some(Type::String)),
-//RS         ("to_float", 0) => Some(Some(Type::Float)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-NUMTYPE1=A: an exact ratio. Arithmetic answers another Fraction; the two
-//RS /// parts answer whole numbers; comparison answers a yes or no.
-//RS pub fn fraction_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let fraction = || Type::Named(Syntax::TYPE_FRACTION.to_string());
-//RS     match (method, nargs) {
-//RS         ("add" | "sub" | "mul" | "div", 1) => Some(Some(fraction())),
-//RS         ("numerator" | "denominator", 0) => Some(Some(Type::Int)),
-//RS         ("to_string", 0) => Some(Some(Type::String)),
-//RS         ("to_float", 0) => Some(Some(Type::Float)),
-//RS         ("is_zero", 0) => Some(Some(Type::Bool)),
-//RS         ("equal", 1) => Some(Some(Type::Bool)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS // ── CtFraction: comptime/REPL tier-0 exact ratio ────────────────────────────
-//RS //
-//RS // Mirrors `JetFraction` in the Prelude so a Fraction computed at comptime
-//RS // prints byte-identical to the same expression run through the AOT path.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct CtFraction {
-//RS     pub numerator: CtBigInt,
-//RS     pub denominator: CtBigInt,
-//RS }
-//RS 
-//RS impl PartialOrd for CtFraction {
-//RS     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-//RS         Some(self.cmp(other))
-//RS     }
-//RS }
-//RS 
-//RS impl Ord for CtFraction {
-//RS     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-//RS         self.numerator
-//RS             .mul(&other.denominator)
-//RS             .compare(&other.numerator.mul(&self.denominator))
-//RS     }
-//RS }
-//RS 
-//RS impl CtFraction {
-//RS     pub fn new(numerator: i64, denominator: i64) -> Option<Self> {
-//RS         Self::from_bigints(
-//RS             CtBigInt::from_int(numerator),
-//RS             CtBigInt::from_int(denominator),
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn from_bigints(
-//RS         mut numerator: CtBigInt,
-//RS         mut denominator: CtBigInt,
-//RS     ) -> Option<Self> {
-//RS         if denominator.is_zero() {
-//RS             return None;
-//RS         }
-//RS         if denominator.negative {
-//RS             numerator = numerator.neg();
-//RS             denominator = denominator.neg();
-//RS         }
-//RS         let divisor = CtBigInt::gcd(&numerator, &denominator);
-//RS         Some(Self {
-//RS             numerator: numerator.div_rem(&divisor)?.0,
-//RS             denominator: denominator.div_rem(&divisor)?.0,
-//RS         })
-//RS     }
-//RS     fn from_reduced_bigints(mut numerator: CtBigInt, mut denominator: CtBigInt) -> Option<Self> {
-//RS         if denominator.is_zero() {
-//RS             return None;
-//RS         }
-//RS         if denominator.negative {
-//RS             numerator = numerator.neg();
-//RS             denominator = denominator.neg();
-//RS         }
-//RS         Some(Self {
-//RS             numerator,
-//RS             denominator,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn add(&self, other: &Self) -> Option<Self> {
-//RS         let left = self.numerator.mul(&other.denominator);
-//RS         let right = other.numerator.mul(&self.denominator);
-//RS         Self::from_bigints(
-//RS             left.add(&right),
-//RS             self.denominator.mul(&other.denominator),
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn sub(&self, other: &Self) -> Option<Self> {
-//RS         let left = self.numerator.mul(&other.denominator);
-//RS         let right = other.numerator.mul(&self.denominator);
-//RS         Self::from_bigints(
-//RS             left.sub(&right),
-//RS             self.denominator.mul(&other.denominator),
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn mul(&self, other: &Self) -> Option<Self> {
-//RS         Self::from_bigints(
-//RS             self.numerator.mul(&other.numerator),
-//RS             self.denominator.mul(&other.denominator),
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn div(&self, other: &Self) -> Option<Self> {
-//RS         Self::from_bigints(
-//RS             self.numerator.mul(&other.denominator),
-//RS             self.denominator.mul(&other.numerator),
-//RS         )
-//RS     }
-//RS 
-//RS     /// Exact conversion from a finite binary64 value. The rational carrier is
-//RS     /// arbitrary precision, so no finite binary value is narrowed or routed
-//RS     /// through decimal text.
-//RS     pub fn from_float(value: f64) -> Option<Self> {
-//RS         if !value.is_finite() {
-//RS             return None;
-//RS         }
-//RS         if value == 0.0 {
-//RS             return Self::new(0, 1);
-//RS         }
-//RS         let bits = value.to_bits();
-//RS         let negative = (bits >> 63) != 0;
-//RS         let exponent = ((bits >> 52) & 0x7ff) as i32;
-//RS         let fraction = bits & ((1u64 << 52) - 1);
-//RS         let (significand, power) = if exponent == 0 {
-//RS             (fraction, -1074)
-//RS         } else {
-//RS             (fraction | (1u64 << 52), exponent - 1023 - 52)
-//RS         };
-//RS         let mut numerator = CtBigInt::from_u64(significand);
-//RS         let denominator = if power >= 0 {
-//RS             for _ in 0..u32::try_from(power).ok()? {
-//RS                 numerator = numerator.mul(&CtBigInt::from_int(2));
-//RS             }
-//RS             CtBigInt::from_int(1)
-//RS         } else {
-//RS             let mut denominator = CtBigInt::from_int(1);
-//RS             for _ in 0..u32::try_from(-power).ok()? {
-//RS                 denominator = denominator.mul(&CtBigInt::from_int(2));
-//RS             }
-//RS             denominator
-//RS         };
-//RS         if negative {
-//RS             numerator = numerator.neg();
-//RS         }
-//RS         Self::from_bigints(numerator, denominator)
-//RS     }
-//RS 
-//RS     pub fn to_int_exact(&self) -> Option<CtBigInt> {
-//RS         (self.denominator == CtBigInt::from_int(1)).then(|| self.numerator.clone())
-//RS     }
-//RS 
-//RS     pub fn from_int(value: i64) -> Option<Self> {
-//RS         Self::new(value, 1)
-//RS     }
-//RS 
-//RS     pub fn from_bigint(value: CtBigInt) -> Option<Self> {
-//RS         Self::from_bigints(value, CtBigInt::from_int(1))
-//RS     }
-//RS 
-//RS     pub fn from_decimal(value: &CtDecimal) -> Option<Self> {
-//RS         value.to_fraction()
-//RS     }
-//RS 
-//RS     pub fn to_decimal(&self) -> Option<CtDecimal> {
-//RS         CtDecimal::from_fraction(self)
-//RS     }
-//RS 
-//RS     pub fn to_float(&self) -> f64 {
-//RS         self.numerator.to_f64() / self.denominator.to_f64()
-//RS     }
-//RS 
-//RS     pub fn is_zero(&self) -> bool {
-//RS         self.numerator.is_zero()
-//RS     }
-//RS 
-//RS     pub fn to_string_rep(&self) -> String {
-//RS         if let Some(decimal) = CtDecimal::from_fraction(self) {
-//RS             return decimal.to_string_rep();
-//RS         }
-//RS         format!(
-//RS             "{}/{}",
-//RS             self.numerator.to_string_rep(),
-//RS             self.denominator.to_string_rep()
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn to_value(&self) -> crate::AST::CtValue {
-//RS         crate::AST::CtValue::Struct {
-//RS             type_name: Syntax::TYPE_FRACTION.to_string(),
-//RS             fields: vec![
-//RS                 (
-//RS                     "numerator".to_string(),
-//RS                     ct_int_value(self.numerator.clone()),
-//RS                 ),
-//RS                 (
-//RS                     "denominator".to_string(),
-//RS                     ct_int_value(self.denominator.clone()),
-//RS                 ),
-//RS             ],
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn from_value(value: &crate::AST::CtValue) -> Result<Self, String> {
-//RS         let crate::AST::CtValue::Struct { type_name, fields } = value else {
-//RS             return Err("expected Fraction".to_string());
-//RS         };
-//RS         if type_name != Syntax::TYPE_FRACTION {
-//RS             return Err(format!("expected Fraction, found {type_name}"));
-//RS         }
-//RS         let mut numerator = None;
-//RS         let mut denominator = None;
-//RS         for (name, field) in fields {
-//RS             let value = match field {
-//RS                 crate::AST::CtValue::Int(n) => CtBigInt::from_int(*n),
-//RS                 crate::AST::CtValue::BigInt(value) => value.clone(),
-//RS                 _ => return Err(format!("malformed Fraction.{name}")),
-//RS             };
-//RS             if name == "numerator" {
-//RS                 numerator = Some(value);
-//RS             } else if name == "denominator" {
-//RS                 denominator = Some(value);
-//RS             }
-//RS         }
-//RS         Self::from_bigints(
-//RS             numerator.ok_or_else(|| "malformed Fraction.numerator".to_string())?,
-//RS             denominator.ok_or_else(|| "malformed Fraction.denominator".to_string())?,
-//RS         )
-//RS         .ok_or_else(|| "invalid exact quotient".to_string())
-//RS     }
-//RS }
-//RS 
-//RS fn ct_int_value(value: CtBigInt) -> crate::AST::CtValue {
-//RS     const SMALL_MIN: i64 = -(1i64 << 62);
-//RS     const SMALL_MAX: i64 = (1i64 << 62) - 1;
-//RS     match value.try_i64().filter(|n| (SMALL_MIN..=SMALL_MAX).contains(n)) {
-//RS         Some(value) => crate::AST::CtValue::Int(value),
-//RS         None => crate::AST::CtValue::BigInt(value),
-//RS     }
-//RS }
-//RS 
-//RS // ── CtBigInt: comptime/REPL tier-0 arbitrary-precision integer ──────────────
-//RS //
-//RS // Mirrors the exact integer carrier in
-//RS // `crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs` limb-for-limb
-//RS // (sign-magnitude, little-endian base 10^9) so a spilled `Int` computed at
-//RS // comptime prints byte-identical to the same expression run through the AOT path
-//RS // (R12 parity). Kept here (not in `jet-comptime`) because `CtValue` — shared
-//RS // by every seam crate — needs the type in its own definition.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct CtBigInt {
-//RS     pub negative: bool,
-//RS     pub limbs: Vec<u32>, // little-endian base 10^9
-//RS }
-//RS 
-//RS const CTBI_BASE: u64 = 1_000_000_000;
-//RS fn ctbi_limb_len(limbs: &[u32]) -> usize {
-//RS     let mut length = limbs.len();
-//RS     while length > 1 && limbs[length - 1] == 0 {
-//RS         length -= 1;
-//RS     }
-//RS     length
-//RS }
-//RS 
-//RS fn ctbi_u128_limbs(mut value: u128) -> ([u32; 5], usize) {
-//RS     let mut limbs = [0u32; 5];
-//RS     let mut length = 0usize;
-//RS     while value != 0 {
-//RS         limbs[length] = (value % u128::from(CTBI_BASE)) as u32;
-//RS         value /= u128::from(CTBI_BASE);
-//RS         length += 1;
-//RS     }
-//RS     if length == 0 {
-//RS         length = 1;
-//RS     }
-//RS     (limbs, length)
-//RS }
-//RS 
-//RS fn ctbi_limb_is_zero(limbs: &[u32]) -> bool {
-//RS     ctbi_limb_len(limbs) == 1 && limbs.first().copied().unwrap_or(0) == 0
-//RS }
-//RS 
-//RS fn ctbi_limb_decimal_digits(limbs: &[u32]) -> usize {
-//RS     let length = ctbi_limb_len(limbs);
-//RS     if length == 0 || (length == 1 && limbs[0] == 0) {
-//RS         return 1;
-//RS     }
-//RS     let mut top = limbs[length - 1];
-//RS     let mut digits = 1usize;
-//RS 
-//RS     while top >= 10 {
-//RS         top /= 10;
-//RS         digits += 1;
-//RS     }
-//RS     digits + length.saturating_sub(1) * 9
-//RS }
-//RS 
-//RS fn ctbi_small_power10_limbs(scale: u32) -> Option<([u32; 5], usize)> {
-//RS     (scale <= 38).then(|| ctbi_u128_limbs(10u128.pow(scale)))
-//RS }
-//RS 
-//RS fn ctbi_limb_decimal_prefix_f64(limbs: &[u32], digits: usize) -> f64 {
-//RS     if ctbi_limb_is_zero(limbs) {
-//RS         return 0.0;
-//RS     }
-//RS     let total = ctbi_limb_decimal_digits(limbs);
-//RS     let take = digits.min(total);
-//RS     let top_index = ctbi_limb_len(limbs) - 1;
-//RS     let mut top_width = 1usize;
-//RS     let mut width_probe = limbs[top_index];
-//RS     while width_probe >= 10 {
-//RS         width_probe /= 10;
-//RS         top_width += 1;
-//RS     }
-//RS     let mut prefix = 0.0;
-//RS     let mut consumed = 0usize;
-//RS     for index in (0..=top_index).rev() {
-//RS         if consumed == take {
-//RS             break;
-//RS         }
-//RS         let limb = limbs[index];
-//RS         let width = if index == top_index { top_width } else { 9 };
-//RS         let need = take - consumed;
-//RS         if need >= width {
-//RS             prefix = prefix * 10f64.powi(width as i32) + limb as f64;
-//RS             consumed += width;
-//RS         } else {
-//RS             let divisor = 10u32.pow((width - need) as u32);
-//RS             prefix = prefix * 10f64.powi(need as i32) + f64::from(limb / divisor);
-//RS             break;
-//RS         }
-//RS     }
-//RS     prefix
-//RS }
-//RS 
-//RS fn ctbi_limb_cmp(left: &[u32], right: &[u32]) -> std::cmp::Ordering {
-//RS     let left_len = ctbi_limb_len(left);
-//RS     let right_len = ctbi_limb_len(right);
-//RS     match left_len.cmp(&right_len) {
-//RS         std::cmp::Ordering::Equal => {
-//RS             for index in (0..left_len).rev() {
-//RS                 match left[index].cmp(&right[index]) {
-//RS                     std::cmp::Ordering::Equal => {}
-//RS                     ordering => return ordering,
-//RS                 }
-//RS             }
-//RS             std::cmp::Ordering::Equal
-//RS         }
-//RS         ordering => ordering,
-//RS     }
-//RS }
-//RS 
-//RS fn ctbi_limb_shift_left(limbs: &mut Vec<u32>, bits: usize) {
-//RS     limbs.reserve(bits.saturating_div(28).saturating_add(1));
-//RS     for _ in 0..bits {
-//RS         let mut carry = 0u64;
-//RS         for limb in limbs.iter_mut() {
-//RS             let value = u64::from(*limb) * 2 + carry;
-//RS             *limb = (value % CTBI_BASE) as u32;
-//RS             carry = value / CTBI_BASE;
-//RS         }
-//RS         if carry != 0 {
-//RS             limbs.push(carry as u32);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn ctbi_limb_double(limbs: &mut Vec<u32>) {
-//RS     let mut carry = 0u64;
-//RS     for limb in limbs.iter_mut() {
-//RS         let value = u64::from(*limb) * 2 + carry;
-//RS         *limb = (value % CTBI_BASE) as u32;
-//RS         carry = value / CTBI_BASE;
-//RS     }
-//RS     if carry != 0 {
-//RS         limbs.push(carry as u32);
-//RS     }
-//RS }
-//RS 
-//RS fn ctbi_limb_sub_assign(left: &mut Vec<u32>, right: &[u32]) {
-//RS     debug_assert!(ctbi_limb_cmp(left, right) != std::cmp::Ordering::Less);
-//RS     let mut borrow = 0i64;
-//RS     for index in 0..left.len() {
-//RS         let subtrahend = i64::from(right.get(index).copied().unwrap_or(0)) + borrow;
-//RS         let difference = i64::from(left[index]) - subtrahend;
-//RS         if difference < 0 {
-//RS             left[index] = (difference + CTBI_BASE as i64) as u32;
-//RS             borrow = 1;
-//RS         } else {
-//RS             left[index] = difference as u32;
-//RS             borrow = 0;
-//RS         }
-//RS     }
-//RS     debug_assert_eq!(borrow, 0);
-//RS     while left.len() > 1 && left.last() == Some(&0) {
-//RS         left.pop();
-//RS     }
-//RS }
-//RS 
-//RS fn ctbi_ratio_cmp_pow2(
-//RS     numerator: &[u32],
-//RS     denominator: &[u32],
-//RS     exponent: i64,
-//RS ) -> std::cmp::Ordering {
-//RS     let mut shifted = if exponent >= 0 {
-//RS         denominator.to_vec()
-//RS     } else {
-//RS         numerator.to_vec()
-//RS     };
-//RS     let bits = usize::try_from(exponent.unsigned_abs()).unwrap_or(usize::MAX);
-//RS     ctbi_limb_shift_left(&mut shifted, bits);
-//RS     if exponent >= 0 {
-//RS         ctbi_limb_cmp(numerator, &shifted)
-//RS     } else {
-//RS         ctbi_limb_cmp(&shifted, denominator)
-//RS     }
-//RS }
-//RS 
-//RS fn ctbi_ratio_exponent(numerator: &[u32], denominator: &[u32]) -> i64 {
-//RS     let numerator_digits = ctbi_limb_decimal_digits(numerator);
-//RS     let denominator_digits = ctbi_limb_decimal_digits(denominator);
-//RS     let numerator_take = numerator_digits.min(17);
-//RS     let denominator_take = denominator_digits.min(17);
-//RS     let log2_ten = 10f64.log2();
-//RS     let numerator_log = (numerator_digits - numerator_take) as f64 * log2_ten
-//RS         + ctbi_limb_decimal_prefix_f64(numerator, numerator_take).log2();
-//RS     let denominator_log = (denominator_digits - denominator_take) as f64 * log2_ten
-//RS         + ctbi_limb_decimal_prefix_f64(denominator, denominator_take).log2();
-//RS     (numerator_log - denominator_log).floor() as i64
-//RS }
-//RS 
-//RS fn ctbi_ratio_inf(negative: bool) -> f64 {
-//RS     if negative {
-//RS         f64::NEG_INFINITY
-//RS     } else {
-//RS         f64::INFINITY
-//RS     }
-//RS }
-//RS 
-//RS fn ctbi_ratio_zero(negative: bool) -> f64 {
-//RS     if negative {
-//RS         f64::from_bits(1u64 << 63)
-//RS     } else {
-//RS         0.0
-//RS     }
-//RS }
-//RS 
-//RS /// Convert an exact base-10 limb ratio to binary64 with one correctly rounded
-//RS /// projection. This is the shared exact-number conversion path; callers never
-//RS /// need to allocate a decimal spelling just to cross into `Float`.
-//RS fn ctbi_ratio_limbs_to_f64(numerator: &[u32], denominator: &[u32], negative: bool) -> f64 {
-//RS     if ctbi_limb_is_zero(numerator) {
-//RS         return 0.0;
-//RS     }
-//RS     debug_assert!(!ctbi_limb_is_zero(denominator));
-//RS 
-//RS     let numerator_digits = ctbi_limb_decimal_digits(numerator);
-//RS     let denominator_digits = ctbi_limb_decimal_digits(denominator);
-//RS     let decimal_delta = numerator_digits as i64 - denominator_digits as i64;
-//RS     if decimal_delta > 400 {
-//RS         return ctbi_ratio_inf(negative);
-//RS     }
-//RS     if decimal_delta < -400 {
-//RS         return ctbi_ratio_zero(negative);
-//RS     }
-//RS 
-//RS     let mut exponent = ctbi_ratio_exponent(numerator, denominator);
-//RS     loop {
-//RS         if ctbi_ratio_cmp_pow2(numerator, denominator, exponent)
-//RS             == std::cmp::Ordering::Less
-//RS         {
-//RS             exponent -= 1;
-//RS             continue;
-//RS         }
-//RS         if ctbi_ratio_cmp_pow2(numerator, denominator, exponent + 1)
-//RS             != std::cmp::Ordering::Less
-//RS         {
-//RS             exponent += 1;
-//RS             continue;
-//RS         }
-//RS         break;
-//RS     }
-//RS 
-//RS     if exponent > 1023 {
-//RS         return ctbi_ratio_inf(negative);
-//RS     }
-//RS     if exponent < -1075 {
-//RS         return ctbi_ratio_zero(negative);
-//RS     }
-//RS     if exponent == -1075 {
-//RS         let mut scaled = numerator.to_vec();
-//RS         ctbi_limb_shift_left(&mut scaled, 1074);
-//RS         ctbi_limb_double(&mut scaled);
-//RS         let magnitude = if ctbi_limb_cmp(&scaled, denominator) == std::cmp::Ordering::Greater {
-//RS             f64::from_bits(1)
-//RS         } else {
-//RS             0.0
-//RS         };
-//RS         return if negative { -magnitude } else { magnitude };
-//RS     }
-//RS 
-//RS     let mut divisor_storage = Vec::new();
-//RS     let mut remainder = if exponent >= 0 {
-//RS         if exponent == 0 {
-//RS             numerator.to_vec()
-//RS         } else {
-//RS             divisor_storage.extend_from_slice(denominator);
-//RS             ctbi_limb_shift_left(&mut divisor_storage, exponent as usize);
-//RS             numerator.to_vec()
-//RS         }
-//RS     } else {
-//RS         let mut scaled = numerator.to_vec();
-//RS         ctbi_limb_shift_left(&mut scaled, exponent.unsigned_abs() as usize);
-//RS         scaled
-//RS     };
-//RS     let divisor: &[u32] = if exponent > 0 {
-//RS         &divisor_storage
-//RS     } else {
-//RS         denominator
-//RS     };
-//RS     ctbi_limb_sub_assign(&mut remainder, divisor);
-//RS 
-//RS     let mut significand = 1u64 << 52;
-//RS     for shift in (0..52).rev() {
-//RS         ctbi_limb_double(&mut remainder);
-//RS         if ctbi_limb_cmp(&remainder, divisor) != std::cmp::Ordering::Less {
-//RS             ctbi_limb_sub_assign(&mut remainder, divisor);
-//RS             significand |= 1u64 << shift;
-//RS         }
-//RS     }
-//RS     ctbi_limb_double(&mut remainder);
-//RS     let guard = ctbi_limb_cmp(&remainder, divisor) != std::cmp::Ordering::Less;
-//RS     if guard {
-//RS         ctbi_limb_sub_assign(&mut remainder, divisor);
-//RS     }
-//RS     let sticky = !ctbi_limb_is_zero(&remainder);
-//RS     if guard && (sticky || (significand & 1) != 0) {
-//RS         significand += 1;
-//RS         if significand == 1u64 << 53 {
-//RS             significand >>= 1;
-//RS             exponent += 1;
-//RS         }
-//RS     }
-//RS     if exponent > 1023 {
-//RS         return ctbi_ratio_inf(negative);
-//RS     }
-//RS     let bits = ((exponent + 1023) as u64) << 52
-//RS         | (significand & ((1u64 << 52) - 1));
-//RS     let bits = if negative {
-//RS         bits | (1u64 << 63)
-//RS     } else {
-//RS         bits
-//RS     };
-//RS     f64::from_bits(bits)
-//RS }
-//RS 
-//RS fn ctbi_decimal_power10_limbs(scale: u32) -> Vec<u32> {
-//RS     let groups = usize::try_from(scale / 9).unwrap_or(usize::MAX);
-//RS     let remainder = scale % 9;
-//RS     let mut limbs = vec![0u32; groups.saturating_add(1)];
-//RS     limbs[groups] = 10u32.pow(remainder);
-//RS     limbs
-//RS }
-//RS fn ctbi_mul_pow10(value: &CtBigInt, places: u32) -> CtBigInt {
-//RS     if value.is_zero() || places == 0 {
-//RS         return value.clone();
-//RS     }
-//RS     let chunk_shift = usize::try_from(places / 9).unwrap_or(usize::MAX);
-//RS     let remainder = places % 9;
-//RS     let mut limbs = Vec::with_capacity(
-//RS         value
-//RS             .limbs
-//RS             .len()
-//RS             .saturating_add(chunk_shift)
-//RS             .saturating_add(usize::from(remainder != 0)),
-//RS     );
-//RS     limbs.resize(chunk_shift, 0);
-//RS     if remainder == 0 {
-//RS         limbs.extend_from_slice(&value.limbs);
-//RS     } else {
-//RS         let factor = 10u32.pow(remainder);
-//RS         let mut carry = 0u64;
-//RS         for &limb in &value.limbs {
-//RS             let product = u64::from(limb) * u64::from(factor) + carry;
-//RS             limbs.push((product % CTBI_BASE) as u32);
-//RS             carry = product / CTBI_BASE;
-//RS         }
-//RS         if carry != 0 {
-//RS             limbs.push(carry as u32);
-//RS         }
-//RS     }
-//RS     CtBigInt {
-//RS         negative: value.negative,
-//RS         limbs,
-//RS     }
-//RS     .normalize()
-//RS }
-//RS 
-//RS fn ctbi_alloc_error(elements: usize) -> AllocError {
-//RS     let bytes = elements
-//RS         .checked_mul(std::mem::size_of::<u32>())
-//RS         .unwrap_or(usize::MAX);
-//RS     jet_alloc_error(bytes, "exact-int")
-//RS }
-//RS 
-//RS 
-//RS impl CtBigInt {
-//RS     pub fn from_u64(mut value: u64) -> Self {
-//RS         if value == 0 {
-//RS             return Self::from_int(0);
-//RS         }
-//RS         let mut limbs = Vec::new();
-//RS         while value > 0 {
-//RS             limbs.push((value % CTBI_BASE) as u32);
-//RS             value /= CTBI_BASE;
-//RS         }
-//RS         Self {
-//RS             negative: false,
-//RS             limbs,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn from_int(n: i64) -> Self {
-//RS         if n == 0 {
-//RS             return CtBigInt {
-//RS                 negative: false,
-//RS                 limbs: vec![0],
-//RS             };
-//RS         }
-//RS         let negative = n < 0;
-//RS         let mut v = if negative {
-//RS             (n as i128).unsigned_abs() as u64
-//RS         } else {
-//RS             n as u64
-//RS         };
-//RS         let mut limbs = Vec::new();
-//RS         while v > 0 {
-//RS             limbs.push((v % CTBI_BASE) as u32);
-//RS             v /= CTBI_BASE;
-//RS         }
-//RS         CtBigInt { negative, limbs }
-//RS     }
-//RS 
-//RS     fn from_i128(n: i128) -> Self {
-//RS         if n == 0 {
-//RS             return Self::from_int(0);
-//RS         }
-//RS         let negative = n < 0;
-//RS         let mut v = n.unsigned_abs();
-//RS         let mut limbs = Vec::new();
-//RS         while v > 0 {
-//RS             limbs.push((v % u128::from(CTBI_BASE)) as u32);
-//RS             v /= u128::from(CTBI_BASE);
-//RS         }
-//RS         CtBigInt { negative, limbs }
-//RS     }
-//RS     fn from_decimal_digits(digits: &[u8]) -> Self {
-//RS         if digits.is_empty() {
-//RS             return Self::from_int(0);
-//RS         }
-//RS         let chunk_count = digits.len().div_ceil(9);
-//RS         let first_chunk_len = match digits.len() % 9 {
-//RS             0 => 9,
-//RS             length => length,
-//RS         };
-//RS         let mut limbs = Vec::with_capacity(chunk_count);
-//RS         let mut offset = 0usize;
-//RS         let mut chunk_len = first_chunk_len;
-//RS         while offset < digits.len() {
-//RS             let mut chunk = 0u32;
-//RS             for &digit in &digits[offset..offset + chunk_len] {
-//RS                 chunk = chunk * 10 + u32::from(digit);
-//RS             }
-//RS             limbs.push(chunk);
-//RS             offset += chunk_len;
-//RS             chunk_len = 9;
-//RS         }
-//RS         limbs.reverse();
-//RS         Self {
-//RS             negative: false,
-//RS             limbs,
-//RS         }
-//RS         .normalize()
-//RS     }
-//RS 
-//RS 
-//RS     /// Project the exact integer into binary64 without allocating its decimal
-//RS     /// spelling. Keep the conversion here so Decimal and Fraction share one
-//RS     /// correctly rounded numeric boundary.
-//RS     fn to_f64(&self) -> f64 {
-//RS         if self.is_zero() {
-//RS             return 0.0;
-//RS         }
-//RS         if let Some(value) = self.try_i128() {
-//RS             return value as f64;
-//RS         }
-//RS         if ctbi_limb_decimal_digits(&self.limbs) > 309 {
-//RS             return ctbi_ratio_inf(self.negative);
-//RS         }
-//RS 
-//RS         let length = ctbi_limb_len(&self.limbs);
-//RS         if length > 35 {
-//RS             return ctbi_ratio_inf(self.negative);
-//RS         }
-//RS         let mut limbs = [0u32; 35];
-//RS         limbs[..length].copy_from_slice(&self.limbs[..length]);
-//RS         let mut top = 0u64;
-//RS         let mut bit_index = 0usize;
-//RS         let mut guard = false;
-//RS         let mut sticky = false;
-//RS         let mut limb_count = length;
-//RS         while limb_count > 1 || limbs[0] != 0 {
-//RS             let mut remainder = 0u64;
-//RS             for index in (0..limb_count).rev() {
-//RS                 let current = remainder * CTBI_BASE + u64::from(limbs[index]);
-//RS                 limbs[index] = (current / 2) as u32;
-//RS                 remainder = current % 2;
-//RS             }
-//RS             while limb_count > 1 && limbs[limb_count - 1] == 0 {
-//RS                 limb_count -= 1;
-//RS             }
-//RS             let bit = remainder != 0;
-//RS             if bit_index < 53 {
-//RS                 top |= u64::from(bit) << bit_index;
-//RS             } else {
-//RS                 sticky |= guard;
-//RS                 guard = (top & 1) != 0;
-//RS                 top = (top >> 1) | (u64::from(bit) << 52);
-//RS             }
-//RS             bit_index += 1;
-//RS         }
-//RS 
-//RS         let mut exponent = bit_index - 1;
-//RS         if bit_index > 53 && guard && (sticky || (top & 1) != 0) {
-//RS             top += 1;
-//RS             if top == 1u64 << 53 {
-//RS                 top >>= 1;
-//RS                 exponent += 1;
-//RS             }
-//RS         }
-//RS         if exponent > 1023 {
-//RS             return ctbi_ratio_inf(self.negative);
-//RS         }
-//RS         let bits = if bit_index <= 53 {
-//RS             (top as f64).to_bits()
-//RS         } else {
-//RS             ((exponent as u64 + 1023) << 52) | (top & ((1u64 << 52) - 1))
-//RS         };
-//RS         let bits = if self.negative {
-//RS             bits | (1u64 << 63)
-//RS         } else {
-//RS             bits
-//RS         };
-//RS         f64::from_bits(bits)
-//RS     }
-//RS 
-//RS 
-//RS     pub fn from_str(s: &str) -> Result<Self, String> {
-//RS         let t = s.trim();
-//RS         if t.is_empty() {
-//RS             return Err("empty exact Int string".to_string());
-//RS         }
-//RS         let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
-//RS             (true, rest)
-//RS         } else if let Some(rest) = t.strip_prefix('+') {
-//RS             (false, rest)
-//RS         } else {
-//RS             (false, t)
-//RS         };
-//RS         if body.is_empty() || !body.chars().all(|c| c.is_ascii_digit()) {
-//RS             return Err(format!("invalid exact Int string `{s}`"));
-//RS         }
-//RS         let mut acc = CtBigInt {
-//RS             negative: false,
-//RS             limbs: vec![0],
-//RS         };
-//RS         for ch in body.chars() {
-//RS             let digit = ch.to_digit(10).unwrap();
-//RS             acc = acc.mul_small(10).add_small(digit);
-//RS         }
-//RS         acc.negative = negative && !(acc.limbs.len() == 1 && acc.limbs[0] == 0);
-//RS         Ok(acc)
-//RS     }
-//RS 
-//RS     /// Project one JSON number token into the arbitrary-precision default
-//RS     /// `Int` carrier without passing through `Float`.
-//RS     pub fn from_json_number(s: &str) -> Result<Self, String> {
-//RS         Self::from_str(&json_exact_integer_text(s)?)
-//RS     }
-//RS 
-//RS     /// Parse one source integer literal. The lexer keeps the original spelling
-//RS     /// so exact `Int` can survive the i64 fast path; this is the one canonical
-//RS     /// radix/underscore parser used by sema, comptime, and TIR lowering.
-//RS     pub fn from_literal(s: &str) -> Result<Self, String> {
-//RS         let text = s.replace('_', "");
-//RS         let (negative, body) = if let Some(rest) = text.strip_prefix('-') {
-//RS             (true, rest)
-//RS         } else if let Some(rest) = text.strip_prefix('+') {
-//RS             (false, rest)
-//RS         } else {
-//RS             (false, text.as_str())
-//RS         };
-//RS         let (radix, digits) =
-//RS             if let Some(rest) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-//RS                 (16, rest)
-//RS             } else if let Some(rest) = body.strip_prefix("0o").or_else(|| body.strip_prefix("0O")) {
-//RS                 (8, rest)
-//RS             } else if let Some(rest) = body.strip_prefix("0b").or_else(|| body.strip_prefix("0B")) {
-//RS                 (2, rest)
-//RS             } else {
-//RS                 return Self::from_str(&text);
-//RS             };
-//RS         if digits.is_empty() {
-//RS             return Err(format!("invalid integer literal `{s}`"));
-//RS         }
-//RS         let mut value = Self::from_int(0);
-//RS         for digit in digits.chars() {
-//RS             let digit = digit
-//RS                 .to_digit(radix)
-//RS                 .ok_or_else(|| format!("invalid integer literal `{s}`"))?;
-//RS             value = value.mul_small(radix).add_small(digit);
-//RS         }
-//RS         value.negative = negative && !value.is_zero();
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     /// Parse an exact integer in an explicit base.
-//RS     pub fn from_radix(text: &str, radix: u32) -> Result<Self, String> {
-//RS         if !(2..=36).contains(&radix) {
-//RS             return Err(format!("integer radix must be between 2 and 36, got {radix}"));
-//RS         }
-//RS         let text = text.trim();
-//RS         let (negative, digits) = if let Some(rest) = text.strip_prefix('-') {
-//RS             (true, rest)
-//RS         } else if let Some(rest) = text.strip_prefix('+') {
-//RS             (false, rest)
-//RS         } else {
-//RS             (false, text)
-//RS         };
-//RS         if digits.is_empty() {
-//RS             return Err("integer radix text is empty".to_string());
-//RS         }
-//RS         let mut value = Self::from_int(0);
-//RS         for digit in digits.chars() {
-//RS             let digit = digit
-//RS                 .to_digit(radix)
-//RS                 .ok_or_else(|| format!("invalid base-{radix} integer `{text}`"))?;
-//RS             value = value.mul_small(radix).add_small(digit);
-//RS         }
-//RS         value.negative = negative && !value.is_zero();
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     fn normalize(mut self) -> Self {
-//RS         while self.limbs.len() > 1 && *self.limbs.last().unwrap() == 0 {
-//RS             self.limbs.pop();
-//RS         }
-//RS         if self.limbs.len() == 1 && self.limbs[0] == 0 {
-//RS             self.negative = false;
-//RS         }
-//RS         self
-//RS     }
-//RS 
-//RS     fn try_from_int(n: i64) -> Result<Self, AllocError> {
-//RS         let negative = n < 0;
-//RS         let mut value = if negative {
-//RS             (n as i128).unsigned_abs() as u64
-//RS         } else {
-//RS             n as u64
-//RS         };
-//RS         let mut count = 0usize;
-//RS         if value == 0 {
-//RS             count = 1;
-//RS         } else {
-//RS             while value > 0 {
-//RS                 count = count.saturating_add(1);
-//RS                 value /= CTBI_BASE;
-//RS             }
-//RS         }
-//RS         let mut limbs = Vec::new();
-//RS         limbs
-//RS             .try_reserve_exact(count)
-//RS             .map_err(|_| ctbi_alloc_error(count))?;
-//RS         value = if negative {
-//RS             (n as i128).unsigned_abs() as u64
-//RS         } else {
-//RS             n as u64
-//RS         };
-//RS         if value == 0 {
-//RS             limbs.push(0);
-//RS         } else {
-//RS             while value > 0 {
-//RS                 limbs.push((value % CTBI_BASE) as u32);
-//RS                 value /= CTBI_BASE;
-//RS             }
-//RS         }
-//RS         Ok(Self { negative, limbs })
-//RS     }
-//RS 
-//RS     fn try_clone(&self) -> Result<Self, AllocError> {
-//RS         let mut limbs = Vec::new();
-//RS         limbs
-//RS             .try_reserve_exact(self.limbs.len())
-//RS             .map_err(|_| ctbi_alloc_error(self.limbs.len()))?;
-//RS         limbs.extend_from_slice(&self.limbs);
-//RS         Ok(Self {
-//RS             negative: self.negative,
-//RS             limbs,
-//RS         })
-//RS     }
-//RS 
-//RS 
-//RS     pub fn is_zero(&self) -> bool {
-//RS         self.limbs.len() == 1 && self.limbs[0] == 0
-//RS     }
-//RS 
-//RS     /// Return the value when it fits in the resident machine-word payload.
-//RS     /// The tagged runtime representation reserves the outer signed bit, so
-//RS     /// callers pass the 63-bit bound explicitly instead of silently narrowing.
-//RS     pub fn try_i64(&self) -> Option<i64> {
-//RS         let mut value = 0u128;
-//RS         for &limb in self.limbs.iter().rev() {
-//RS             value = value.checked_mul(CTBI_BASE as u128)?;
-//RS             value = value.checked_add(limb as u128)?;
-//RS         }
-//RS         let signed = if self.negative {
-//RS             let magnitude = i128::try_from(value).ok()?;
-//RS             -magnitude
-//RS         } else {
-//RS             i128::try_from(value).ok()?
-//RS         };
-//RS         i64::try_from(signed).ok()
-//RS     }
-//RS 
-//RS     pub fn try_i128(&self) -> Option<i128> {
-//RS         let mut value = 0u128;
-//RS         for &limb in self.limbs.iter().rev() {
-//RS             value = value.checked_mul(CTBI_BASE as u128)?;
-//RS             value = value.checked_add(limb as u128)?;
-//RS         }
-//RS         let magnitude = i128::try_from(value).ok()?;
-//RS         Some(if self.negative { -magnitude } else { magnitude })
-//RS     }
-//RS 
-//RS     /// Project the exact integer into the low 64 bits with the same
-//RS     /// two's-complement wrap used by the runtime `from_bits` ABI.
-//RS     pub fn wrapping_u64(&self) -> u64 {
-//RS         let magnitude = self.limbs.iter().rev().fold(0_u64, |value, &limb| {
-//RS             value
-//RS                 .wrapping_mul(CTBI_BASE)
-//RS                 .wrapping_add(limb as u64)
-//RS         });
-//RS         if self.negative {
-//RS             0_u64.wrapping_sub(magnitude)
-//RS         } else {
-//RS             magnitude
-//RS         }
-//RS     }
-//RS 
-//RS     fn mul_small(&self, m: u32) -> Self {
-//RS         let mut carry = 0u64;
-//RS         let mut limbs = Vec::with_capacity(self.limbs.len() + 1);
-//RS         for &limb in &self.limbs {
-//RS             let prod = limb as u64 * m as u64 + carry;
-//RS             limbs.push((prod % CTBI_BASE) as u32);
-//RS             carry = prod / CTBI_BASE;
-//RS         }
-//RS         if carry > 0 {
-//RS             limbs.push(carry as u32);
-//RS         }
-//RS         CtBigInt {
-//RS             negative: self.negative,
-//RS             limbs,
-//RS         }
-//RS         .normalize()
-//RS     }
-//RS 
-//RS     fn add_small(&self, n: u32) -> Self {
-//RS         self.add(&CtBigInt::from_int(n as i64))
-//RS     }
-//RS 
-//RS     pub fn add(&self, other: &CtBigInt) -> CtBigInt {
-//RS         if self.negative == other.negative {
-//RS             let mut carry = 0u64;
-//RS             let len = self.limbs.len().max(other.limbs.len());
-//RS             let mut limbs = Vec::with_capacity(len + 1);
-//RS             for i in 0..len {
-//RS                 let a = *self.limbs.get(i).unwrap_or(&0) as u64;
-//RS                 let b = *other.limbs.get(i).unwrap_or(&0) as u64;
-//RS                 let sum = a + b + carry;
-//RS                 limbs.push((sum % CTBI_BASE) as u32);
-//RS                 carry = sum / CTBI_BASE;
-//RS             }
-//RS             if carry > 0 {
-//RS                 limbs.push(carry as u32);
-//RS             }
-//RS             CtBigInt {
-//RS                 negative: self.negative,
-//RS                 limbs,
-//RS             }
-//RS             .normalize()
-//RS         } else {
-//RS             let cmp = self.cmp_abs(other);
-//RS             if cmp == 0 {
-//RS                 CtBigInt::from_int(0)
-//RS             } else if cmp > 0 {
-//RS                 self.sub_abs(other).with_sign(self.negative)
-//RS             } else {
-//RS                 other.sub_abs(self).with_sign(other.negative)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn try_add(&self, other: &CtBigInt) -> Result<CtBigInt, AllocError> {
-//RS         if self.negative == other.negative {
-//RS             let mut carry = 0u64;
-//RS             let len = self.limbs.len().max(other.limbs.len());
-//RS             let capacity = len.saturating_add(1);
-//RS             let mut limbs = Vec::new();
-//RS             limbs
-//RS                 .try_reserve_exact(capacity)
-//RS                 .map_err(|_| ctbi_alloc_error(capacity))?;
-//RS             for i in 0..len {
-//RS                 let a = *self.limbs.get(i).unwrap_or(&0) as u64;
-//RS                 let b = *other.limbs.get(i).unwrap_or(&0) as u64;
-//RS                 let sum = a + b + carry;
-//RS                 limbs.push((sum % CTBI_BASE) as u32);
-//RS                 carry = sum / CTBI_BASE;
-//RS             }
-//RS             if carry > 0 {
-//RS                 limbs.push(carry as u32);
-//RS             }
-//RS             Ok(CtBigInt {
-//RS                 negative: self.negative,
-//RS                 limbs,
-//RS             }
-//RS             .normalize())
-//RS         } else {
-//RS             let cmp = self.cmp_abs(other);
-//RS             if cmp == 0 {
-//RS                 CtBigInt::try_from_int(0)
-//RS             } else if cmp > 0 {
-//RS                 self.try_sub_abs(other).map(|value| value.with_sign(self.negative))
-//RS             } else {
-//RS                 other
-//RS                     .try_sub_abs(self)
-//RS                     .map(|value| value.with_sign(other.negative))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     fn with_sign(self, negative: bool) -> Self {
-//RS         CtBigInt {
-//RS             negative,
-//RS             limbs: self.limbs,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn sub(&self, other: &CtBigInt) -> CtBigInt {
-//RS         let mut neg_other = other.clone();
-//RS         neg_other.negative = !neg_other.negative;
-//RS         self.add(&neg_other)
-//RS     }
-//RS 
-//RS     fn sub_abs(&self, other: &CtBigInt) -> CtBigInt {
-//RS         let mut borrow = 0i64;
-//RS         let len = self.limbs.len();
-//RS         let mut limbs = Vec::with_capacity(len);
-//RS         for i in 0..len {
-//RS             let a = self.limbs[i] as i64;
-//RS             let b = *other.limbs.get(i).unwrap_or(&0) as i64;
-//RS             let mut cur = a - b - borrow;
-//RS             if cur < 0 {
-//RS                 cur += CTBI_BASE as i64;
-//RS                 borrow = 1;
-//RS             } else {
-//RS                 borrow = 0;
-//RS             }
-//RS             limbs.push(cur as u32);
-//RS         }
-//RS         CtBigInt {
-//RS             negative: false,
-//RS             limbs,
-//RS         }
-//RS         .normalize()
-//RS     }
-//RS 
-//RS     fn try_sub_abs(&self, other: &CtBigInt) -> Result<CtBigInt, AllocError> {
-//RS         let mut borrow = 0i64;
-//RS         let len = self.limbs.len();
-//RS         let mut limbs = Vec::new();
-//RS         limbs
-//RS             .try_reserve_exact(len)
-//RS             .map_err(|_| ctbi_alloc_error(len))?;
-//RS         for i in 0..len {
-//RS             let a = self.limbs[i] as i64;
-//RS             let b = *other.limbs.get(i).unwrap_or(&0) as i64;
-//RS             let mut cur = a - b - borrow;
-//RS             if cur < 0 {
-//RS                 cur += CTBI_BASE as i64;
-//RS                 borrow = 1;
-//RS             } else {
-//RS                 borrow = 0;
-//RS             }
-//RS             limbs.push(cur as u32);
-//RS         }
-//RS         Ok(CtBigInt {
-//RS             negative: false,
-//RS             limbs,
-//RS         }
-//RS         .normalize())
-//RS     }
-//RS 
-//RS 
-//RS     fn cmp_abs(&self, other: &CtBigInt) -> i8 {
-//RS         match self.limbs.len().cmp(&other.limbs.len()) {
-//RS             std::cmp::Ordering::Greater => 1,
-//RS             std::cmp::Ordering::Less => -1,
-//RS             std::cmp::Ordering::Equal => {
-//RS                 for (a, b) in self.limbs.iter().rev().zip(other.limbs.iter().rev()) {
-//RS                     match a.cmp(b) {
-//RS                         std::cmp::Ordering::Greater => return 1,
-//RS                         std::cmp::Ordering::Less => return -1,
-//RS                         std::cmp::Ordering::Equal => {}
-//RS                     }
-//RS                 }
-//RS                 0
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn mul(&self, other: &CtBigInt) -> CtBigInt {
-//RS         let mut out = CtBigInt::from_int(0);
-//RS         for (i, &limb) in other.limbs.iter().enumerate() {
-//RS             if limb == 0 {
-//RS                 continue;
-//RS             }
-//RS             let mut part = self.mul_small(limb);
-//RS             for _ in 0..i {
-//RS                 part = part.mul_small(CTBI_BASE as u32);
-//RS             }
-//RS             out = out.add(&part);
-//RS         }
-//RS         CtBigInt {
-//RS             negative: self.negative != other.negative,
-//RS             limbs: out.limbs,
-//RS         }
-//RS         .normalize()
-//RS     }
-//RS 
-//RS     pub fn neg(&self) -> CtBigInt {
-//RS         if self.limbs.len() == 1 && self.limbs[0] == 0 {
-//RS             self.clone()
-//RS         } else {
-//RS             CtBigInt {
-//RS                 negative: !self.negative,
-//RS                 limbs: self.limbs.clone(),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn div_rem_small(&self, divisor: u32) -> (CtBigInt, u32) {
-//RS         let divisor = u64::from(divisor);
-//RS         let mut remainder = 0u64;
-//RS         let mut limbs = vec![0u32; self.limbs.len()];
-//RS         for index in (0..self.limbs.len()).rev() {
-//RS             let current = remainder * CTBI_BASE + u64::from(self.limbs[index]);
-//RS             limbs[index] = (current / divisor) as u32;
-//RS             remainder = current % divisor;
-//RS         }
-//RS         (
-//RS             CtBigInt {
-//RS                 negative: false,
-//RS                 limbs,
-//RS             }
-//RS             .normalize(),
-//RS             remainder as u32,
-//RS         )
-//RS     }
-//RS 
-//RS     fn bit_width(&self) -> usize {
-//RS         let mut value = self.abs();
-//RS         let mut width = 0usize;
-//RS         while !value.is_zero() {
-//RS             let (next, _) = value.div_rem_small(2);
-//RS             value = next;
-//RS             width += 1;
-//RS         }
-//RS         width
-//RS     }
-//RS 
-//RS     fn unsigned_bits(&self, width: usize) -> Vec<bool> {
-//RS         let mut value = self.abs();
-//RS         let mut bits = Vec::with_capacity(width);
-//RS         for _ in 0..width {
-//RS             let (next, remainder) = value.div_rem_small(2);
-//RS             bits.push(remainder != 0);
-//RS             value = next;
-//RS         }
-//RS         bits
-//RS     }
-//RS 
-//RS     fn from_unsigned_bits(bits: &[bool]) -> CtBigInt {
-//RS         let mut value = CtBigInt::from_int(0);
-//RS         for bit in bits.iter().rev() {
-//RS             value = value.mul_small(2);
-//RS             if *bit {
-//RS                 value = value.add_small(1);
-//RS             }
-//RS         }
-//RS         value
-//RS     }
-//RS 
-//RS     fn twos_complement(&self, width: usize) -> Vec<bool> {
-//RS         let mut bits = self.unsigned_bits(width);
-//RS         if self.negative {
-//RS             for bit in &mut bits {
-//RS                 *bit = !*bit;
-//RS             }
-//RS             let mut carry = true;
-//RS             for bit in &mut bits {
-//RS                 if !carry {
-//RS                     break;
-//RS                 }
-//RS                 if *bit {
-//RS                     *bit = false;
-//RS                 } else {
-//RS                     *bit = true;
-//RS                     carry = false;
-//RS                 }
-//RS             }
-//RS         }
-//RS         bits
-//RS     }
-//RS 
-//RS     fn from_twos_complement(mut bits: Vec<bool>) -> CtBigInt {
-//RS         let negative = bits.last().copied().unwrap_or(false);
-//RS         if !negative {
-//RS             return Self::from_unsigned_bits(&bits);
-//RS         }
-//RS         for bit in &mut bits {
-//RS             *bit = !*bit;
-//RS         }
-//RS         let mut carry = true;
-//RS         for bit in &mut bits {
-//RS             if !carry {
-//RS                 break;
-//RS             }
-//RS             if *bit {
-//RS                 *bit = false;
-//RS             } else {
-//RS                 *bit = true;
-//RS                 carry = false;
-//RS             }
-//RS         }
-//RS         Self::from_unsigned_bits(&bits).neg()
-//RS     }
-//RS 
-//RS     fn bitwise(&self, other: &CtBigInt, op: impl Fn(bool, bool) -> bool) -> CtBigInt {
-//RS         let width = self.bit_width().max(other.bit_width()).saturating_add(1);
-//RS         let left = self.twos_complement(width);
-//RS         let right = other.twos_complement(width);
-//RS         let bits = left
-//RS             .into_iter()
-//RS             .zip(right)
-//RS             .map(|(left, right)| op(left, right))
-//RS             .collect();
-//RS         Self::from_twos_complement(bits)
-//RS     }
-//RS 
-//RS     // Operands that fit i128 combine in machine two's complement, which is
-//RS     // the same infinite-width result; only wider values take the bit walk.
-//RS     pub fn bit_and(&self, other: &CtBigInt) -> CtBigInt {
-//RS         if let (Some(left), Some(right)) = (self.try_i128(), other.try_i128()) {
-//RS             return Self::from_i128(left & right);
-//RS         }
-//RS         self.bitwise(other, |left, right| left & right)
-//RS     }
-//RS 
-//RS     pub fn bit_or(&self, other: &CtBigInt) -> CtBigInt {
-//RS         if let (Some(left), Some(right)) = (self.try_i128(), other.try_i128()) {
-//RS             return Self::from_i128(left | right);
-//RS         }
-//RS         self.bitwise(other, |left, right| left | right)
-//RS     }
-//RS 
-//RS     pub fn bit_xor(&self, other: &CtBigInt) -> CtBigInt {
-//RS         if let (Some(left), Some(right)) = (self.try_i128(), other.try_i128()) {
-//RS             return Self::from_i128(left ^ right);
-//RS         }
-//RS         self.bitwise(other, |left, right| left ^ right)
-//RS     }
-//RS 
-//RS     pub fn bit_count(&self, width: u32, method: &str) -> Option<i64> {
-//RS         let width = usize::try_from(width).ok()?;
-//RS         if width == 0 {
-//RS             return None;
-//RS         }
-//RS         if matches!(method, "bit_count" | "bit_length") {
-//RS             if let Some(value) = self.try_i64() {
-//RS                 let magnitude = value.unsigned_abs();
-//RS                 return Some(match method {
-//RS                     "bit_count" => i64::from(magnitude.count_ones()),
-//RS                     "bit_length" => i64::from(64 - magnitude.leading_zeros()),
-//RS                     _ => unreachable!(),
-//RS                 });
-//RS             }
-//RS             let bit_width = self.bit_width();
-//RS             let count = if method == "bit_length" {
-//RS                 bit_width
-//RS             } else {
-//RS                 let mut value = self.abs();
-//RS                 let mut ones = 0usize;
-//RS                 while !value.is_zero() {
-//RS                     let (next, remainder) = value.div_rem_small(2);
-//RS                     ones += usize::from(remainder != 0);
-//RS                     value = next;
-//RS                 }
-//RS                 ones
-//RS             };
-//RS             return i64::try_from(count).ok();
-//RS         }
-//RS         let bits = self.twos_complement(width);
-//RS         let ones = bits.iter().filter(|bit| **bit).count();
-//RS         let count = match method {
-//RS             "count_ones" => ones,
-//RS             "count_zeros" => width - ones,
-//RS             "leading_zeros" => bits.iter().rev().take_while(|bit| !**bit).count(),
-//RS             "trailing_zeros" => bits.iter().take_while(|bit| !**bit).count(),
-//RS             _ => return None,
-//RS         };
-//RS         i64::try_from(count).ok()
-//RS     }
-//RS 
-//RS     pub fn checked_widen(&self, target_f32: bool) -> Option<f64> {
-//RS         let significant = self.bit_width();
-//RS         let mut trailing = 0usize;
-//RS         let mut value = self.abs();
-//RS         while !value.is_zero() {
-//RS             let (next, remainder) = value.div_rem_small(2);
-//RS             if remainder != 0 {
-//RS                 break;
-//RS             }
-//RS             trailing += 1;
-//RS             value = next;
-//RS         }
-//RS         let value = self.to_f64();
-//RS         crate::NumericConversion::jet_numeric_checked_widen_parts(
-//RS             significant,
-//RS             trailing,
-//RS             value,
-//RS             target_f32,
-//RS         )
-//RS     }
-//RS 
-//RS     fn shift_count(&self) -> Option<usize> {
-//RS         let count = self.try_i64()?;
-//RS         (count >= 0).then_some(count as usize)
-//RS     }
-//RS 
-//RS     pub fn shl(&self, count: &CtBigInt) -> Option<CtBigInt> {
-//RS         let count = count.shift_count()?;
-//RS         let mut value = self.clone();
-//RS         for _ in 0..count {
-//RS             value = value.mul_small(2);
-//RS         }
-//RS         Some(value)
-//RS     }
-//RS 
-//RS     pub fn shr(&self, count: &CtBigInt) -> Option<CtBigInt> {
-//RS         let count = count.shift_count()?;
-//RS         let mut value = self.clone();
-//RS         for _ in 0..count {
-//RS             let (quotient, remainder) = value.abs().div_rem_small(2);
-//RS             value = if self.negative && remainder != 0 {
-//RS                 quotient.add_small(1).neg()
-//RS             } else {
-//RS                 quotient.with_sign(self.negative)
-//RS             };
-//RS         }
-//RS         Some(value)
-//RS     }
-//RS 
-//RS     pub fn is_even(&self) -> bool {
-//RS         self.div_rem_small(2).1 == 0
-//RS     }
-//RS 
-//RS     pub fn is_odd(&self) -> bool {
-//RS         !self.is_even()
-//RS     }
-//RS 
-//RS     pub fn digits(&self) -> i64 {
-//RS         i64::try_from(ctbi_limb_decimal_digits(&self.limbs)).unwrap_or(i64::MAX)
-//RS     }
-//RS 
-//RS     pub fn leading_ones(&self) -> i64 {
-//RS         let width = 64usize.max(self.bit_width().saturating_add(1));
-//RS         let count = self
-//RS             .twos_complement(width)
-//RS             .iter()
-//RS             .rev()
-//RS             .take_while(|bit| **bit)
-//RS             .count();
-//RS         i64::try_from(count).unwrap_or(i64::MAX)
-//RS     }
-//RS 
-//RS     pub fn trailing_ones(&self) -> i64 {
-//RS         let width = 64usize.max(self.bit_width().saturating_add(1));
-//RS         let count = self
-//RS             .twos_complement(width)
-//RS             .iter()
-//RS             .take_while(|bit| **bit)
-//RS             .count();
-//RS         i64::try_from(count).unwrap_or(i64::MAX)
-//RS     }
-//RS 
-//RS     pub fn isqrt(&self) -> Option<CtBigInt> {
-//RS         if self.negative {
-//RS             return None;
-//RS         }
-//RS         if self.is_zero() {
-//RS             return Some(self.clone());
-//RS         }
-//RS         let one = CtBigInt::from_int(1);
-//RS         let two = CtBigInt::from_int(2);
-//RS         let mut root = one.clone();
-//RS         for _ in 0..self.bit_width().saturating_add(1) / 2 {
-//RS             root = root.mul_small(2);
-//RS         }
-//RS         loop {
-//RS             let quotient = self.div_rem(&root)?.0;
-//RS             let next = root.add(&quotient).div_rem(&two)?.0;
-//RS             if next.compare(&root) != std::cmp::Ordering::Less {
-//RS                 break;
-//RS             }
-//RS             root = next;
-//RS         }
-//RS         while root.mul(&root).compare(self) == std::cmp::Ordering::Greater {
-//RS             root = root.sub(&one);
-//RS         }
-//RS         loop {
-//RS             let next = root.add(&one);
-//RS             if next.mul(&next).compare(self) == std::cmp::Ordering::Greater {
-//RS                 break;
-//RS             }
-//RS             root = next;
-//RS         }
-//RS         Some(root)
-//RS     }
-//RS 
-//RS     pub fn pow(&self, exponent: &CtBigInt) -> Option<CtBigInt> {
-//RS         if exponent.negative {
-//RS             return None;
-//RS         }
-//RS         let mut exponent = exponent.clone();
-//RS         let mut base = self.clone();
-//RS         let mut result = CtBigInt::from_int(1);
-//RS         while !exponent.is_zero() {
-//RS             let (next, bit) = exponent.div_rem_small(2);
-//RS             if bit != 0 {
-//RS                 result = result.mul(&base);
-//RS             }
-//RS             exponent = next;
-//RS             if !exponent.is_zero() {
-//RS                 base = base.mul(&base);
-//RS             }
-//RS         }
-//RS         Some(result)
-//RS     }
-//RS 
-//RS     pub fn gcd(left: &CtBigInt, right: &CtBigInt) -> CtBigInt {
-//RS         let mut a = left.abs();
-//RS         let mut b = right.abs();
-//RS         while !b.is_zero() {
-//RS             let (_, remainder) = a.div_rem(&b).expect("gcd divisor is nonzero");
-//RS             a = b;
-//RS             b = remainder.abs();
-//RS         }
-//RS         a
-//RS     }
-//RS 
-//RS     pub fn lcm(left: &CtBigInt, right: &CtBigInt) -> CtBigInt {
-//RS         if left.is_zero() || right.is_zero() {
-//RS             return CtBigInt::from_int(0);
-//RS         }
-//RS         let divisor = Self::gcd(left, right);
-//RS         let quotient = left.abs().div_rem(&divisor).expect("lcm gcd is nonzero").0;
-//RS         quotient.mul(&right.abs())
-//RS     }
-//RS 
-//RS     pub fn binomial(n: &CtBigInt, k: &CtBigInt) -> Option<CtBigInt> {
-//RS         if n.negative || k.negative || k.compare(n) == std::cmp::Ordering::Greater {
-//RS             return None;
-//RS         }
-//RS         let other = n.sub(k);
-//RS         let limit = if k.compare(&other) == std::cmp::Ordering::Greater {
-//RS             other
-//RS         } else {
-//RS             k.clone()
-//RS         };
-//RS         let one = CtBigInt::from_int(1);
-//RS         let mut index = one.clone();
-//RS         let mut result = one.clone();
-//RS         while index.compare(&limit) != std::cmp::Ordering::Greater {
-//RS             let numerator = n.sub(&limit).add(&index);
-//RS             result = result.mul(&numerator).div_rem(&index)?.0;
-//RS             index = index.add(&one);
-//RS         }
-//RS         Some(result)
-//RS     }
-//RS 
-//RS     /// Total order (sign-aware, unlike the private magnitude-only `cmp_abs`).
-//RS     pub fn compare(&self, other: &CtBigInt) -> std::cmp::Ordering {
-//RS         match (self.negative, other.negative) {
-//RS             (false, true) => std::cmp::Ordering::Greater,
-//RS             (true, false) => std::cmp::Ordering::Less,
-//RS             (false, false) => match self.cmp_abs(other) {
-//RS                 1 => std::cmp::Ordering::Greater,
-//RS                 -1 => std::cmp::Ordering::Less,
-//RS                 _ => std::cmp::Ordering::Equal,
-//RS             },
-//RS             (true, true) => match self.cmp_abs(other) {
-//RS                 1 => std::cmp::Ordering::Less,
-//RS                 -1 => std::cmp::Ordering::Greater,
-//RS                 _ => std::cmp::Ordering::Equal,
-//RS             },
-//RS         }
-//RS     }
-//RS 
-//RS     /// Truncating quotient and remainder. Both outputs are normalized; the
-//RS     /// remainder carries the dividend sign, matching Rust's integer rules.
-//RS     pub fn div_rem(&self, other: &CtBigInt) -> Option<(CtBigInt, CtBigInt)> {
-//RS         if other.is_zero() {
-//RS             return None;
-//RS         }
-//RS         let divisor = other.abs();
-//RS         let dividend = self.abs();
-//RS         if dividend.cmp_abs(&divisor) < 0 {
-//RS             return Some((CtBigInt::from_int(0), self.clone()));
-//RS         }
-//RS 
-//RS         let mut quotient = vec![0u32; dividend.limbs.len()];
-//RS         let mut remainder = CtBigInt::from_int(0);
-//RS         for index in (0..dividend.limbs.len()).rev() {
-//RS             remainder.limbs.insert(0, dividend.limbs[index]);
-//RS             remainder = remainder.normalize();
-//RS             let mut low = 0u32;
-//RS             let mut high = (CTBI_BASE - 1) as u32;
-//RS             while low < high {
-//RS                 let middle = low + (high - low) / 2 + 1;
-//RS                 if divisor.mul_small(middle).cmp_abs(&remainder) <= 0 {
-//RS                     low = middle;
-//RS                 } else {
-//RS                     high = middle - 1;
-//RS                 }
-//RS             }
-//RS             quotient[index] = low;
-//RS             if low != 0 {
-//RS                 remainder = remainder.sub_abs(&divisor.mul_small(low));
-//RS             }
-//RS         }
-//RS         let quotient = CtBigInt {
-//RS             negative: self.negative != other.negative,
-//RS             limbs: quotient,
-//RS         }
-//RS         .normalize();
-//RS         remainder.negative = self.negative && !remainder.is_zero();
-//RS         Some((quotient, remainder.normalize()))
-//RS     }
-//RS 
-//RS     /// Euclidean quotient and remainder. The remainder is always
-//RS     /// non-negative and smaller than the divisor magnitude; the quotient is
-//RS     /// adjusted from the truncating pair when the dividend is negative.
-// END-PORT-PENDING 0079 crates/jet-foundation/src/Numeric.rs:1-1793
+// Arbitrary-precision default Int and base-10 Decimal; shared sema/codegen tables.
+use jet_foundation.JSONNumber.[json_decimal_lexeme, json_decimal_small, json_exact_integer_text]
+use jet_foundation.Syntax
+use jet_foundation.AST.[Expr, Marker, Type, CtValue]
+use jet_foundation.Outcome.[jet_alloc_error, AllocError]
+// Rust: crates/jet-foundation/src/Numeric.rs:8
+pub const MONEY_LINT_NAMES: [String] = ["price", "cost", "amount", "fee", "balance", "tax"]
+// Rust: crates/jet-foundation/src/Numeric.rs:16
+pub fn is_decimal_type_name(name: String) -> Bool Never! { name == Syntax.TYPE_DECIMAL }
+// Rust: crates/jet-foundation/src/Numeric.rs:20
+pub fn type_is_decimal(ty: Type) -> Bool Never! {
+    if ty == { .Named(n) -> is_decimal_type_name(n) else -> false }
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:24
+pub fn is_exact_type_name(name: String) -> Bool Never! { name == Syntax.TYPE_DECIMAL || name == Syntax.TYPE_FRACTION }
+// Rust: crates/jet-foundation/src/Numeric.rs:28
+pub fn exact_type_from_name(name: String) -> Type? Never! {
+    if is_exact_type_name(name) -> Val(Type.Named(~name)) else -> None
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:35
+pub fn precise_conversion_route(target_name: String, source_name: String) -> (owner: String, method: String)? Never! {
+    if (target_name, source_name) == {
+        (Syntax.TYPE_DECIMAL, "Int") -> Val((Syntax.TYPE_DECIMAL, "from_int"))
+        (Syntax.TYPE_DECIMAL, "Float") -> Val((Syntax.TYPE_DECIMAL, "from_float"))
+        (Syntax.TYPE_DECIMAL, Syntax.TYPE_FRACTION) -> Val((Syntax.TYPE_DECIMAL, "from_fraction"))
+        (Syntax.TYPE_FRACTION, "Int") -> Val((Syntax.TYPE_FRACTION, "from_int"))
+        (Syntax.TYPE_FRACTION, "Float") -> Val((Syntax.TYPE_FRACTION, "from_float"))
+        (Syntax.TYPE_FRACTION, Syntax.TYPE_DECIMAL) -> Val((Syntax.TYPE_FRACTION, "from_decimal"))
+        ("Float", Syntax.TYPE_DECIMAL) -> Val((Syntax.TYPE_DECIMAL, "to_float"))
+        ("Float", Syntax.TYPE_FRACTION) -> Val((Syntax.TYPE_FRACTION, "to_float"))
+        ("Int", Syntax.TYPE_DECIMAL) -> Val((Syntax.TYPE_DECIMAL, "to_int"))
+        ("Int", Syntax.TYPE_FRACTION) -> Val((Syntax.TYPE_FRACTION, "to_int"))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:61
+pub fn precise_conversion_return(target: Type, method: String, nargs: Int) -> (Type?)? Never! {
+    if nargs != 1 -> return None
+    source_name :: Syntax.numeric_conversion_source(method) ?? return None
+    target_name :: if target == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Named(name) -> { if !is_exact_type_name(name) -> return None; name }
+        else -> return None
+    }
+    _ :: precise_conversion_route(target_name, source_name) ?? return None
+    Val(Val(~target))
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:79
+pub fn is_money_like_name(name: String) -> Bool Never! {
+    lower :: name.to_ascii_lowercase()
+    loop m in MONEY_LINT_NAMES { if lower.contains(m) -> return true }
+    false
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:198
+pub fn allows_float_money(markers: [Marker]) -> Bool Never! {
+    loop m in markers {
+        if m.name == "allow" {
+            loop a in m.expr_args() { if a == .Ident("float_money", _) -> return true }
+        }
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:206
+pub fn decimal_method_return(method: String, nargs: Int) -> (Type?)? Never! {
+    if (method, nargs) == {
+        ("add" | "sub" | "mul", 1) -> Val(Val(Type.Named(Syntax.TYPE_DECIMAL)))
+        ("div", 1) -> Val(Val(Type.Named(Syntax.TYPE_FRACTION)))
+        ("round" | "floor" | "ceil", 0) -> Val(Val(Type.Named(Syntax.TYPE_DECIMAL)))
+        ("equal", 1) -> Val(Val(Type.Bool))
+        ("compare", 1) -> Val(Val(Type.Named(Syntax.TYPE_ORDERING)))
+        ("to_string", 0) -> Val(Val(Type.String))
+        ("to_float", 0) -> Val(Val(Type.Float))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:222
+pub fn fraction_method_return(method: String, nargs: Int) -> (Type?)? Never! {
+    if (method, nargs) == {
+        ("add" | "sub" | "mul" | "div", 1) -> Val(Val(Type.Named(Syntax.TYPE_FRACTION)))
+        ("numerator" | "denominator", 0) -> Val(Val(Type.Int))
+        ("to_string", 0) -> Val(Val(Type.String))
+        ("to_float", 0) -> Val(Val(Type.Float))
+        ("is_zero", 0) | ("equal", 1) -> Val(Val(Type.Bool))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:240
+pub struct CtFraction { pub numerator: CtBigInt, pub denominator: CtBigInt }
+impl CtFraction {
+    // Rust: crates/jet-foundation/src/Numeric.rs:246
+    fn partial_cmp(self, other: CtFraction) -> Ordering? Never! { Val(self.cmp(other)) }
+    // Rust: crates/jet-foundation/src/Numeric.rs:252
+    fn cmp(self, other: CtFraction) -> Ordering Never! {
+        self.numerator.mul(other.denominator).compare(other.numerator.mul(self.denominator))
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:260
+    pub fn new(numerator: I64, denominator: I64) -> CtFraction? Never! {
+        CtFraction.from_bigints(CtBigInt.from_int(numerator), CtBigInt.from_int(denominator))
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:267
+    pub fn from_bigints(numerator: ^CtBigInt, denominator: ^CtBigInt) -> CtFraction? Never! {
+        if denominator.is_zero() -> return None
+        if denominator.negative { numerator = numerator.neg(); denominator = denominator.neg() }
+        divisor :: CtBigInt.gcd(numerator, denominator)
+        n :: numerator.div_rem(divisor) ?? return None
+        d :: denominator.div_rem(divisor) ?? return None
+        Val(CtFraction{numerator: ^n.0, denominator: ^d.0})
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:284
+    fn from_reduced_bigints(numerator: ^CtBigInt, denominator: ^CtBigInt) -> CtFraction? Never! {
+        if denominator.is_zero() -> return None
+        if denominator.negative { numerator = numerator.neg(); denominator = denominator.neg() }
+        Val(CtFraction{numerator: ^numerator, denominator: ^denominator})
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:298
+    pub fn add(self, other: CtFraction) -> CtFraction? Never! {
+        left :: self.numerator.mul(other.denominator)
+        right :: other.numerator.mul(self.denominator)
+        CtFraction.from_bigints(left.add(right), self.denominator.mul(other.denominator))
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:307
+    pub fn sub(self, other: CtFraction) -> CtFraction? Never! {
+        left :: self.numerator.mul(other.denominator)
+        right :: other.numerator.mul(self.denominator)
+        CtFraction.from_bigints(left.sub(right), self.denominator.mul(other.denominator))
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:316
+    pub fn mul(self, other: CtFraction) -> CtFraction? Never! {
+        CtFraction.from_bigints(self.numerator.mul(other.numerator), self.denominator.mul(other.denominator))
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:323
+    pub fn div(self, other: CtFraction) -> CtFraction? Never! {
+        CtFraction.from_bigints(self.numerator.mul(other.denominator), self.denominator.mul(other.numerator))
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:333
+    pub fn from_float(value: F64) -> CtFraction? Never! {
+        if !value.is_finite() -> return None
+        if value == 0.0 -> return CtFraction.new(I64{0}, I64{1})
+        bits :: value.to_bits()
+        negative :: (bits >> 63) != U64{0}
+        exponent :: I32{(bits >> 52) & U64{0x7ff}}
+        fraction :: bits & ((U64{1} << 52) - U64{1})
+        (significand, power) :: if exponent == I32{0} -> (fraction, I32{-1074}) else -> (fraction | (U64{1} << 52), exponent - I32{1023} - I32{52})
+        numerator := CtBigInt.from_u64(significand)
+        denominator := CtBigInt.from_int(I64{1})
+        if power >= I32{0} {
+            count :: U32.try_from(power) ?? return None
+            loop _ in 0..<Int{count} -> numerator = numerator.mul(CtBigInt.from_int(I64{2}))
+        } else {
+            count :: U32.try_from(-power) ?? return None
+            loop _ in 0..<Int{count} -> denominator = denominator.mul(CtBigInt.from_int(I64{2}))
+        }
+        if negative -> numerator = numerator.neg()
+        CtFraction.from_bigints(^numerator, ^denominator)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:368
+    pub fn to_int_exact(self) -> CtBigInt? Never! {
+        if self.denominator == CtBigInt.from_int(I64{1}) -> Val(~self.numerator) else -> None
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:372
+    pub fn from_int(value: I64) -> CtFraction? Never! { CtFraction.new(value, I64{1}) }
+    // Rust: crates/jet-foundation/src/Numeric.rs:376
+    pub fn from_bigint(value: ^CtBigInt) -> CtFraction? Never! { CtFraction.from_bigints(^value, CtBigInt.from_int(I64{1})) }
+    // Rust: crates/jet-foundation/src/Numeric.rs:380
+    pub fn from_decimal(value: CtDecimal) -> CtFraction? Never! { value.to_fraction() }
+    // Rust: crates/jet-foundation/src/Numeric.rs:384
+    pub fn to_decimal(self) -> CtDecimal? Never! { CtDecimal.from_fraction(self) }
+    // Rust: crates/jet-foundation/src/Numeric.rs:388
+    pub fn to_float(self) -> F64 Never! { self.numerator.to_f64() / self.denominator.to_f64() }
+    // Rust: crates/jet-foundation/src/Numeric.rs:392
+    pub fn is_zero(self) -> Bool Never! { self.numerator.is_zero() }
+    // Rust: crates/jet-foundation/src/Numeric.rs:396
+    pub fn to_string_rep(self) -> String Never! {
+        if CtDecimal.from_fraction(self) == .Val(decimal) -> return decimal.to_string_rep()
+        "{self.numerator.to_string_rep()}/{self.denominator.to_string_rep()}"
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:407
+    pub fn to_value(self) -> CtValue Never! {
+        CtValue.Struct{type_name: Syntax.TYPE_FRACTION, fields: [
+            ("numerator", ct_int_value(~self.numerator)), ("denominator", ct_int_value(~self.denominator))]}
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:423
+    pub fn from_value(value: CtValue) -> CtFraction Err! {
+        (type_name, fields) :: if value == { .Struct(type_name, fields) -> (type_name, fields) else -> return err("expected Fraction") }
+        if type_name != Syntax.TYPE_FRACTION -> return err("expected Fraction, found {type_name}")
+        numerator := CtBigInt?{None}
+        denominator := CtBigInt?{None}
+        loop (name, field) in fields {
+            number :: if field == {
+                .Int(n) -> CtBigInt.from_int(n)
+                .BigInt(n) -> ~n
+                else -> return err("malformed Fraction.{name}")
+            }
+            if name == "numerator" -> numerator = Val(^number)
+            else if name == "denominator" -> denominator = Val(^number)
+        }
+        n :: numerator ?? return err("malformed Fraction.numerator")
+        d :: denominator ?? return err("malformed Fraction.denominator")
+        CtFraction.from_bigints(^n, ^d) ?? return err("invalid exact quotient")
+    }
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:452
+fn ct_int_value(value: ^CtBigInt) -> CtValue Never! {
+    const SMALL_MIN: I64 = -(I64{1} << 62)
+    const SMALL_MAX: I64 = (I64{1} << 62) - I64{1}
+    if value.try_i64() == .Val(n) { if n >= SMALL_MIN && n <= SMALL_MAX -> return CtValue.Int(n) }
+    CtValue.BigInt(^value)
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:470
+pub struct CtBigInt { pub negative: Bool, pub limbs: [U32] }
+// Rust: crates/jet-foundation/src/Numeric.rs:475
+const CTBI_BASE: U64 = U64{1_000_000_000}
+// Rust: crates/jet-foundation/src/Numeric.rs:476
+fn ctbi_limb_len(limbs: [U32]) -> Int Never! {
+    length := limbs.len()
+    loop length > 1 && limbs[length - 1] == U32{0} -> length -= 1
+    length
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:484
+fn ctbi_u128_limbs(value: U128) -> (limbs: [U32; 5], length: Int) Never! {
+    remaining := value
+    limbs := [U32; 5]{}
+    length := 0
+    loop remaining != U128{0} {
+        limbs[length] = U32{remaining % U128{CTBI_BASE}}
+        remaining /= U128{CTBI_BASE}
+        length += 1
+    }
+    if length == 0 -> length = 1
+    (^limbs, length)
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:498
+fn ctbi_limb_is_zero(limbs: [U32]) -> Bool Never! { ctbi_limb_len(limbs) == 1 && (limbs.first() ?? U32{0}) == U32{0} }
+// Rust: crates/jet-foundation/src/Numeric.rs:502
+fn ctbi_limb_decimal_digits(limbs: [U32]) -> Int Never! {
+    length :: ctbi_limb_len(limbs)
+    if length == 0 || (length == 1 && limbs[0] == U32{0}) -> return 1
+    top := limbs[length - 1]
+    digits := 1
+    loop top >= U32{10} { top /= U32{10}; digits += 1 }
+    digits + (length - 1).max(0) * 9
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:517
+fn ctbi_small_power10_limbs(scale: U32) -> (limbs: [U32; 5], length: Int)? Never! {
+    if scale <= U32{38} -> Val(ctbi_u128_limbs(U128{10}.pow(scale))) else -> None
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:521
+fn ctbi_limb_decimal_prefix_f64(limbs: [U32], digits: Int) -> F64 Never! {
+    if ctbi_limb_is_zero(limbs) -> return 0.0
+    take :: digits.min(ctbi_limb_decimal_digits(limbs))
+    top_index :: ctbi_limb_len(limbs) - 1
+    top_width := 1
+    width_probe := limbs[top_index]
+    loop width_probe >= U32{10} { width_probe /= U32{10}; top_width += 1 }
+    prefix := 0.0
+    consumed := 0
+    loop index in (0..=top_index).rev() {
+        if consumed == take -> break
+        limb :: limbs[index]
+        width :: if index == top_index -> top_width else -> 9
+        need :: take - consumed
+        if need >= width {
+            prefix = prefix * F64{10}.powi(I32{width}) + F64{limb}
+            consumed += width
+        } else {
+            divisor :: U32{10}.pow(U32{width - need})
+            prefix = prefix * F64{10}.powi(I32{need}) + F64{limb / divisor}
+            break
+        }
+    }
+    prefix
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:555
+fn ctbi_limb_cmp(left: [U32], right: [U32]) -> Ordering Never! {
+    left_len :: ctbi_limb_len(left)
+    right_len :: ctbi_limb_len(right)
+    order :: left_len.compare(right_len)
+    if order != .Equal -> return order
+    loop index in (0..<left_len).rev() {
+        order :: left[index].compare(right[index])
+        if order != .Equal -> return order
+    }
+    .Equal
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:572
+fn ctbi_limb_shift_left(limbs: &[U32], bits: Int) Never! {
+    // GATE #4494: native list capacity reservation.
+    &limbs.reserve((bits / 28).saturating_add(1))
+    loop _ in 0..<bits {
+        carry := U64{0}
+        loop index in 0..<limbs.len() {
+            value :: U64{limbs[index]} * U64{2} + carry
+            limbs[index] = U32{value % CTBI_BASE}
+            carry = value / CTBI_BASE
+        }
+        if carry != U64{0} -> &limbs.push(U32{carry})
+    }
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:587
+fn ctbi_limb_double(limbs: &[U32]) Never! {
+    carry := U64{0}
+    loop index in 0..<limbs.len() {
+        value :: U64{limbs[index]} * U64{2} + carry
+        limbs[index] = U32{value % CTBI_BASE}
+        carry = value / CTBI_BASE
+    }
+    if carry != U64{0} -> &limbs.push(U32{carry})
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:599
+fn ctbi_limb_sub_assign(left: &[U32], right: [U32]) Never! {
+    assert(ctbi_limb_cmp(left, right) != .Less)
+    borrow := I64{0}
+    loop index in 0..<left.len() {
+        difference :: I64{left[index]} - I64{right.get(index) ?? U32{0}} - borrow
+        if difference < I64{0} { left[index] = U32{difference + I64{CTBI_BASE}}; borrow = I64{1} }
+        else { left[index] = U32{difference}; borrow = I64{0} }
+    }
+    assert(borrow == I64{0})
+    loop left.len() > 1 && left.last() == Val(U32{0}) -> _ :: &left.pop()
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:619
+fn ctbi_ratio_cmp_pow2(numerator: [U32], denominator: [U32], exponent: I64) -> Ordering Never! {
+    shifted := if exponent >= I64{0} -> ~denominator else -> ~numerator
+    ctbi_limb_shift_left(&shifted, Int.try_from(exponent.unsigned_abs()) ?? Int.max)
+    if exponent >= I64{0} -> ctbi_limb_cmp(numerator, shifted) else -> ctbi_limb_cmp(shifted, denominator)
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:638
+fn ctbi_ratio_exponent(numerator: [U32], denominator: [U32]) -> I64 Never! {
+    numerator_digits :: ctbi_limb_decimal_digits(numerator)
+    denominator_digits :: ctbi_limb_decimal_digits(denominator)
+    numerator_take :: numerator_digits.min(17)
+    denominator_take :: denominator_digits.min(17)
+    log2_ten :: F64{10}.log2()
+    numerator_log :: F64{numerator_digits - numerator_take} * log2_ten + ctbi_limb_decimal_prefix_f64(numerator, numerator_take).log2()
+    denominator_log :: F64{denominator_digits - denominator_take} * log2_ten + ctbi_limb_decimal_prefix_f64(denominator, denominator_take).log2()
+    I64{(numerator_log - denominator_log).floor()}
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:651
+fn ctbi_ratio_inf(negative: Bool) -> F64 Never! { if negative -> F64.NEG_INFINITY else -> F64.INFINITY }
+// Rust: crates/jet-foundation/src/Numeric.rs:659
+fn ctbi_ratio_zero(negative: Bool) -> F64 Never! { if negative -> F64.from_bits(U64{1} << 63) else -> 0.0 }
+// Rust: crates/jet-foundation/src/Numeric.rs:670
+fn ctbi_ratio_limbs_to_f64(numerator: [U32], denominator: [U32], negative: Bool) -> F64 Never! {
+    if ctbi_limb_is_zero(numerator) -> return 0.0
+    assert(!ctbi_limb_is_zero(denominator))
+    decimal_delta :: I64{ctbi_limb_decimal_digits(numerator)} - I64{ctbi_limb_decimal_digits(denominator)}
+    if decimal_delta > I64{400} -> return ctbi_ratio_inf(negative)
+    if decimal_delta < I64{-400} -> return ctbi_ratio_zero(negative)
+    exponent := ctbi_ratio_exponent(numerator, denominator)
+    loop {
+        if ctbi_ratio_cmp_pow2(numerator, denominator, exponent) == .Less { exponent -= I64{1}; next }
+        if ctbi_ratio_cmp_pow2(numerator, denominator, exponent + I64{1}) != .Less { exponent += I64{1}; next }
+        break
+    }
+    if exponent > I64{1023} -> return ctbi_ratio_inf(negative)
+    if exponent < I64{-1075} -> return ctbi_ratio_zero(negative)
+    if exponent == I64{-1075} {
+        scaled := ~numerator
+        ctbi_limb_shift_left(&scaled, 1074)
+        ctbi_limb_double(&scaled)
+        magnitude :: if ctbi_limb_cmp(scaled, denominator) == .Greater -> F64.from_bits(U64{1}) else -> 0.0
+        return if negative -> -magnitude else -> magnitude
+    }
+    divisor_storage := [U32]{}
+    remainder := ~numerator
+    if exponent > I64{0} {
+        &divisor_storage.extend(~denominator)
+        ctbi_limb_shift_left(&divisor_storage, Int{exponent})
+    } else if exponent < I64{0} -> ctbi_limb_shift_left(&remainder, Int{exponent.unsigned_abs()})
+    divisor :: if exponent > I64{0} -> divisor_storage else -> denominator
+    ctbi_limb_sub_assign(&remainder, divisor)
+    significand := U64{1} << 52
+    loop shift in (0..<52).rev() {
+        ctbi_limb_double(&remainder)
+        if ctbi_limb_cmp(remainder, divisor) != .Less {
+            ctbi_limb_sub_assign(&remainder, divisor)
+            significand |= U64{1} << shift
+        }
+    }
+    ctbi_limb_double(&remainder)
+    guard :: ctbi_limb_cmp(remainder, divisor) != .Less
+    if guard -> ctbi_limb_sub_assign(&remainder, divisor)
+    sticky :: !ctbi_limb_is_zero(remainder)
+    if guard && (sticky || (significand & U64{1}) != U64{0}) {
+        significand += U64{1}
+        if significand == (U64{1} << 53) { significand >>= 1; exponent += I64{1} }
+    }
+    if exponent > I64{1023} -> return ctbi_ratio_inf(negative)
+    bits := (U64{exponent + I64{1023}} << 52) | (significand & ((U64{1} << 52) - U64{1}))
+    if negative -> bits |= U64{1} << 63
+    F64.from_bits(bits)
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:776
+fn ctbi_decimal_power10_limbs(scale: U32) -> [U32] Never! {
+    groups :: Int.try_from(scale / U32{9}) ?? Int.max
+    limbs := [U32]{}
+    &limbs.resize(groups.saturating_add(1), U32{0})
+    limbs[groups] = U32{10}.pow(scale % U32{9})
+    ^limbs
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:783
+fn ctbi_mul_pow10(value: CtBigInt, places: U32) -> CtBigInt Never! {
+    if value.is_zero() || places == U32{0} -> return ~value
+    chunk_shift :: Int.try_from(places / U32{9}) ?? Int.max
+    remainder :: places % U32{9}
+    limbs := [U32]{}
+    // GATE #4494: native list capacity reservation.
+    &limbs.reserve(value.limbs.len().saturating_add(chunk_shift).saturating_add(if remainder != U32{0} -> 1 else -> 0))
+    &limbs.resize(chunk_shift, U32{0})
+    if remainder == U32{0} -> &limbs.extend(~value.limbs)
+    else {
+        factor :: U32{10}.pow(remainder)
+        carry := U64{0}
+        loop limb in value.limbs {
+            product :: U64{limb} * U64{factor} + carry
+            &limbs.push(U32{product % CTBI_BASE})
+            carry = product / CTBI_BASE
+        }
+        if carry != U64{0} -> &limbs.push(U32{carry})
+    }
+    CtBigInt{negative: value.negative, limbs: ^limbs}.normalize()
+}
+// Rust: crates/jet-foundation/src/Numeric.rs:818
+fn ctbi_alloc_error(elements: Int) -> AllocError Never! {
+    // GATE #4483: selected execution target's usize bound.
+    bytes :: U64{elements}.checked_mul(U64{4}) ?? core.sys.usize_max()
+    jet_alloc_error(bytes, "exact-int")
+}
+impl CtBigInt {
+    // Rust: crates/jet-foundation/src/Numeric.rs:827
+    pub fn from_u64(value: U64) -> CtBigInt Never! {
+        if value == U64{0} -> return CtBigInt.from_int(I64{0})
+        remaining := value
+        limbs := [U32]{}
+        loop remaining > U64{0} { &limbs.push(U32{remaining % CTBI_BASE}); remaining /= CTBI_BASE }
+        CtBigInt{negative: false, limbs: ^limbs}
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:842
+    pub fn from_int(n: I64) -> CtBigInt Never! {
+        if n == I64{0} -> return CtBigInt{negative: false, limbs: [U32{0}]}
+        negative :: n < I64{0}
+        v := if negative -> U64{I128{n}.unsigned_abs()} else -> U64{n}
+        limbs := [U32]{}
+        loop v > U64{0} { &limbs.push(U32{v % CTBI_BASE}); v /= CTBI_BASE }
+        CtBigInt{negative: negative, limbs: ^limbs}
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:863
+    fn from_i128(n: I128) -> CtBigInt Never! {
+        if n == I128{0} -> return CtBigInt.from_int(I64{0})
+        negative :: n < I128{0}
+        v := n.unsigned_abs()
+        limbs := [U32]{}
+        loop v > U128{0} { &limbs.push(U32{v % U128{CTBI_BASE}}); v /= U128{CTBI_BASE} }
+        CtBigInt{negative: negative, limbs: ^limbs}
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:876
+    fn from_decimal_digits(digits: [U8]) -> CtBigInt Never! {
+        if digits.is_empty() -> return CtBigInt.from_int(I64{0})
+        chunk_count :: digits.len().div_ceil(9)
+        first_chunk_len :: if digits.len() % 9 == 0 -> 9 else -> digits.len() % 9
+        limbs := [U32]{}
+        // GATE #4494: native list capacity reservation.
+        &limbs.reserve(chunk_count)
+        offset := 0
+        chunk_len := first_chunk_len
+        loop offset < digits.len() {
+            chunk := U32{0}
+            loop index in offset..<offset + chunk_len -> chunk = chunk * U32{10} + U32{digits[index]}
+            &limbs.push(chunk)
+            offset += chunk_len
+            chunk_len = 9
+        }
+        &limbs.reverse()
+        CtBigInt{negative: false, limbs: ^limbs}.normalize()
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:909
+    fn to_f64(self) -> F64 Never! {
+        if self.is_zero() -> return 0.0
+        if self.try_i128() == .Val(value) -> return F64{value}
+        if ctbi_limb_decimal_digits(self.limbs) > 309 -> return ctbi_ratio_inf(self.negative)
+        length :: ctbi_limb_len(self.limbs)
+        if length > 35 -> return ctbi_ratio_inf(self.negative)
+        limbs := [U32; 35]{}
+        loop index in 0..<length -> limbs[index] = self.limbs[index]
+        top := U64{0}
+        bit_index := 0
+        guard := false
+        sticky := false
+        limb_count := length
+        loop limb_count > 1 || limbs[0] != U32{0} {
+            remainder := U64{0}
+            loop index in (0..<limb_count).rev() {
+                current :: remainder * CTBI_BASE + U64{limbs[index]}
+                limbs[index] = U32{current / U64{2}}
+                remainder = current % U64{2}
+            }
+            loop limb_count > 1 && limbs[limb_count - 1] == U32{0} -> limb_count -= 1
+            bit :: remainder != U64{0}
+            if bit_index < 53 -> top |= (if bit -> U64{1} else -> U64{0}) << bit_index
+            else {
+                sticky = sticky || guard
+                guard = (top & U64{1}) != U64{0}
+                top = (top >> 1) | ((if bit -> U64{1} else -> U64{0}) << 52)
+            }
+            bit_index += 1
+        }
+        exponent := bit_index - 1
+        if bit_index > 53 && guard && (sticky || (top & U64{1}) != U64{0}) {
+            top += U64{1}
+            if top == (U64{1} << 53) { top >>= 1; exponent += 1 }
+        }
+        if exponent > 1023 -> return ctbi_ratio_inf(self.negative)
+        bits := if bit_index <= 53 -> F64{top}.to_bits() else -> ((U64{exponent} + U64{1023}) << 52) | (top & ((U64{1} << 52) - U64{1}))
+        if self.negative -> bits |= U64{1} << 63
+        F64.from_bits(bits)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:977
+    pub fn from_str(s: String) -> CtBigInt Err! {
+        t := s.trim() // #4303
+        if t.is_empty() -> return err("empty exact Int string")
+        (negative, body) :: if t.strip_prefix("-") == {
+            .Val(rest) -> (true, rest)
+            else -> if t.strip_prefix("+") == { .Val(rest) -> (false, rest) else -> (false, t) }
+        }
+        if body.is_empty() || !body.chars().all((c) -> c.is_ascii_digit()) -> return err("invalid exact Int string `{s}`")
+        acc := CtBigInt{negative: false, limbs: [U32{0}]}
+        loop ch in body.chars() {
+            digit :: ch.to_digit(U32{10}).expect("validated decimal digit")
+            acc = acc.mul_small(U32{10}).add_small(digit)
+        }
+        acc.negative = negative && !acc.is_zero()
+        ^acc
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1006
+    pub fn from_json_number(s: String) -> CtBigInt Err! { CtBigInt.from_str(json_exact_integer_text(s)) }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1013
+    pub fn from_literal(s: String) -> CtBigInt Err! {
+        text :: s.replace("_", "")
+        (negative, body) :: if text.strip_prefix("-") == {
+            .Val(rest) -> (true, rest)
+            else -> if text.strip_prefix("+") == { .Val(rest) -> (false, rest) else -> (false, text) }
+        }
+        radix := U32{0}
+        digits := body
+        if body.strip_prefix("0x").or_else(() -> body.strip_prefix("0X")) == .Val(rest) { radix = U32{16}; digits = rest }
+        else if body.strip_prefix("0o").or_else(() -> body.strip_prefix("0O")) == .Val(rest) { radix = U32{8}; digits = rest }
+        else if body.strip_prefix("0b").or_else(() -> body.strip_prefix("0B")) == .Val(rest) { radix = U32{2}; digits = rest }
+        else -> return CtBigInt.from_str(text)
+        if digits.is_empty() -> return err("invalid integer literal `{s}`")
+        value := CtBigInt.from_int(I64{0})
+        loop ch in digits.chars() {
+            digit :: ch.to_digit(radix) ?? return err("invalid integer literal `{s}`")
+            value = value.mul_small(radix).add_small(digit)
+        }
+        value.negative = negative && !value.is_zero()
+        ^value
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1047
+    pub fn from_radix(input: String, radix: U32) -> CtBigInt Err! {
+        if radix < U32{2} || radix > U32{36} -> return err("integer radix must be between 2 and 36, got {radix}")
+        text := input.trim() // #4303
+        (negative, digits) :: if text.strip_prefix("-") == {
+            .Val(rest) -> (true, rest)
+            else -> if text.strip_prefix("+") == { .Val(rest) -> (false, rest) else -> (false, text) }
+        }
+        if digits.is_empty() -> return err("integer radix text is empty")
+        value := CtBigInt.from_int(I64{0})
+        loop ch in digits.chars() {
+            digit :: ch.to_digit(radix) ?? return err("invalid base-{radix} integer `{text}`")
+            value = value.mul_small(radix).add_small(digit)
+        }
+        value.negative = negative && !value.is_zero()
+        ^value
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1073
+    fn normalize(^self) -> CtBigInt Never! {
+        loop self.limbs.len() > 1 && self.limbs.last() == Val(U32{0}) -> _ :: &self.limbs.pop()
+        if self.limbs.len() == 1 && self.limbs[0] == U32{0} -> self.negative = false
+        ^self
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1083
+    fn try_from_int(n: I64) -> CtBigInt AllocError! {
+        negative :: n < I64{0}
+        value := if negative -> U64{I128{n}.unsigned_abs()} else -> U64{n}
+        count := 0
+        if value == U64{0} -> count = 1
+        else { loop value > U64{0} { count = count.saturating_add(1); value /= CTBI_BASE } }
+        limbs := [U32]{}
+        // GATE #4494: fallible exact native list reservation.
+        if &limbs.try_reserve_exact(count) == .Err(_) -> return Err(ctbi_alloc_error(count))
+        value = if negative -> U64{I128{n}.unsigned_abs()} else -> U64{n}
+        if value == U64{0} -> &limbs.push(U32{0})
+        else { loop value > U64{0} { &limbs.push(U32{value % CTBI_BASE}); value /= CTBI_BASE } }
+        Ok(CtBigInt{negative: negative, limbs: ^limbs})
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1119
+    fn try_clone(self) -> CtBigInt AllocError! {
+        limbs := [U32]{}
+        // GATE #4494: fallible exact native list reservation.
+        if &limbs.try_reserve_exact(self.limbs.len()) == .Err(_) -> return Err(ctbi_alloc_error(self.limbs.len()))
+        &limbs.extend(~self.limbs)
+        Ok(CtBigInt{negative: self.negative, limbs: ^limbs})
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1132
+    pub fn is_zero(self) -> Bool Never! { self.limbs.len() == 1 && self.limbs[0] == U32{0} }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1139
+    pub fn try_i64(self) -> I64? Never! {
+        value := U128{0}
+        loop limb in self.limbs.rev() {
+            value = value.checked_mul(U128{CTBI_BASE}) ?? return None
+            value = value.checked_add(U128{limb}) ?? return None
+        }
+        magnitude :: I128.try_from(value) ?? return None
+        signed :: if self.negative -> -magnitude else -> magnitude
+        I64.try_from(signed)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1154
+    pub fn try_i128(self) -> I128? Never! {
+        value := U128{0}
+        loop limb in self.limbs.rev() {
+            value = value.checked_mul(U128{CTBI_BASE}) ?? return None
+            value = value.checked_add(U128{limb}) ?? return None
+        }
+        magnitude :: I128.try_from(value) ?? return None
+        Val(if self.negative -> -magnitude else -> magnitude)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1166
+    pub fn wrapping_u64(self) -> U64 Never! {
+        magnitude := U64{0}
+        loop limb in self.limbs.rev() -> magnitude = magnitude.wrapping_mul(CTBI_BASE).wrapping_add(U64{limb})
+        if self.negative -> U64{0}.wrapping_sub(magnitude) else -> magnitude
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1179
+    fn mul_small(self, m: U32) -> CtBigInt Never! {
+        carry := U64{0}
+        limbs := [U32]{}
+        // GATE #4494: native list capacity reservation.
+        &limbs.reserve(self.limbs.len() + 1)
+        loop limb in self.limbs {
+            prod :: U64{limb} * U64{m} + carry
+            &limbs.push(U32{prod % CTBI_BASE})
+            carry = prod / CTBI_BASE
+        }
+        if carry > U64{0} -> &limbs.push(U32{carry})
+        CtBigInt{negative: self.negative, limbs: ^limbs}.normalize()
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1197
+    fn add_small(self, n: U32) -> CtBigInt Never! { self.add(CtBigInt.from_int(I64{n})) }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1201
+    pub fn add(self, other: CtBigInt) -> CtBigInt Never! {
+        if self.negative == other.negative {
+            carry := U64{0}
+            len :: self.limbs.len().max(other.limbs.len())
+            limbs := [U32]{}
+            // GATE #4494: native list capacity reservation.
+            &limbs.reserve(len + 1)
+            loop i in 0..<len {
+                a :: U64{self.limbs.get(i) ?? U32{0}}
+                b :: U64{other.limbs.get(i) ?? U32{0}}
+                sum :: a + b + carry
+                &limbs.push(U32{sum % CTBI_BASE})
+                carry = sum / CTBI_BASE
+            }
+            if carry > U64{0} -> &limbs.push(U32{carry})
+            return CtBigInt{negative: self.negative, limbs: ^limbs}.normalize()
+        }
+        cmp :: self.cmp_abs(other)
+        if cmp == I8{0} -> CtBigInt.from_int(I64{0})
+        else if cmp > I8{0} -> self.sub_abs(other).with_sign(self.negative)
+        else -> other.sub_abs(self).with_sign(other.negative)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1233
+    fn try_add(self, other: CtBigInt) -> CtBigInt AllocError! {
+        if self.negative == other.negative {
+            carry := U64{0}
+            len :: self.limbs.len().max(other.limbs.len())
+            capacity :: len.saturating_add(1)
+            limbs := [U32]{}
+            // GATE #4494: fallible exact native list reservation.
+            if &limbs.try_reserve_exact(capacity) == .Err(_) -> return Err(ctbi_alloc_error(capacity))
+            loop i in 0..<len {
+                a :: U64{self.limbs.get(i) ?? U32{0}}
+                b :: U64{other.limbs.get(i) ?? U32{0}}
+                sum :: a + b + carry
+                &limbs.push(U32{sum % CTBI_BASE})
+                carry = sum / CTBI_BASE
+            }
+            if carry > U64{0} -> &limbs.push(U32{carry})
+            return Ok(CtBigInt{negative: self.negative, limbs: ^limbs}.normalize())
+        }
+        cmp :: self.cmp_abs(other)
+        if cmp == I8{0} -> return CtBigInt.try_from_int(I64{0})
+        if cmp > I8{0} {
+            value :: self.try_sub_abs(other)
+            return Ok(value.with_sign(self.negative))
+        }
+        value :: other.try_sub_abs(self)
+        Ok(value.with_sign(other.negative))
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1272
+    fn with_sign(^self, negative: Bool) -> CtBigInt Never! { CtBigInt{negative: negative, limbs: ^self.limbs} }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1279
+    pub fn sub(self, other: CtBigInt) -> CtBigInt Never! {
+        neg_other := ~other
+        neg_other.negative = !neg_other.negative
+        self.add(neg_other)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1285
+    fn sub_abs(self, other: CtBigInt) -> CtBigInt Never! {
+        borrow := I64{0}
+        len :: self.limbs.len()
+        limbs := [U32]{}
+        // GATE #4494: native list capacity reservation.
+        &limbs.reserve(len)
+        loop i in 0..<len {
+            a :: I64{self.limbs[i]}
+            b :: I64{other.limbs.get(i) ?? U32{0}}
+            cur := a - b - borrow
+            if cur < I64{0} { cur += I64{CTBI_BASE}; borrow = I64{1} }
+            else -> borrow = I64{0}
+            &limbs.push(U32{cur})
+        }
+        CtBigInt{negative: false, limbs: ^limbs}.normalize()
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1308
+    fn try_sub_abs(self, other: CtBigInt) -> CtBigInt AllocError! {
+        borrow := I64{0}
+        len :: self.limbs.len()
+        limbs := [U32]{}
+        // GATE #4494: fallible exact native list reservation.
+        if &limbs.try_reserve_exact(len) == .Err(_) -> return Err(ctbi_alloc_error(len))
+        loop i in 0..<len {
+            a :: I64{self.limbs[i]}
+            b :: I64{other.limbs.get(i) ?? U32{0}}
+            cur := a - b - borrow
+            if cur < I64{0} { cur += I64{CTBI_BASE}; borrow = I64{1} }
+            else -> borrow = I64{0}
+            &limbs.push(U32{cur})
+        }
+        Ok(CtBigInt{negative: false, limbs: ^limbs}.normalize())
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1335
+    fn cmp_abs(self, other: CtBigInt) -> I8 Never! {
+        if self.limbs.len().compare(other.limbs.len()) == {
+            .Greater -> return I8{1}
+            .Less -> return I8{-1}
+            .Equal -> {
+                loop (a, b) in self.limbs.rev().zip(other.limbs.rev()) {
+                    if a.compare(b) == { .Greater -> return I8{1} .Less -> return I8{-1} .Equal -> {} }
+                }
+            }
+        }
+        I8{0}
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1352
+    pub fn mul(self, other: CtBigInt) -> CtBigInt Never! {
+        out := CtBigInt.from_int(I64{0})
+        loop i in 0..<other.limbs.len() {
+            limb :: other.limbs[i]
+            if limb == U32{0} -> next
+            part := self.mul_small(limb)
+            loop _ in 0..<i -> part = part.mul_small(U32{CTBI_BASE})
+            out = out.add(part)
+        }
+        CtBigInt{negative: self.negative != other.negative, limbs: ^out.limbs}.normalize()
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1371
+    pub fn neg(self) -> CtBigInt Never! {
+        if self.is_zero() -> ~self else -> CtBigInt{negative: !self.negative, limbs: ~self.limbs}
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1382
+    fn div_rem_small(self, divisor: U32) -> (quotient: CtBigInt, remainder: U32) Never! {
+        d :: U64{divisor}
+        remainder := U64{0}
+        limbs := [U32]{}
+        &limbs.resize(self.limbs.len(), U32{0})
+        loop index in (0..<self.limbs.len()).rev() {
+            current :: remainder * CTBI_BASE + U64{self.limbs[index]}
+            limbs[index] = U32{current / d}
+            remainder = current % d
+        }
+        (CtBigInt{negative: false, limbs: ^limbs}.normalize(), U32{remainder})
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1401
+    fn bit_width(self) -> Int Never! {
+        value := self.abs()
+        width := 0
+        loop !value.is_zero() { (next_value, _) :: value.div_rem_small(U32{2}); value = ^next_value; width += 1 }
+        width
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1412
+    fn unsigned_bits(self, width: Int) -> [Bool] Never! {
+        value := self.abs()
+        bits := [Bool]{}
+        // GATE #4494: native list capacity reservation.
+        &bits.reserve(width)
+        loop _ in 0..<width {
+            (next_value, remainder) :: value.div_rem_small(U32{2})
+            &bits.push(remainder != U32{0})
+            value = ^next_value
+        }
+        ^bits
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1423
+    fn from_unsigned_bits(bits: [Bool]) -> CtBigInt Never! {
+        value := CtBigInt.from_int(I64{0})
+        loop bit in bits.rev() { value = value.mul_small(U32{2}); if bit -> value = value.add_small(U32{1}) }
+        ^value
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1434
+    fn twos_complement(self, width: Int) -> [Bool] Never! {
+        bits := self.unsigned_bits(width)
+        if self.negative {
+            loop i in 0..<bits.len() -> bits[i] = !bits[i]
+            carry := true
+            loop i in 0..<bits.len() {
+                if !carry -> break
+                if bits[i] -> bits[i] = false
+                else { bits[i] = true; carry = false }
+            }
+        }
+        ^bits
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1456
+    fn from_twos_complement(bits: ^[Bool]) -> CtBigInt Never! {
+        negative :: bits.last() ?? false
+        if !negative -> return CtBigInt.from_unsigned_bits(bits)
+        loop i in 0..<bits.len() -> bits[i] = !bits[i]
+        carry := true
+        loop i in 0..<bits.len() {
+            if !carry -> break
+            if bits[i] -> bits[i] = false
+            else { bits[i] = true; carry = false }
+        }
+        CtBigInt.from_unsigned_bits(bits).neg()
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1479
+    fn bitwise(self, other: CtBigInt, op: (Bool, Bool) -> Bool) -> CtBigInt Never! {
+        width :: self.bit_width().max(other.bit_width()).saturating_add(1)
+        left :: self.twos_complement(width)
+        right :: other.twos_complement(width)
+        bits := [Bool]{}
+        loop (l, r) in left.zip(right) -> &bits.push(op(l, r))
+        CtBigInt.from_twos_complement(^bits)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1493
+    pub fn bit_and(self, other: CtBigInt) -> CtBigInt Never! {
+        if (self.try_i128(), other.try_i128()) == (.Val(left), .Val(right)) -> return CtBigInt.from_i128(left & right)
+        self.bitwise(other, (left, right) -> left && right)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1500
+    pub fn bit_or(self, other: CtBigInt) -> CtBigInt Never! {
+        if (self.try_i128(), other.try_i128()) == (.Val(left), .Val(right)) -> return CtBigInt.from_i128(left | right)
+        self.bitwise(other, (left, right) -> left || right)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1507
+    pub fn bit_xor(self, other: CtBigInt) -> CtBigInt Never! {
+        if (self.try_i128(), other.try_i128()) == (.Val(left), .Val(right)) -> return CtBigInt.from_i128(left ^ right)
+        self.bitwise(other, (left, right) -> left != right)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1514
+    pub fn bit_count(self, requested_width: U32, method: String) -> I64? Never! {
+        width :: Int.try_from(requested_width) ?? return None
+        if width == 0 -> return None
+        if method == "bit_count" || method == "bit_length" {
+            if self.try_i64() == .Val(value) {
+                magnitude :: value.unsigned_abs()
+                return Val(if method == "bit_count" -> I64{magnitude.count_ones()} else -> I64{64 - magnitude.leading_zeros()})
+            }
+            bit_width :: self.bit_width()
+            count := bit_width
+            if method != "bit_length" {
+                value := self.abs()
+                ones := 0
+                loop !value.is_zero() {
+                    (next_value, remainder) :: value.div_rem_small(U32{2})
+                    ones += if remainder != U32{0} -> 1 else -> 0
+                    value = ^next_value
+                }
+                count = ones
+            }
+            return I64.try_from(count)
+        }
+        bits :: self.twos_complement(width)
+        ones :: bits.filter((bit) -> bit).count()
+        count :: if method == {
+            "count_ones" -> ones
+            "count_zeros" -> width - ones
+            "leading_zeros" -> bits.rev().take_while((bit) -> !bit).count()
+            "trailing_zeros" -> bits.take_while((bit) -> !bit).count()
+            else -> return None
+        }
+        I64.try_from(count)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1555
+    pub fn checked_widen(self, target_f32: Bool) -> F64? Never! {
+        significant :: self.bit_width()
+        trailing := 0
+        value := self.abs()
+        loop !value.is_zero() {
+            (next_value, remainder) :: value.div_rem_small(U32{2})
+            if remainder != U32{0} -> break
+            trailing += 1
+            value = ^next_value
+        }
+        jet_numeric_checked_widen_parts(significant, trailing, self.to_f64(), target_f32)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1576
+    fn shift_count(self) -> Int? Never! {
+        count :: self.try_i64() ?? return None
+        if count >= I64{0} -> Val(Int{count}) else -> None
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1581
+    pub fn shl(self, count: CtBigInt) -> CtBigInt? Never! {
+        shifts :: count.shift_count() ?? return None
+        value := ~self
+        loop _ in 0..<shifts -> value = value.mul_small(U32{2})
+        Val(^value)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1590
+    pub fn shr(self, count: CtBigInt) -> CtBigInt? Never! {
+        shifts :: count.shift_count() ?? return None
+        value := ~self
+        loop _ in 0..<shifts {
+            (quotient, remainder) :: value.abs().div_rem_small(U32{2})
+            value = if self.negative && remainder != U32{0} -> quotient.add_small(U32{1}).neg() else -> quotient.with_sign(self.negative)
+        }
+        Val(^value)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1604
+    pub fn is_even(self) -> Bool Never! { self.div_rem_small(U32{2}).1 == U32{0} }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1608
+    pub fn is_odd(self) -> Bool Never! { !self.is_even() }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1612
+    pub fn digits(self) -> I64 Never! { I64.try_from(ctbi_limb_decimal_digits(self.limbs)) ?? I64.max }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1616
+    pub fn leading_ones(self) -> I64 Never! {
+        width :: 64.max(self.bit_width().saturating_add(1))
+        count :: self.twos_complement(width).rev().take_while((bit) -> bit).count()
+        I64.try_from(count) ?? I64.max
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1627
+    pub fn trailing_ones(self) -> I64 Never! {
+        width :: 64.max(self.bit_width().saturating_add(1))
+        count :: self.twos_complement(width).take_while((bit) -> bit).count()
+        I64.try_from(count) ?? I64.max
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1637
+    pub fn isqrt(self) -> CtBigInt? Never! {
+        if self.negative -> return None
+        if self.is_zero() -> return Val(~self)
+        one :: CtBigInt.from_int(I64{1})
+        two :: CtBigInt.from_int(I64{2})
+        root := ~one
+        loop _ in 0..<self.bit_width().saturating_add(1) / 2 -> root = root.mul_small(U32{2})
+        loop {
+            pair :: self.div_rem(root) ?? return None
+            next_pair :: root.add(pair.0).div_rem(two) ?? return None
+            next_root :: ^next_pair.0
+            if next_root.compare(root) != .Less -> break
+            root = ^next_root
+        }
+        loop root.mul(root).compare(self) == .Greater -> root = root.sub(one)
+        loop {
+            next_root :: root.add(one)
+            if next_root.mul(next_root).compare(self) == .Greater -> break
+            root = ^next_root
+        }
+        Val(^root)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1671
+    pub fn pow(self, exponent: CtBigInt) -> CtBigInt? Never! {
+        if exponent.negative -> return None
+        remaining := ~exponent
+        base := ~self
+        result := CtBigInt.from_int(I64{1})
+        loop !remaining.is_zero() {
+            (next_value, bit) :: remaining.div_rem_small(U32{2})
+            if bit != U32{0} -> result = result.mul(base)
+            remaining = ^next_value
+            if !remaining.is_zero() -> base = base.mul(base)
+        }
+        Val(^result)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1691
+    pub fn gcd(left: CtBigInt, right: CtBigInt) -> CtBigInt Never! {
+        a := left.abs()
+        b := right.abs()
+        loop !b.is_zero() {
+            (_, remainder) :: a.div_rem(b).expect("gcd divisor is nonzero")
+            a = ^b
+            b = remainder.abs()
+        }
+        ^a
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1702
+    pub fn lcm(left: CtBigInt, right: CtBigInt) -> CtBigInt Never! {
+        if left.is_zero() || right.is_zero() -> return CtBigInt.from_int(I64{0})
+        divisor :: CtBigInt.gcd(left, right)
+        quotient :: left.abs().div_rem(divisor).expect("lcm gcd is nonzero").0
+        quotient.mul(right.abs())
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1711
+    pub fn binomial(n: CtBigInt, k: CtBigInt) -> CtBigInt? Never! {
+        if n.negative || k.negative || k.compare(n) == .Greater -> return None
+        other :: n.sub(k)
+        limit :: if k.compare(other) == .Greater -> ^other else -> ~k
+        one :: CtBigInt.from_int(I64{1})
+        index := ~one
+        result := ~one
+        loop index.compare(limit) != .Greater {
+            numerator :: n.sub(limit).add(index)
+            pair :: result.mul(numerator).div_rem(index) ?? return None
+            result = ^pair.0
+            index = index.add(one)
+        }
+        Val(^result)
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1733
+    pub fn compare(self, other: CtBigInt) -> Ordering Never! {
+        if (self.negative, other.negative) == {
+            (false, true) -> .Greater
+            (true, false) -> .Less
+            (false, false) -> if self.cmp_abs(other) == { I8{1} -> .Greater I8{-1} -> .Less else -> .Equal }
+            (true, true) -> if self.cmp_abs(other) == { I8{1} -> .Less I8{-1} -> .Greater else -> .Equal }
+        }
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1752
+    pub fn div_rem(self, other: CtBigInt) -> (quotient: CtBigInt, remainder: CtBigInt)? Never! {
+        if other.is_zero() -> return None
+        divisor :: other.abs()
+        dividend :: self.abs()
+        if dividend.cmp_abs(divisor) < I8{0} -> return Val((CtBigInt.from_int(I64{0}), ~self))
+        quotient := [U32]{}
+        &quotient.resize(dividend.limbs.len(), U32{0})
+        remainder := CtBigInt.from_int(I64{0})
+        loop index in (0..<dividend.limbs.len()).rev() {
+            &remainder.limbs.insert(0, dividend.limbs[index])
+            remainder = remainder.normalize()
+            low := U32{0}
+            high := U32{CTBI_BASE - U64{1}}
+            loop low < high {
+                middle :: low + (high - low) / U32{2} + U32{1}
+                if divisor.mul_small(middle).cmp_abs(remainder) <= I8{0} -> low = middle
+                else -> high = middle - U32{1}
+            }
+            quotient[index] = low
+            if low != U32{0} -> remainder = remainder.sub_abs(divisor.mul_small(low))
+        }
+        carried :: CtBigInt{negative: self.negative != other.negative, limbs: ^quotient}.normalize()
+        remainder.negative = self.negative && !remainder.is_zero()
+        Val((^carried, remainder.normalize()))
+    }
+    // Rust: crates/jet-foundation/src/Numeric.rs:1791
+    // Euclidean quotient/remainder continues in the next Numeric packet.
+}
 

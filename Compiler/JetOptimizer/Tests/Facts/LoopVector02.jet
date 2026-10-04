@@ -1,0 +1,46 @@
+// No original inline tests occur in MIROptimization.rs:10016-11812.
+// Behavioral controls exercise scalar witnesses and packed type boundaries.
+use jet_foundation.[MIRValueID, MIRConstant, MIRTypeKind, MIRMeasure, mir_type_from_kind]
+use jet_optimizer.[scalar_int_constant, vector_fixed_bound_covers, is_reduction_type, list_element_type]
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:10163
+#Test("scalar_int_constant_requires_an_integer_witness") {
+    constants := [U64:MIRConstant]{}
+    integer :: MIRValueID{value: 1}
+    boolean :: MIRValueID{value: 2}
+    absent :: MIRValueID{value: 3}
+    &constants.add(integer.value, MIRConstant.Int{value: -7, width: None, spelling: None}).drop("integer witness")
+    &constants.add(boolean.value, MIRConstant.Bool{value: true}).drop("noninteger witness")
+    assert_eq(scalar_int_constant(constants, integer), Val(-7))
+    assert_eq(scalar_int_constant(constants, boolean), None)
+    assert_eq(scalar_int_constant(constants, absent), None)
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11086
+#Test("vector_fixed_bound_covers_exact_extent_but_not_overrun") {
+    element :: mir_type_from_kind(MIRTypeKind.Float)
+    fixed :: mir_type_from_kind(MIRTypeKind.FixedList{elem: element, len: MIRMeasure.Literal{kind: "length", value: 8}})
+    dynamic :: mir_type_from_kind(MIRTypeKind.List{inner: element})
+    assert(vector_fixed_bound_covers(fixed, 0))
+    assert(vector_fixed_bound_covers(fixed, 8))
+    assert(!vector_fixed_bound_covers(fixed, 9))
+    assert(!vector_fixed_bound_covers(dynamic, 8))
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11326
+#Test("reduction_type_accepts_only_the_two_float_widths") {
+    assert(is_reduction_type(mir_type_from_kind(MIRTypeKind.Float)))
+    assert(is_reduction_type(mir_type_from_kind(MIRTypeKind.Float32)))
+    assert(!is_reduction_type(mir_type_from_kind(MIRTypeKind.Int)))
+    assert(!is_reduction_type(mir_type_from_kind(MIRTypeKind.Bool)))
+}
+
+// Rust: crates/jet-foundation/src/MIROptimization.rs:11737
+#Test("list_element_type_preserves_fixed_and_dynamic_elements") {
+    element :: mir_type_from_kind(MIRTypeKind.Float32)
+    dynamic :: mir_type_from_kind(MIRTypeKind.List{inner: element})
+    fixed :: mir_type_from_kind(MIRTypeKind.FixedList{elem: element, len: MIRMeasure.Literal{kind: "length", value: 4}})
+    assert_eq(list_element_type(dynamic), Val(element))
+    assert_eq(list_element_type(fixed), Val(element))
+    assert_eq(list_element_type(element), None)
+}

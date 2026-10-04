@@ -1,0 +1,32 @@
+use PluginWire.[PluginValue, PluginParamDecodeError, PLUGIN_MAX_PARAMS, plugin_encode_params, plugin_decode_params, plugin_decode_value]
+
+// Rust: crates/jet-foundation/src/PluginWire.rs:278-292
+#Test("a_large_list_is_one_parameter") {
+    count :: PLUGIN_MAX_PARAMS * 2
+    argument := [PluginValue].with_capacity(count)
+    loop value in 0..<count -> &argument.push(PluginValue.Int(I64{value}))
+    decoded :: plugin_decode_params(plugin_encode_params([PluginValue]{PluginValue.List(^argument)})) ?? panic("argument decoding failed: {err}")
+    assert_eq(decoded.len(), 1)
+    if decoded[0] == {
+        .List(values) -> {
+            assert_eq(values.len(), count)
+            loop index in 0..<values.len() {
+                if values[index] == {
+                    .Int(value) -> assert_eq(value, I64{index})
+                    else -> panic("the component list did not preserve its integer elements")
+                }
+            }
+        }
+        else -> panic("the component list did not survive argument decoding")
+    }
+}
+
+// Rust: crates/jet-foundation/src/PluginWire.rs:294-302
+#Test("collection_counts_cannot_allocate_beyond_the_frame") {
+    loop frame in [String]{"L18446744073709551615:", "R999999:", "G999999:"} {
+        if plugin_decode_value(frame.bytes()) == {
+            .Err(error) -> assert_eq(error, PluginParamDecodeError.Malformed)
+            .Ok(_) -> panic("collection count beyond the frame was accepted")
+        }
+    }
+}

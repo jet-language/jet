@@ -1,0 +1,209 @@
+// The Loader owner is shared by every graph snapshot. Callable locations are
+// indices of its actual AST, not another function store or a publication replay.
+use core.files.runtime.kernel_path_components as retained_ast_path
+use jet_foundation.[BuildFactSnapshot, Func, Item, LoadedModule, MIRTargetMachine, MIROSTarget, Program, ProgramBundle, Span, SymbolID, SymbolKind, TFuncKind, Diagnostic, foundation_member_name, symbol_id]
+
+struct SemaRetainedFunctionLocation { module: Int, path: [Int], method: Int?, trait_block: Int? }
+fn sema_retained_input_owner(inputs: [SemaRegistrationModuleInput], target: MIRTargetMachine, facts: SemaBuildFacts, canonical: String) -> Shared<ProgramBundle> Never! {
+    loop input in inputs { if input.bundle_owner == .Val(owner) -> return owner }
+    // Pure declaration clients supply parsed Programs and explicit target/build
+    // facts. This is their original owner; native Driver never uses this path.
+    os :: if facts.os == { "linux" -> MIROSTarget.Linux; "macos" -> MIROSTarget.MacOS; "windows" -> MIROSTarget.Windows; else -> panic("parsed graph inputs omitted their explicit OS fact") }
+    platform :: if os == MIROSTarget.Windows -> retained_ast_path.PathPlatform.Windows else -> retained_ast_path.PathPlatform.Unix
+    root :: if inputs.len() > 0 -> retained_ast_path.parent(retained_ast_path.from_text(inputs[0].source_file, platform)) ?? retained_ast_path.from_text(".", platform) else -> retained_ast_path.from_text(".", platform)
+    bundle := ProgramBundle.new(root, os, facts.snapshot ?? BuildFactSnapshot.for_host(os, target.triple), "2028")
+    loop input in inputs {
+        if input.module_identity == canonical -> next
+        program := input.program
+        &bundle.modules.push(LoadedModule.from_program(retained_ast_path.from_text(input.source_file, platform), input.source_file, input.unit_source, input.module_name, ^program))
+    }
+    shared ^bundle
+}
+fn sema_retained_bind_input_owner(inputs: &[SemaRegistrationModuleInput], owner: Shared<ProgramBundle>, canonical: String) Never! {
+    permit :: owner.guard_read()
+    rows := [String:Int]{}
+    loop (index, module) in permit.value.modules { if !rows.has_key(module.display) -> rows[module.display] = index }
+    loop index in 0..<inputs.len() {
+        if inputs[index].module_identity == canonical -> next
+        if inputs[index].bundle_owner == None && inputs[index].bundle_index == None -> inputs[index].bundle_index = rows.get(inputs[index].source_file)
+        inputs[index].bundle_owner = Val(owner)
+    }
+}
+fn sema_retained_publish_prepared_input(input: SemaRegistrationModuleInput) Never! {
+    owner :: input.bundle_owner ?? return
+    index :: input.bundle_index ?? return
+    permit := owner.guard_edit()
+    permit.value.modules[index].imports = input.program.imports
+    permit.value.modules[index].items = input.program.items
+    permit.value.modules[index].rule_facts = input.program.rule_facts
+}
+fn sema_retained_qualified_name(scope: String, name: String) -> String Never! {
+    if scope == "" || name.starts_with("__jet_") -> return name
+    foundation_member_name(scope, name)
+}
+fn sema_retained_impl_key(module: String, span: Span, name: String, trait_name: String?) -> String Never! { "{module}:{span.start}:{span.end}:{name}:{trait_name:Debug}" }
+fn sema_retained_add_method(rows: &[String:SemaRetainedFunctionLocation], module: String, owner: String, function: Func, location: SemaRetainedFunctionLocation) Never! {
+    key :: symbol_id(SymbolKind.Function, module, owner, function.name).key
+    if !rows.has_key(key) -> rows[key] = location
+}
+fn sema_retained_collect(items: [Item], module: Int, identity: String, scope: String, prefix: [Int], impl_owners: [String:String], rows: &[String:SemaRetainedFunctionLocation]) Never! {
+    loop (index, item) in items {
+        path := prefix
+        &path.push(index)
+        if item == {
+            .Func(function) -> {
+                key :: symbol_id(SymbolKind.Function, identity, "", sema_retained_qualified_name(scope, function.name)).key
+                if !rows.has_key(key) -> rows[key] = SemaRetainedFunctionLocation{module: module, path: path, method: None, trait_block: None}
+            }
+            .CodeModule(definition) -> if definition.body == .Val(body) {
+                child_scope :: if scope == "" -> definition.name else -> "{scope}.{definition.name}"
+                sema_retained_collect(body, module, identity, child_scope, path, impl_owners, &rows)
+            }
+            .Struct(definition) -> {
+                owner :: symbol_id(SymbolKind.Type, identity, "", sema_retained_qualified_name(scope, definition.name)).key
+                loop (method, function) in definition.methods -> sema_retained_add_method(&rows, identity, owner, function, SemaRetainedFunctionLocation{module: module, path: path, method: Val(method), trait_block: None})
+                loop (block, implementation) in definition.trait_impls {
+                    loop (method, function) in implementation.methods -> sema_retained_add_method(&rows, identity, owner, function, SemaRetainedFunctionLocation{module: module, path: path, method: Val(method), trait_block: Val(block)})
+                }
+            }
+            .Enum(definition) -> {
+                owner :: symbol_id(SymbolKind.Type, identity, "", sema_retained_qualified_name(scope, definition.name)).key
+                loop (method, function) in definition.methods -> sema_retained_add_method(&rows, identity, owner, function, SemaRetainedFunctionLocation{module: module, path: path, method: Val(method), trait_block: None})
+                loop (block, implementation) in definition.trait_impls {
+                    loop (method, function) in implementation.methods -> sema_retained_add_method(&rows, identity, owner, function, SemaRetainedFunctionLocation{module: module, path: path, method: Val(method), trait_block: Val(block)})
+                }
+            }
+            .Impl(definition) -> {
+                name :: sema_retained_qualified_name(scope, definition.type_name)
+                key :: sema_retained_impl_key(identity, definition.span, name, definition.trait_name)
+                owner :: impl_owners.get(key) ?? next
+                loop (method, function) in definition.methods -> sema_retained_add_method(&rows, identity, owner, function, SemaRetainedFunctionLocation{module: module, path: path, method: Val(method), trait_block: None})
+            }
+            else -> {}
+        }
+    }
+}
+fn sema_retained_declaration_key(item: Item) -> String? Never! {
+    if item == {
+        .Struct(value) -> Val("struct:{value.name}:{value.span.start}:{value.span.end}")
+        .Enum(value) -> Val("enum:{value.name}:{value.span.start}:{value.span.end}")
+        .Impl(value) -> Val("impl:{value.type_name}:{value.span.start}:{value.span.end}:{value.trait_name:Debug}")
+        else -> None
+    }
+}
+fn sema_retained_publish_generated(items: &[Item], prepared: [Item]) Never! {
+    positions := [String:Int]{}
+    loop (index, item) in items {
+        key :: sema_retained_declaration_key(item) ?? next
+        if !positions.has_key(key) -> positions[key] = index
+    }
+    loop item in prepared {
+        key :: sema_retained_declaration_key(item) ?? next
+        if positions.get(key) == .Val(index) {
+            // Actual derive/unit/signature transformations precede all body
+            // checks; a checked Every stamp is never copied back afterwards.
+            items[index] = item
+        } else {
+            positions[key] = items.len()
+            &items.push(item)
+        }
+    }
+}
+fn sema_retained_index_graph(graph: &SemaRegistrationGraph) Never! {
+    owners := [String:String]{}
+    loop module in graph.modules {
+        loop implementation in module.impls {
+            if implementation.methods.len() == 0 -> next
+            owner :: implementation.methods[0].symbol.owner ?? next
+            definition :: implementation.declaration
+            owners[sema_retained_impl_key(module.module_identity, definition.span, definition.type_name, definition.trait_name)] = owner
+        }
+    }
+    permit := graph.bundle.guard_edit()
+    rows := [String:SemaRetainedFunctionLocation]{}
+    loop module in graph.modules {
+        index :: module.bundle_index ?? next
+        sema_retained_publish_generated(&permit.value.modules[index].items, module.program.items)
+        sema_retained_collect(permit.value.modules[index].items, index, module.module_identity, "", [], owners, &rows)
+    }
+    // Actual compiler-generated declarations become AST members once. They
+    // are not a private checked-function cache, and no checked fact is copied.
+    loop module in graph.modules {
+        index :: module.bundle_index ?? next
+        loop item in module.program.items {
+            if item == .Func(function) && function.compiler_generated {
+                key :: symbol_id(SymbolKind.Function, module.module_identity, "", function.name).key
+                if rows.has_key(key) -> next
+                position :: permit.value.modules[index].items.len()
+                &permit.value.modules[index].items.push(item)
+                rows[key] = SemaRetainedFunctionLocation{module: index, path: [position], method: None, trait_block: None}
+            }
+        }
+    }
+    graph.retained_functions = rows
+}
+fn sema_retained_apply_memory(function: &Func, prepared: Func) Never! {
+    // Signature/body rewrites are genuine preparation products. The original
+    // marker, its argument, and its resolved stamp are never replaced here.
+    function.params = prepared.params
+    function.return_type = prepared.return_type
+    function.body = prepared.body
+    function.gc_scope = prepared.gc_scope
+    function.gc_return = prepared.gc_return
+}
+fn sema_function_callable_name(function: Func, id: SymbolID, environment: SemaScopeEnvironment) -> String Never! {
+    graph :: environment.registration_graph ?? return function.name
+    row :: graph.callable_rows.get(id.key) ?? return function.name
+    if row == {
+        .Function(module, index) -> graph.modules[module].functions[index].declaration.name
+        .NominalMethod(module, owner, index) -> graph.modules[module].nominals[owner].methods[index].declaration.name
+        .ImplMethod(module, owner, index) -> graph.modules[module].impls[owner].methods[index].declaration.name
+        .Foreign(_, _) -> function.name
+    }
+}
+fn sema_function_body_input(prepared: Func, kind: TFuncKind, raw: Bool, environment: SemaScopeEnvironment) -> String Never! {
+    if environment.incremental_cache == None || environment.incremental_probe -> return ""
+    if prepared.is_comptime || sema_incremental_syntax_facts(prepared.body).has_comptime -> return ""
+    "{prepared:Debug}:{kind:Debug}:{raw}:{environment.generic_params:Debug}"
+}
+fn sema_function_check_retained(prepared: Func, owner_id: SymbolID, kind: TFuncKind, raw: Bool, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], calls: &[SemaCallSiteFact], requests: &[SemaComptimeRequest], names: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    graph :: environment.registration_graph ?? return sema_function_check_unavailable(owner_id.key, "the retained callable has no original loaded graph")
+    location :: graph.retained_functions.get(owner_id.key) ?? return sema_function_check_unavailable(owner_id.key, "the retained callable has no original AST location")
+    permit := graph.bundle.guard_edit()
+    sema_function_check_at(&permit.value.modules[location.module].items, location, 0, prepared, owner_id, kind, raw, &environment, &scopes, &diagnostics, &calls, &requests, &names)
+}
+fn sema_function_check_at(items: &[Item], location: SemaRetainedFunctionLocation, depth: Int, prepared: Func, owner_id: SymbolID, kind: TFuncKind, raw: Bool, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], calls: &[SemaCallSiteFact], requests: &[SemaComptimeRequest], names: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    index :: location.path[depth]
+    if &items[index] == {
+        .CodeModule(module) -> if &module.body == .Val(body) -> return sema_function_check_at(&body, location, depth + 1, prepared, owner_id, kind, raw, &environment, &scopes, &diagnostics, &calls, &requests, &names)
+        .Func(function) -> {
+            sema_retained_apply_memory(&function, prepared)
+            return sema_function_check(&function, owner_id, kind, raw, &environment, &scopes, &diagnostics, &calls, &requests, &names, sema_function_body_input(prepared, kind, raw, environment))
+        }
+        .Struct(definition) -> {
+            method :: location.method ?? panic("retained struct method location has no method")
+            if location.trait_block == .Val(block) {
+                sema_retained_apply_memory(&definition.trait_impls[block].methods[method], prepared)
+                return sema_function_check(&definition.trait_impls[block].methods[method], owner_id, kind, raw, &environment, &scopes, &diagnostics, &calls, &requests, &names, sema_function_body_input(prepared, kind, raw, environment))
+            }
+            sema_retained_apply_memory(&definition.methods[method], prepared)
+            return sema_function_check(&definition.methods[method], owner_id, kind, raw, &environment, &scopes, &diagnostics, &calls, &requests, &names, sema_function_body_input(prepared, kind, raw, environment))
+        }
+        .Enum(definition) -> {
+            method :: location.method ?? panic("retained enum method location has no method")
+            if location.trait_block == .Val(block) {
+                sema_retained_apply_memory(&definition.trait_impls[block].methods[method], prepared)
+                return sema_function_check(&definition.trait_impls[block].methods[method], owner_id, kind, raw, &environment, &scopes, &diagnostics, &calls, &requests, &names, sema_function_body_input(prepared, kind, raw, environment))
+            }
+            sema_retained_apply_memory(&definition.methods[method], prepared)
+            return sema_function_check(&definition.methods[method], owner_id, kind, raw, &environment, &scopes, &diagnostics, &calls, &requests, &names, sema_function_body_input(prepared, kind, raw, environment))
+        }
+        .Impl(definition) -> {
+            method :: location.method ?? panic("retained impl method location has no method")
+            sema_retained_apply_memory(&definition.methods[method], prepared)
+            return sema_function_check(&definition.methods[method], owner_id, kind, raw, &environment, &scopes, &diagnostics, &calls, &requests, &names, sema_function_body_input(prepared, kind, raw, environment))
+        }
+        else -> {}
+    }
+    sema_function_check_unavailable(owner_id.key, "the indexed original AST no longer contains its callable")
+}

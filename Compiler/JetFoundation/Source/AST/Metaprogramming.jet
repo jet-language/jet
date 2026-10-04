@@ -1,0 +1,684 @@
+// PORT-PENDING 2133 crates-jet-foundation-src-ast-metaprogramming: crates/jet-foundation/src/AST/metaprogramming.rs:1-680
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Ratified shared-preparation and reflection contract types.
+//RS //!
+//RS //! These records define public shapes only. Parsing, checking, evaluation, and
+//RS //! runtime retention are owned by the compiler delivery cards.
+//RS 
+//RS /// D-PREP-SURFACE2=A: the total phase reported by `$phase` at its evaluation site.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum Phase {
+//RS     Preparation,
+//RS     Build,
+//RS     Runtime,
+//RS }
+//RS 
+//RS impl Phase {
+//RS     pub const ALL: [Self; 3] = [Self::Preparation, Self::Build, Self::Runtime];
+//RS 
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Preparation => "Preparation",
+//RS             Self::Build => "Build",
+//RS             Self::Runtime => "Runtime",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-META-REFLECT2=A: compiler stage at which a checked fact becomes available.
+//RS /// This is distinct from the language execution phase returned by `$phase`.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum CompilerStage {
+//RS     Parsed,
+//RS     Resolved,
+//RS     Typed,
+//RS     Prepared,
+//RS     Emitted,
+//RS }
+//RS 
+//RS impl CompilerStage {
+//RS     pub const ALL: [Self; 5] = [
+//RS         Self::Parsed,
+//RS         Self::Resolved,
+//RS         Self::Typed,
+//RS         Self::Prepared,
+//RS         Self::Emitted,
+//RS     ];
+//RS 
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Parsed => "Parsed",
+//RS             Self::Resolved => "Resolved",
+//RS             Self::Typed => "Typed",
+//RS             Self::Prepared => "Prepared",
+//RS             Self::Emitted => "Emitted",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Compiler-issued identities cannot be created from source names or casts.
+//RS macro_rules! opaque_metadata_identity {
+//RS     ($($name:ident),+ $(,)?) => {
+//RS         $(
+//RS             #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS             pub struct $name {
+//RS                 _identity: u64,
+//RS             }
+//RS         )+
+//RS     };
+//RS }
+//RS 
+//RS opaque_metadata_identity!(
+//RS     SnapshotId,
+//RS     TypeId,
+//RS     DeclarationHandle,
+//RS     ScopeId,
+//RS     NodeId,
+//RS     ValueHandle,
+//RS );
+//RS 
+//RS /// Package identity in one checked source snapshot.
+//RS #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+//RS pub struct PackageId {
+//RS     pub name: String,
+//RS     pub version: String,
+//RS     pub digest: String,
+//RS }
+//RS 
+//RS /// Exact source identity used by metadata facts, rather than a mutable path alone.
+//RS #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+//RS pub struct SourceId {
+//RS     pub package: PackageId,
+//RS     pub path: Option<String>,
+//RS     pub digest: String,
+//RS }
+//RS 
+//RS /// D-META-REFLECT2=A: byte range in an exact source snapshot; end is exclusive.
+//RS #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+//RS pub struct SourceSpan {
+//RS     pub source: SourceId,
+//RS     pub start: i64,
+//RS     pub end: i64,
+//RS }
+//RS 
+//RS /// Existing typed compiler diagnostic reused by `MetadataFailure::Invalid`.
+//RS pub type CompilerDiagnostic = crate::Diagnostics::Diagnostic;
+//RS 
+//RS /// Closed compiler fact availability stage for metadata failures.
+//RS #[derive(Debug, Clone)]
+//RS pub enum MetadataFailure {
+//RS     Unavailable {
+//RS         required_stage: CompilerStage,
+//RS         reason: String,
+//RS     },
+//RS     Unsupported {
+//RS         capability: String,
+//RS     },
+//RS     Stale {
+//RS         requested: SnapshotId,
+//RS         current: SnapshotId,
+//RS     },
+//RS     Invalid {
+//RS         diagnostics: Vec<CompilerDiagnostic>,
+//RS     },
+//RS     Denied {
+//RS         scope: ScopeId,
+//RS         reason: String,
+//RS     },
+//RS     Truncated {
+//RS         limit: i64,
+//RS         observed: i64,
+//RS     },
+//RS }
+//RS 
+//RS impl MetadataFailure {
+//RS     pub const fn kind_name(&self) -> &'static str {
+//RS         match self {
+//RS             Self::Unavailable { .. } => "Unavailable",
+//RS             Self::Unsupported { .. } => "Unsupported",
+//RS             Self::Stale { .. } => "Stale",
+//RS             Self::Invalid { .. } => "Invalid",
+//RS             Self::Denied { .. } => "Denied",
+//RS             Self::Truncated { .. } => "Truncated",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-META-REFLECT2=A: a checked metadata query's explicit typed failure.
+//RS #[derive(Debug, Clone)]
+//RS pub struct MetadataError {
+//RS     pub kind: MetadataFailure,
+//RS     pub query: String,
+//RS     pub source: Option<SourceSpan>,
+//RS }
+//RS /// Static contract descriptors are schema only. They do not imply that a
+//RS /// parser, checker, reflection producer, or runtime retention path exists.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataIdentity {
+//RS     Snapshot,
+//RS     Type,
+//RS     Declaration,
+//RS     Scope,
+//RS     Node,
+//RS     Value,
+//RS }
+//RS 
+//RS impl MetadataIdentity {
+//RS     pub const fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Snapshot => "SnapshotId",
+//RS             Self::Type => "TypeId",
+//RS             Self::Declaration => "DeclarationHandle",
+//RS             Self::Scope => "ScopeId",
+//RS             Self::Node => "NodeId",
+//RS             Self::Value => "ValueHandle",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Public metadata records and their canonical source records.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataRecord {
+//RS     Phase,
+//RS     CompilerStage,
+//RS     MetadataError,
+//RS     MetadataFailure,
+//RS     PackageId,
+//RS     SourceId,
+//RS     SourceSpan,
+//RS     ParameterInfo,
+//RS     DefaultInfo,
+//RS     CallableSignature,
+//RS     FunctionInfo,
+//RS     MethodInfo,
+//RS     ClosureInfo,
+//RS     CaptureInfo,
+//RS     EffectInfo,
+//RS     FailureInfo,
+//RS     GenericBinding,
+//RS     GenericArgument,
+//RS     MeasureInfo,
+//RS     TypeForm,
+//RS     TypeInfo,
+//RS     TupleTypeField,
+//RS     FieldInfo,
+//RS     CaseInfo,
+//RS     TraitInfo,
+//RS     LayoutInfo,
+//RS     ProgramInfo,
+//RS     ScopeInfo,
+//RS     CheckedNode,
+//RS     CheckedNodeKind,
+//RS     ObligationFact,
+//RS     SymbolDef,
+//RS     ReferenceFact,
+//RS     CallFact,
+//RS     StateGraph,
+//RS     FactDefinition,
+//RS     DerivationFact,
+//RS     SourceInfo,
+//RS     CommentInfo,
+//RS     CommentKind,
+//RS     ExpansionInfo,
+//RS     AttributeInfo,
+//RS     AttributeOrigin,
+//RS     PackageInfo,
+//RS     DependencyInfo,
+//RS     ImportInfo,
+//RS     SettingInfo,
+//RS     ProfileInfo,
+//RS     TargetInfo,
+//RS     ContributionInfo,
+//RS     ContributionKind,
+//RS     ValueInfo,
+//RS     ValueFieldInfo,
+//RS     TypeCatalog,
+//RS     RetentionScope,
+//RS     MetadataFamily,
+//RS     Visibility,
+//RS     ParamZone,
+//RS     AccessConvention,
+//RS     CallingConvention,
+//RS     FailureSource,
+//RS     CaptureMode,
+//RS     PreparedValue,
+//RS     CodeRef,
+//RS     DimensionInfo,
+//RS     TagMarker,
+//RS     PolicyFact,
+//RS     ViewProvenanceFact,
+//RS     CompilerDiagnostic,
+//RS     AbiInfo,
+//RS     TargetId,
+//RS }
+//RS 
+//RS impl MetadataRecord {
+//RS     /// Canonical public record spelling.
+//RS     pub const fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Phase => "Phase",
+//RS             Self::CompilerStage => "CompilerStage",
+//RS             Self::MetadataError => "MetadataError",
+//RS             Self::MetadataFailure => "MetadataFailure",
+//RS             Self::PackageId => "PackageId",
+//RS             Self::SourceId => "SourceId",
+//RS             Self::SourceSpan => "SourceSpan",
+//RS             Self::ParameterInfo => "ParameterInfo",
+//RS             Self::DefaultInfo => "DefaultInfo",
+//RS             Self::CallableSignature => "CallableSignature",
+//RS             Self::FunctionInfo => "FunctionInfo",
+//RS             Self::MethodInfo => "MethodInfo",
+//RS             Self::ClosureInfo => "ClosureInfo",
+//RS             Self::CaptureInfo => "CaptureInfo",
+//RS             Self::EffectInfo => "EffectInfo",
+//RS             Self::FailureInfo => "FailureInfo",
+//RS             Self::GenericBinding => "GenericBinding",
+//RS             Self::GenericArgument => "GenericArgument",
+//RS             Self::MeasureInfo => "MeasureInfo",
+//RS             Self::TypeForm => "TypeForm",
+//RS             Self::TypeInfo => "TypeInfo",
+//RS             Self::TupleTypeField => "TupleTypeField",
+//RS             Self::FieldInfo => "FieldInfo",
+//RS             Self::CaseInfo => "CaseInfo",
+//RS             Self::TraitInfo => "TraitInfo",
+//RS             Self::LayoutInfo => "LayoutInfo",
+//RS             Self::ProgramInfo => "ProgramInfo",
+//RS             Self::ScopeInfo => "ScopeInfo",
+//RS             Self::CheckedNode => "CheckedNode",
+//RS             Self::CheckedNodeKind => "CheckedNodeKind",
+//RS             Self::ObligationFact => "ObligationFact",
+//RS             Self::SymbolDef => "SymbolDef",
+//RS             Self::ReferenceFact => "ReferenceFact",
+//RS             Self::CallFact => "CallFact",
+//RS             Self::StateGraph => "StateGraph",
+//RS             Self::FactDefinition => "FactDefinition",
+//RS             Self::DerivationFact => "DerivationFact",
+//RS             Self::SourceInfo => "SourceInfo",
+//RS             Self::CommentInfo => "CommentInfo",
+//RS             Self::CommentKind => "CommentKind",
+//RS             Self::ExpansionInfo => "ExpansionInfo",
+//RS             Self::AttributeInfo => "AttributeInfo",
+//RS             Self::AttributeOrigin => "AttributeOrigin",
+//RS             Self::PackageInfo => "PackageInfo",
+//RS             Self::DependencyInfo => "DependencyInfo",
+//RS             Self::ImportInfo => "ImportInfo",
+//RS             Self::SettingInfo => "SettingInfo",
+//RS             Self::ProfileInfo => "ProfileInfo",
+//RS             Self::TargetInfo => "TargetInfo",
+//RS             Self::ContributionInfo => "ContributionInfo",
+//RS             Self::ContributionKind => "ContributionKind",
+//RS             Self::ValueInfo => "ValueInfo",
+//RS             Self::ValueFieldInfo => "ValueFieldInfo",
+//RS             Self::TypeCatalog => "TypeCatalog",
+//RS             Self::RetentionScope => "RetentionScope",
+//RS             Self::MetadataFamily => "MetadataFamily",
+//RS             Self::Visibility => "Visibility",
+//RS             Self::ParamZone => "ParamZone",
+//RS             Self::AccessConvention => "AccessConvention",
+//RS             Self::CallingConvention => "CallingConvention",
+//RS             Self::FailureSource => "FailureSource",
+//RS             Self::CaptureMode => "CaptureMode",
+//RS             Self::PreparedValue => "PreparedValue",
+//RS             Self::CodeRef => "CodeRef",
+//RS             Self::DimensionInfo => "DimensionInfo",
+//RS             Self::TagMarker => "TagMarker",
+//RS             Self::PolicyFact => "PolicyFact",
+//RS             Self::ViewProvenanceFact => "ViewProvenanceFact",
+//RS             Self::CompilerDiagnostic => "CompilerDiagnostic",
+//RS             Self::AbiInfo => "AbiInfo",
+//RS             Self::TargetId => "TargetId",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A field's base type. Collection, optionality, and checked-result shape are
+//RS /// encoded separately by `MetadataFieldCardinality`.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataValueType {
+//RS     Bool,
+//RS     Int,
+//RS     String,
+//RS     Identity(MetadataIdentity),
+//RS     Record(MetadataRecord),
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataFieldCardinality {
+//RS     One,
+//RS     Optional,
+//RS     List,
+//RS     FallibleOne,
+//RS     FallibleList,
+//RS }
+//RS 
+//RS /// Availability is a producer obligation, never an empty/default value.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataAvailability {
+//RS     EvaluationSite,
+//RS     CheckedSnapshot,
+//RS     AtStage(CompilerStage),
+//RS     TargetDependent,
+//RS     RuntimeRetained,
+//RS     ProducerReported,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataProducerStatus {
+//RS     ContractOnly,
+//RS     NotImplemented,
+//RS     ExistingCallableProducerNeedsExtension,
+//RS }
+//RS 
+//RS /// Existing canonical type/record owner. Entries are references, not new
+//RS /// copies of the source model or claims that a public metadata producer exists.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataCanonicalSource {
+//RS     AstPhase,
+//RS     AstCompilerStage,
+//RS     AstMetadataFailure,
+//RS     AstMetadataError,
+//RS     AstPackageId,
+//RS     AstSourceId,
+//RS     AstSourceSpan,
+//RS     AstType,
+//RS     AstMeasure,
+//RS     AstDimension,
+//RS     AstTagMarker,
+//RS     AstParamZone,
+//RS     AstAccessConvention,
+//RS     NameVisibility,
+//RS     AstCallablePolicy,
+//RS     ComptimeValue,
+//RS     Diagnostic,
+//RS     SemanticCallableSignatureFact,
+//RS     SemanticCallableParameterFact,
+//RS     SemanticViewProvenanceFact,
+//RS     SemanticSymbolDef,
+//RS     SemanticSymbolRef,
+//RS     SemanticCallEdge,
+//RS     SemanticStateGraphFact,
+//RS     SemanticCompilerFact,
+//RS     DerivationRecord,
+//RS     PackageDependencyRecord,
+//RS     PackageImportRecord,
+//RS     PackageProfileRecord,
+//RS     PackageTargetRecord,
+//RS     CodeRef,
+//RS     CheckedNodeKind,
+//RS     LocalObligationFact,
+//RS     CallingConvention,
+//RS     FailureSource,
+//RS     CaptureMode,
+//RS     AbiInfo,
+//RS     TargetId,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataCanonicalStatus {
+//RS     ExistingTypeOrRecord,
+//RS     ExistingStringProjectionNeedsTypedExtension,
+//RS     ContractTypeHasNoCurrentDefinition,
+//RS     ProducerNotImplemented,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct MetadataFieldSchema {
+//RS     pub name: &'static str,
+//RS     pub value_type: MetadataValueType,
+//RS     pub cardinality: MetadataFieldCardinality,
+//RS     pub error_type: Option<MetadataRecord>,
+//RS     pub availability: MetadataAvailability,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct MetadataVariantSchema {
+//RS     pub name: MetadataVariant,
+//RS     pub fields: &'static [MetadataFieldSchema],
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum MetadataRecordShape {
+//RS     Fields(&'static [MetadataFieldSchema]),
+//RS     FieldsFrom {
+//RS         source: MetadataCanonicalSource,
+//RS         status: MetadataCanonicalStatus,
+//RS         fields: &'static [MetadataFieldSchema],
+//RS     },
+//RS     Extends {
+//RS         base: MetadataRecord,
+//RS         fields: &'static [MetadataFieldSchema],
+//RS     },
+//RS     Variants(&'static [MetadataVariantSchema]),
+//RS     VariantsFrom {
+//RS         source: MetadataCanonicalSource,
+//RS         status: MetadataCanonicalStatus,
+//RS         variants: &'static [MetadataVariantSchema],
+//RS     },
+//RS     Canonical {
+//RS         source: MetadataCanonicalSource,
+//RS         status: MetadataCanonicalStatus,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct MetadataRecordSchema {
+//RS     pub record: MetadataRecord,
+//RS     pub shape: MetadataRecordShape,
+//RS     pub producer: MetadataProducerStatus,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataVariant {
+//RS     Preparation,
+//RS     Build,
+//RS     Runtime,
+//RS     Parsed,
+//RS     Resolved,
+//RS     Typed,
+//RS     Prepared,
+//RS     Emitted,
+//RS     Unavailable,
+//RS     Unsupported,
+//RS     Stale,
+//RS     Invalid,
+//RS     Denied,
+//RS     Truncated,
+//RS     TypeArgument,
+//RS     ValueArgument,
+//RS     MeasureArgument,
+//RS     FormInt,
+//RS     FormFloat,
+//RS     FormBool,
+//RS     FormString,
+//RS     FormChar,
+//RS     FormList,
+//RS     FormMap,
+//RS     FormShared,
+//RS     FormOption,
+//RS     FormResult,
+//RS     FormFunction,
+//RS     FormNamed,
+//RS     FormApply,
+//RS     FormTraitObject,
+//RS     FormTuple,
+//RS     FormFixedList,
+//RS     FormIntN,
+//RS     FormInlineRange,
+//RS     FormFloat32,
+//RS     FormTagged,
+//RS     FormUnion,
+//RS     FormQuantity,
+//RS     FormMeasure,
+//RS     RequestedRoots,
+//RS     WholeProgram,
+//RS     Types,
+//RS     Callables,
+//RS     Program,
+//RS     Source,
+//RS     Packages,
+//RS     LocalState,
+//RS     All,
+//RS     Line,
+//RS     Block,
+//RS     Documentation,
+//RS     Written,
+//RS     Expanded,
+//RS     Declaration,
+//RS     Profile,
+//RS     CommandLine,
+//RS }
+//RS 
+//RS impl MetadataVariant {
+//RS     pub const fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Preparation => "Preparation",
+//RS             Self::Build => "Build",
+//RS             Self::Runtime => "Runtime",
+//RS             Self::Parsed => "Parsed",
+//RS             Self::Resolved => "Resolved",
+//RS             Self::Typed => "Typed",
+//RS             Self::Prepared => "Prepared",
+//RS             Self::Emitted => "Emitted",
+//RS             Self::Unavailable => "Unavailable",
+//RS             Self::Unsupported => "Unsupported",
+//RS             Self::Stale => "Stale",
+//RS             Self::Invalid => "Invalid",
+//RS             Self::Denied => "Denied",
+//RS             Self::Truncated => "Truncated",
+//RS             Self::TypeArgument => "Type",
+//RS             Self::ValueArgument => "Value",
+//RS             Self::MeasureArgument => "Measure",
+//RS             Self::FormInt => "Int",
+//RS             Self::FormFloat => "Float",
+//RS             Self::FormBool => "Bool",
+//RS             Self::FormString => "String",
+//RS             Self::FormChar => "Char",
+//RS             Self::FormList => "List",
+//RS             Self::FormMap => "Map",
+//RS             Self::FormShared => "Shared",
+//RS             Self::FormOption => "Option",
+//RS             Self::FormResult => "Result",
+//RS             Self::FormFunction => "Function",
+//RS             Self::FormNamed => "Named",
+//RS             Self::FormApply => "Apply",
+//RS             Self::FormTraitObject => "TraitObject",
+//RS             Self::FormTuple => "Tuple",
+//RS             Self::FormFixedList => "FixedList",
+//RS             Self::FormIntN => "IntN",
+//RS             Self::FormInlineRange => "InlineRange",
+//RS             Self::FormFloat32 => "Float32",
+//RS             Self::FormTagged => "Tagged",
+//RS             Self::FormUnion => "Union",
+//RS             Self::FormQuantity => "Quantity",
+//RS             Self::FormMeasure => "Measure",
+//RS             Self::RequestedRoots => "RequestedRoots",
+//RS             Self::WholeProgram => "WholeProgram",
+//RS             Self::Types => "Types",
+//RS             Self::Callables => "Callables",
+//RS             Self::Program => "Program",
+//RS             Self::Source => "Source",
+//RS             Self::Packages => "Packages",
+//RS             Self::LocalState => "LocalState",
+//RS             Self::All => "All",
+//RS             Self::Line => "Line",
+//RS             Self::Block => "Block",
+//RS             Self::Documentation => "Documentation",
+//RS             Self::Written => "Written",
+//RS             Self::Expanded => "Expanded",
+//RS             Self::Declaration => "Declaration",
+//RS             Self::Profile => "Profile",
+//RS             Self::CommandLine => "CommandLine",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataRootInputType {
+//RS     TypeExpression,
+//RS     CallableSelection,
+//RS     MethodName,
+//RS     MethodHandle,
+//RS     AuthorizedSnapshotHandle,
+//RS     RuntimeValue,
+//RS     Int,
+//RS }
+//RS 
+//RS impl MetadataRootInputType {
+//RS     pub const fn identity(self) -> Option<MetadataIdentity> {
+//RS         match self {
+//RS             Self::MethodHandle => Some(MetadataIdentity::Declaration),
+//RS             Self::AuthorizedSnapshotHandle => Some(MetadataIdentity::Snapshot),
+//RS             Self::TypeExpression
+//RS             | Self::CallableSelection
+//RS             | Self::MethodName
+//RS             | Self::RuntimeValue
+//RS             | Self::Int => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataArgumentMode {
+//RS     Positional,
+//RS     NamedOnly,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct MetadataRootArgument {
+//RS     pub name: &'static str,
+//RS     pub input_type: MetadataRootInputType,
+//RS     pub cardinality: MetadataFieldCardinality,
+//RS     pub mode: MetadataArgumentMode,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataRootOverload {
+//RS     AuthorizedSnapshotHandle,
+//RS     TypedMethodHandle,
+//RS }
+//RS 
+//RS impl MetadataRootOverload {
+//RS     pub const fn input_type(self) -> MetadataRootInputType {
+//RS         match self {
+//RS             Self::AuthorizedSnapshotHandle => MetadataRootInputType::AuthorizedSnapshotHandle,
+//RS             Self::TypedMethodHandle => MetadataRootInputType::MethodHandle,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//RS pub enum MetadataRootScope {
+//RS     EvaluationSite,
+//RS     LexicalSnapshot,
+//RS     CurrentAuthorizedProgram,
+//RS     LexicalPackage,
+//RS     LexicalSource,
+//RS     RuntimeValue,
+//RS     RetainedRuntimeTypeCatalog,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct MetadataRootResult {
+//RS     pub success: MetadataValueType,
+//RS     pub error: Option<MetadataRecord>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum MetadataOperationInputType {
+//RS     String,
+//RS     Generated,
+//RS     Provider,
+//RS     Identity(MetadataIdentity),
+//RS     Record(MetadataRecord),
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct MetadataOperationArgument {
+//RS     pub name: &'static str,
+//RS     pub input_type: MetadataOperationInputType,
+//RS     pub cardinality: MetadataFieldCardinality,
+//RS }
+//RS 
+// END-PORT-PENDING 2133 crates/jet-foundation/src/AST/metaprogramming.rs:1-680
+

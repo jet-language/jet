@@ -422,10 +422,10 @@ fn parse_decision_span(value: DataTree) -> Span Err! {
     if fields.len() != 2 || !fields.contains_key("start") || !fields.contains_key("end") -> return Err("decision span has missing or unsafe fields")
     start_word :: decision_u64(fields, "start", "decision span")
     // GATE #4483: usize conversion uses selected-target width, never host width.
-    bits :: decision_target.selected_pointer_bits()
-    if bits < 64 && start_word > ((U64{1} << bits) - U64{1}) -> return Err("decision span start is out of range")
+    usize_max :: decision_target.usize_max()
+    if start_word > usize_max -> return Err("decision span start is out of range")
     end_word :: decision_u64(fields, "end", "decision span")
-    if bits < 64 && end_word > ((U64{1} << bits) - U64{1}) -> return Err("decision span end is out of range")
+    if end_word > usize_max -> return Err("decision span end is out of range")
     Span{start: Int.from_u64(start_word), end: Int.from_u64(end_word)}
 }
 // Rust: crates/jet-foundation/src/MIR.rs:3049

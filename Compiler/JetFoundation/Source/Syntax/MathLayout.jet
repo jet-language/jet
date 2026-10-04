@@ -1,0 +1,866 @@
+// PORT-PENDING 2126 crates-jet-foundation-src-syntax-math-layout: crates/jet-foundation/src/Syntax/math_layout.rs:1-862
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS /// D-PLACE1=A / D-ATOMIC-WIDTH1=A (ratified 2026-09-04/06): the one safe
+//RS /// scalar synchronization family. `Atomic<T>` accepts the closed scalar set
+//RS /// `Bool`, `I32`, `U32`, `I64`, `Int`, and `U64`. Ordinary operations are
+//RS /// sequentially consistent; `publish`/`observe` are the intent-named
+//RS /// release/acquire pair. No operation accepts a memory-order argument.
+//RS pub const TYPE_ATOMIC: &str = "Atomic";
+//RS pub const ATOMIC_SCALAR_TYPES: &[&str] = &["Bool", "I32", "U32", "I64", "Int", "U64"];
+//RS pub const ATOMIC_METHODS: &[&str] =
+//RS     &["load", "store", "add", "try_add", "compare_exchange", "publish", "observe"];
+//RS 
+//RS /// D-LAYOUT-ALIGN1=A (ratified 2026-09-06): alignment remains inside the
+//RS /// existing `#Layout(c, align(N))` family. `target` is the contextual expert
+//RS /// mode (`align(target, N)`); portable declarations use the profile-intersection
+//RS /// facts and the language baseline rather than a backend-local numeric rule.
+//RS pub const LAYOUT_ALIGN_TARGET: &str = "target";
+//RS pub const LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX: u64 = 1 << 20;
+//RS 
+//RS /// D-SIMD1/D-SIMD2/D-SIMD3 (ratified 2026-06-24/2026-08-27): the built-in
+//RS /// portable SIMD lane types. The family is named by scalar width and lane
+//RS /// count: `F32x4`/`F64x2` are the existing 128-bit forms and
+//RS /// `F32x8`/`F64x4` are the 256-bit forms. Integer lanes cover signed and
+//RS /// unsigned 8/16/32/64-bit scalars at both widths. Constructors, splats,
+//RS /// indexing, element-wise arithmetic, reductions, and fixed-list bridges all
+//RS /// use the same closed compiler-provided family. AOT native builds enable the
+//RS /// host CPU by default; `#Scalar` is the explicit function/method opt-out.
+//RS pub const SIMD_F32X4_TYPE: &str = "F32x4";
+//RS pub const SIMD_F64X2_TYPE: &str = "F64x2";
+//RS pub const SIMD_F32X8_TYPE: &str = "F32x8";
+//RS pub const SIMD_F64X4_TYPE: &str = "F64x4";
+//RS 
+//RS /// Scalar kind carried by one portable SIMD lane family member.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum SimdLaneKind {
+//RS     F32,
+//RS     F64,
+//RS     I8,
+//RS     I16,
+//RS     I32,
+//RS     I64,
+//RS     U8,
+//RS     U16,
+//RS     U32,
+//RS     U64,
+//RS }
+//RS 
+//RS /// The complete named lane family. Keep this list beside the layout decoder;
+//RS /// sema, protocol registration, and codegen all consume this one source.
+//RS pub const SIMD_LANE_TYPE_NAMES: &[&str] = &[
+//RS     SIMD_F32X4_TYPE,
+//RS     SIMD_F64X2_TYPE,
+//RS     SIMD_F32X8_TYPE,
+//RS     SIMD_F64X4_TYPE,
+//RS     "I8x16",
+//RS     "I16x8",
+//RS     "I32x4",
+//RS     "I64x2",
+//RS     "U8x16",
+//RS     "U16x8",
+//RS     "U32x4",
+//RS     "U64x2",
+//RS     "I8x32",
+//RS     "I16x16",
+//RS     "I32x8",
+//RS     "I64x4",
+//RS     "U8x32",
+//RS     "U16x16",
+//RS     "U32x8",
+//RS     "U64x4",
+//RS ];
+//RS 
+//RS /// Return the scalar kind and lane count for one named lane type.
+//RS pub fn simd_lane_layout(name: &str) -> Option<(SimdLaneKind, usize)> {
+//RS     Some(match name {
+//RS         SIMD_F32X4_TYPE => (SimdLaneKind::F32, 4),
+//RS         SIMD_F64X2_TYPE => (SimdLaneKind::F64, 2),
+//RS         SIMD_F32X8_TYPE => (SimdLaneKind::F32, 8),
+//RS         SIMD_F64X4_TYPE => (SimdLaneKind::F64, 4),
+//RS         "I8x16" => (SimdLaneKind::I8, 16),
+//RS         "I16x8" => (SimdLaneKind::I16, 8),
+//RS         "I32x4" => (SimdLaneKind::I32, 4),
+//RS         "I64x2" => (SimdLaneKind::I64, 2),
+//RS         "U8x16" => (SimdLaneKind::U8, 16),
+//RS         "U16x8" => (SimdLaneKind::U16, 8),
+//RS         "U32x4" => (SimdLaneKind::U32, 4),
+//RS         "U64x2" => (SimdLaneKind::U64, 2),
+//RS         "I8x32" => (SimdLaneKind::I8, 32),
+//RS         "I16x16" => (SimdLaneKind::I16, 16),
+//RS         "I32x8" => (SimdLaneKind::I32, 8),
+//RS         "I64x4" => (SimdLaneKind::I64, 4),
+//RS         "U8x32" => (SimdLaneKind::U8, 32),
+//RS         "U16x16" => (SimdLaneKind::U16, 16),
+//RS         "U32x8" => (SimdLaneKind::U32, 8),
+//RS         "U64x4" => (SimdLaneKind::U64, 4),
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS pub fn is_simd_lane_type(name: &str) -> bool {
+//RS     simd_lane_layout(name).is_some()
+//RS }
+//RS 
+//RS pub fn simd_lane_arity(name: &str) -> Option<usize> {
+//RS     simd_lane_layout(name).map(|(_, lanes)| lanes)
+//RS }
+//RS 
+//RS /// D-SWIZZLE1 (ratified 2026-06-27): named lane swizzles on vector/SIMD types.
+//RS /// Members `x`/`y`/`z`/`w` name lanes 0..3; patterns like `v.xyz`, `v.yx`, and
+//RS /// write-swizzles `v.xy = Vec2(…)` are blessed field access on `Vec2`/`Vec3`/`Vec4`
+//RS /// and `F32x4`/`F64x2` only (matrices are not swizzleable). Overlapping write
+//RS /// patterns (`v.xx = …`) are diagnosed (E3111); out-of-range lanes (E3110).
+//RS 
+//RS /// D-LINALG1 (ratified 2026-06-24): the built-in linear-algebra value types.
+//RS /// Vectors `Vec2`/`Vec3`/`Vec4` and square matrices `Mat3`/`Mat4` (column-major,
+//RS /// `F64` components). Methods `.dot()`/`.cross()` (Vec3 only)/`.matmul()`, plus
+//RS /// `.length()`/`.normalize()`; element-wise `+`/`-`, scalar `*`, and `Mat * Vec`.
+//RS /// A closed compiler-provided family — the user-facing aliases over the generic
+//RS /// `Vec<N>`/`Matrix<M,N>` substrate. Plain std math (no `unsafe`).
+//RS pub const LINALG_VEC2_TYPE: &str = "Vec2";
+//RS pub const LINALG_VEC3_TYPE: &str = "Vec3";
+//RS pub const LINALG_VEC4_TYPE: &str = "Vec4";
+//RS pub const LINALG_MAT3_TYPE: &str = "Mat3";
+//RS pub const LINALG_MAT4_TYPE: &str = "Mat4";
+//RS 
+//RS /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29) + D-LAYOUT-CTOR1
+//RS /// (D-VERDICT-1306-1, ratified 2026-07-28): the built-in constraint-layout
+//RS /// value types. `HVar`/`VVar` are axis-typed layout variables
+//RS /// (horizontal/vertical); `LengthVar` is an axis-neutral scalar length that
+//RS /// combines with either axis. GATE 1: comparison operators (`>=`/`<=`/`==`)
+//RS /// on these types produce a `Constraint`, not `Bool` — a closed-operator
+//RS /// blessing on this family only (same category as D-SIMD2). GATE 2: all five
+//RS /// names enter the compiler's closed type family (`core_type_known`). A
+//RS /// closed compiler-provided family — no user `+`/comparison overload.
+//RS /// Cross-axis combination (`HVar` with `VVar`) is E-LAYOUT-AXIS-MISMATCH
+//RS /// (E2932). `Layout` is the solver/container value constructed by
+//RS /// `name :: Layout{ … }` (D-DOTCTOR3 element body of `Constraint`s);
+//RS /// `Constraint` is a registered, prioritizable constraint handle
+//RS /// (`.required()`/`.strong()`/`.medium()`/`.weak()`). Method API
+//RS /// (`Layout.h`/`v`/`value`/`suggest`/`add`, `Constraint.gte`/…) is the
+//RS /// desugar underlayment. The retired user spelling `LayoutHandle` is E2936.
+//RS pub const LAYOUT_HVAR_TYPE: &str = "HVar";
+//RS pub const LAYOUT_VVAR_TYPE: &str = "VVar";
+//RS pub const LAYOUT_LENGTHVAR_TYPE: &str = "LengthVar";
+//RS pub const LAYOUT_CONSTRAINT_TYPE: &str = "Constraint";
+//RS pub const LAYOUT_TYPE: &str = "Layout";
+//RS /// Retired D-LAYOUT1 spelling of `Layout` — teaching error E2936 only.
+//RS pub const LAYOUT_HANDLE_TYPE_RETIRED: &str = "LayoutHandle";
+//RS /// Transitional alias — every consumer should migrate to `LAYOUT_TYPE`.
+//RS pub const LAYOUT_HANDLE_TYPE: &str = LAYOUT_TYPE;
+//RS 
+//RS /// D-LAYOUT-CTOR1 (D-VERDICT-1306-1): `name :: Layout{ … }` — a D-DOTCTOR3
+//RS /// typed-literal construction whose body is a comma-separated sequence of
+//RS /// `Constraint` elements (same separators as `[T]{ … }`). Binds `name` (a
+//RS /// `Layout`) in the enclosing scope (the handle outlives the literal, unlike
+//RS /// `task.group`/`region`, since solved values are read after layout is
+//RS /// defined). Each element must be a `>=`/`<=`/`==` comparison of layout
+//RS /// values (a `Constraint`); the parser desugars bare `box.anchor` reads
+//RS /// (`left`/`right`/`top`/`bottom`/`width`/`height`) into
+//RS /// `name.h(box, anchor)` / `name.v(box, anchor)` calls, and `self.anchor`
+//RS /// vivifies the container box named after the binding. Sema/codegen treat
+//RS /// those exactly like any other `Layout` method call — no parallel checking
+//RS /// mechanism; GATE 1/2 do all the real work.
+//RS ///
+//RS /// Retired `layout NAME { … }` keyword (D-LAYOUT1) is E2935 only.
+//RS pub const FOREIGN_LAYOUT_KW: &str = "layout";
+//RS /// `use core.term as term` — exposes `term.read_key() -> Key`.
+//RS pub const CORE_TERM_MODULE: &str = "core.term";
+//RS 
+//RS /// D-TERM1 (ratified 2026-06-22): the key-event type returned by `term.read_key()`.
+//RS /// Variants: `Key.Char(c)`, `Key.Enter`, `Key.Escape`, `Key.Backspace`,
+//RS /// `Key.Tab`, `Key.Delete`, `Key.Up`, `Key.Down`, `Key.Left`, `Key.Right`,
+//RS /// `Key.F(n)`, `Key.Ctrl(c)`, `Key.Unknown`.
+//RS pub const TYPE_KEY: &str = "Key";
+//RS 
+//RS /// D-REACT1 (ratified 2026-06-22, option B): reactivity is an opt-in *library*,
+//RS /// not core semantics. Ordinary binding semantics are unchanged; runtime
+//RS /// reactivity ships as the `core.reactive` ring package. The surface is three
+//RS /// explicit producers and their handle types — no new keyword or sigil (reactive
+//RS /// values are ordinary values made with library calls, exactly as option B
+//RS /// requires). `use core.reactive as reactive` exposes:
+//RS ///   reactive.signal(initial) -> Signal<T>   — a mutable reactive source
+//RS ///   reactive.derived(() -> expr) -> Derived<T> — a value recomputed from signals
+//RS ///   reactive.computed(() -> expr)            — D-SIGNAL1 alias for `derived`
+//RS ///   reactive.effect(() -> { … })             — a side effect re-run on change
+//RS /// Methods: `Signal.get()/set(v)`, `Derived.get()`/`Computed.get()`. Dependency
+//RS /// tracking is explicit-by-read (a `.get()` inside a derived/effect body subscribes).
+//RS /// `#Reactive { … }` lowers to the effect job (D-REACTCORE1).
+//RS pub const REACTIVE_MODULE: &str = "core.reactive";
+//RS pub const TYPE_SIGNAL: &str = "Signal";
+//RS pub const TYPE_DERIVED: &str = "Derived";
+//RS /// D-SIGNAL1 (ratified 2026-06-28, opt A): canonical name for a derived reactive
+//RS /// value. `Derived` remains accepted as a backward-compatible alias.
+//RS pub const TYPE_COMPUTED: &str = "Computed";
+//RS /// D-SIGNAL1: the runtime value created by `#Reactive` / `reactive.effect`.
+//RS pub const TYPE_EFFECT: &str = "Effect";
+//RS /// D-DATARACE1=C: pin a reactive box to the fast one-thread form. Crossing a
+//RS /// task/channel/parallel boundary is E1102.
+//RS pub const MARKER_LOCAL: &str = "Local";
+//RS /// D-DATARACE1=C: pin a reactive box to the lock-guarded synchronized form.
+//RS pub const MARKER_SHARED: &str = "Shared";
+//RS /// D-EVENT1 (ratified 2026-07-07): first-party typed Event/Hook family.
+//RS /// Library values, compiler-known for typing/tooling; no new syntax.
+//RS pub const EVENT_MODULE: &str = "core.event";
+//RS pub const TYPE_EVENT: &str = "Event";
+//RS pub const TYPE_HOOK: &str = "Hook";
+//RS /// D-EVENT-CONTINUE1=C: typed cancellable/transforming decision hooks.
+//RS pub const TYPE_DECISION_HOOK: &str = "DecisionHook";
+//RS pub const TYPE_HOOK_POLICY: &str = "HookPolicy";
+//RS pub const TYPE_HOOK_DECISION: &str = "HookDecision";
+//RS pub const TYPE_HOOK_OUTCOME: &str = "HookOutcome";
+//RS pub const TYPE_SUBSCRIPTION: &str = "Subscription";
+//RS pub const TYPE_EVENT_SCOPE: &str = "EventScope";
+//RS pub const TYPE_EVENT_POLICY: &str = "EventPolicy";
+//RS pub const TYPE_EVENT_TRACE: &str = "EventTrace";
+//RS /// D-EVENT2=A (ratified 2026-07-11): scheduler-backed typed async event family.
+//RS pub const TYPE_ASYNC_EVENT: &str = "AsyncEvent";
+//RS pub const TYPE_ASYNC_POLICY: &str = "AsyncPolicy";
+//RS pub const TYPE_EVENT_OVERFLOW: &str = "Overflow";
+//RS pub const TYPE_FAILURE_POLICY: &str = "FailurePolicy";
+//RS pub const TYPE_DISPATCH_REPORT: &str = "DispatchReport";
+//RS pub const TYPE_DISPATCH_FAILURE: &str = "DispatchFailure";
+//RS pub const TYPE_DISPATCH_STATE: &str = "DispatchState";
+//RS pub const TYPE_EVENT_CONFIG_ERROR: &str = "EventConfigError";
+//RS /// D-WATCH-SCOPE1 (ratified 2026-07-07): unified file/process/port watcher values.
+//RS pub const WATCHER_MODULE: &str = "core.watcher";
+//RS pub const TYPE_WATCH_HANDLE: &str = "WatchHandle";
+//RS pub const TYPE_WATCH_SET: &str = "WatchSet";
+//RS pub const TYPE_WATCH_EVENT: &str = "WatchEvent";
+//RS /// D-FFI-CALLBACK2=A: managed callback event and consuming registration names.
+//RS pub const TYPE_FFI_CALLBACK_EVENT: &str = "FfiCallbackEvent";
+//RS pub const TYPE_FFI_CALLBACK_REGISTRATION: &str = "FfiCallbackRegistration";
+//RS /// D-HONESTNUM1=A / D-TYPE2-UNCERT1=A (ratified 2026-08-06): the science
+//RS /// measurement type name and the measured knowledge grade.
+//RS pub const TYPE_MEASUREMENT: &str = "Measurement";
+//RS /// D-TYPE2-IMAG1=A (ratified 2026-08-06): the carrier named by imaginary
+//RS /// numeric literals with the `i` suffix.
+//RS pub const TYPE_COMPLEX: &str = "Complex";
+//RS 
+//RS /// D-LISTMAP-CANON1=A: legacy list spelling; `[T]` is canonical.
+//RS pub const TYPE_LIST: &str = "List";
+//RS 
+//RS /// D-LISTMAP-CANON1=A / D-MAPSPACE1=A (ratified 2026-08-06): legacy default
+//RS /// map spelling; `[K:V]` is canonical.
+//RS pub const TYPE_MAP: &str = "Map";
+//RS /// D-LISTMAP-CANON1=A / D-COLLNAME1=A: named specific collection types.
+//RS pub const TYPE_HASH_MAP: &str = "HashMap";
+//RS pub const TYPE_BTREE_MAP: &str = "BTreeMap";
+//RS pub const TYPE_QUEUE: &str = "Queue";
+//RS pub const TYPE_SET: &str = "Set";
+//RS /// D-COLLNAME1=A: the ordered unique collection uses a rank word.
+//RS pub const TYPE_RANK: &str = "Rank";
+//RS pub const TYPE_PRIORITY_QUEUE: &str = "PriorityQueue";
+//RS pub const TYPE_LRU: &str = "Cache";
+//RS /// D-COLLNAME1=A: the counted multiset uses a tally word.
+//RS pub const TYPE_TALLY: &str = "Tally";
+//RS /// D-COLLNAME1=A: the bit membership collection uses a plural noun.
+//RS pub const TYPE_BITS: &str = "Bits";
+//RS /// D-COLLNAME1=A: the byte sequence builder uses a plural noun.
+//RS pub const TYPE_BYTES: &str = "Bytes";
+//RS 
+//RS /// D-ONCE-RETIRE1=C / D-COLLNAME1=A: migration inputs for the five renamed
+//RS /// collection types. Split literals keep retired source spellings out of the
+//RS /// live corpus while the formatter and fix engine can still recognize them.
+//RS pub const RETIRED_TYPE_QUEUE: &str = concat!("De", "que");
+//RS pub const RETIRED_TYPE_RANK: &str = concat!("Sorte", "dSet");
+//RS pub const RETIRED_TYPE_TALLY: &str = concat!("B", "ag");
+//RS pub const RETIRED_TYPE_BITS: &str = concat!("Bit", "Set");
+//RS pub const RETIRED_TYPE_BYTES: &str = concat!("Byte", "Buffer");
+//RS /// D-ITERTOOLS1=A: lazy adapter view; materialize with `to_list`/`collect`/reducers.
+//RS pub const TYPE_ITER: &str = "Iter";
+//RS /// D-FOUND-VIEW1=A: borrowed text/byte/mapped-file iteration has an explicit
+//RS /// lifetime-bearing carrier; it cannot reuse `Iter<T>`'s `'static` box.
+//RS pub const TYPE_VIEW_ITER: &str = "ViewIter";
+//RS /// D-LISTREMOVE1/F: selector for the two List.remove meanings.  The default
+//RS /// is `.Val`; `.Slot` opts into positional removal.
+//RS pub const TYPE_REMOVE_BY: &str = "RemoveBy";
+//RS /// D-RANGE-VALUE1=A: one nominal integer range for inclusive and half-open values.
+//RS pub const TYPE_RANGE: &str = "Range";
+//RS /// D-TYPE2-SPELL1=A (ratified 2026-08-06): the structural inline refinement
+//RS /// form. Bounds are literal-only and the spelling is legal in every type
+//RS /// position.
+//RS pub const TYPE_INLINE_RANGE: &str = "Int(lo..hi)";
+//RS 
+//RS /// S41 (ratified M5): character type.
+//RS pub const TYPE_CHAR: &str = "Char";
+//RS 
+//RS /// S66 (ratified 2026-06-15): standard acronyms are fully capitalized in Jet source.
+//RS pub const TYPE_IO_ERROR: &str = "IOError";
+//RS /// D-IOERROR-TREE1=A: shared structured byte-stream error context and operation.
+//RS pub const TYPE_IO_CONTEXT: &str = "IOContext";
+//RS pub const TYPE_IO_OPERATION: &str = "IOOperation";
+//RS /// D-PROCESS-RESOURCE1=A: typed process-session exhaustion names. These are
+//RS /// payloads of `IOError.ResourceLimit`, not strings parsed from diagnostics.
+//RS pub const TYPE_PROCESS_RESOURCE_LIMIT: &str = "ProcessResourceLimit";
+//RS pub const IO_ERROR_VARIANTS: &[&str] = &[
+//RS     "InvalidInput",
+//RS     "NotFound",
+//RS     "PermissionDenied",
+//RS     "TimedOut",
+//RS     "Cancelled",
+//RS     "Closed",
+//RS     "Protocol",
+//RS     "Other",
+//RS     "ResourceLimit",
+//RS ];
+//RS pub const PROCESS_RESOURCE_LIMIT_VARIANTS: &[&str] =
+//RS     &["WallTime", "CpuTime", "Memory", "OpenFiles", "Output"];
+//RS pub const IO_OPERATION_VARIANTS: &[&str] = &[
+//RS     "Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec",
+//RS ];
+//RS pub const IO_CONTEXT_FIELDS: &[&str] = &["operation", "resource", "os_code", "cause"];
+//RS pub const TYPE_UTF8_ERROR: &str = "UTF8Error";
+//RS pub const TYPE_JSON: &str = "JSON";
+//RS pub const TYPE_ENCODING_ERROR: &str = "EncodingError";
+//RS 
+//RS /// D-ENC-DYN1=A+ (ratified 2026-06-25) + D-SERDE13=B (ratified 2026-07-11): the
+//RS /// one dynamic encoding value every format's `parse` returns and every hand codec
+//RS /// constructs and returns. `DataTree` is the single canonical user-facing
+//RS /// spelling — renamed from the old `Data` face by D-SERDE13=B (it is a tree of
+//RS /// data, distinct from any user type named `Data`; the retired `Data` spelling is
+//RS /// a teaching error, E0351, not an alias, per I8). `JSON`/`TOML`/`YAML`/`CSV` are
+//RS /// format-tagged aliases over the same structure, so `json.parse` is typed
+//RS /// `JSON`, `toml.parse` is typed `TOML`, etc., but one walker and one accessor
+//RS /// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Array`,
+//RS /// `Object`.
+//RS pub const TYPE_DATA: &str = "DataTree";
+//RS /// D-SERDE16=A (ratified 2026-07-11): public target-directed subtree dispatch.
+//RS /// `tree.decode<T>()` calls only `T`'s ordinary `Decode` protocol impl.
+//RS pub const METHOD_DATATREE_DECODE: &str = "decode";
+//RS pub const TYPE_DATA_JSON: &str = "JSON";
+//RS pub const TYPE_DATA_TOML: &str = "TOML";
+//RS pub const TYPE_DATA_YAML: &str = "YAML";
+//RS pub const TYPE_DATA_CSV: &str = "CSV";
+//RS 
+//RS /// The accepted spellings of the dynamic encoding value (D-ENC-DYN1=A+ /
+//RS /// D-SERDE13=B): canonical `DataTree` plus the four format-tagged aliases. The
+//RS /// old bare `Data` spelling is intentionally absent — it is caught as E0351.
+//RS pub fn is_data_type_name(name: &str) -> bool {
+//RS     matches!(name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+//RS }
+//RS 
+//RS /// The variants of the dynamic `Data` value (D-ENC-DYN1=A+), the user-facing face
+//RS /// of `DataTree`. `Bytes` stays internal (no dynamic constructor).
+//RS pub fn is_data_variant(variant: &str) -> bool {
+//RS     matches!(
+//RS         variant,
+//RS         "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object"
+//RS     )
+//RS }
+//RS 
+//RS /// D-DBDRIVER1 (ratified): the tagged SQL parameter/column value. Construct with
+//RS /// `DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` /
+//RS /// `.Null`; a `[DBValue]` is the parameterized-query bind list, never a raw SQL
+//RS /// string. A dedicated dynamic-value type (mirrors `Data`'s construction
+//RS /// mechanism, D-ENC-DYN1=A+) — not a user-registrable enum, so it never appears
+//RS /// in `match`. `Blob` carries a `[U8]` byte sequence without text conversion.
+//RS pub const TYPE_DB_VALUE: &str = "DBValue";
+//RS 
+//RS /// D-DBDRIVER1: is `name` the `DBValue` dynamic-value type name?
+//RS pub fn is_db_value_type_name(name: &str) -> bool {
+//RS     name == TYPE_DB_VALUE
+//RS }
+//RS 
+//RS /// D-DBDRIVER1: the variants of `DBValue`.
+//RS pub fn is_db_value_variant(variant: &str) -> bool {
+//RS     matches!(variant, "Null" | "Int" | "Float" | "Text" | "Bool" | "Blob")
+//RS }
+//RS 
+//RS /// M2 / D-SHARED-REVISION1=A: opaque owner/revision ticket carrying an
+//RS /// ordinary snapshot projection.
+//RS pub const TYPE_SHARED_SNAPSHOT: &str = "SharedSnapshot";
+//RS /// D-SHARED-REVISION1=A: typed failures for owner mismatch and generation
+//RS /// exhaustion. A stale ticket is the ordinary `false` outcome.
+//RS pub const TYPE_SHARED_REVISION_ERROR: &str = "SharedRevisionError";
+//RS /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
+//RS pub const TYPE_SHARED: &str = "Shared";
+//RS /// D-SHAREDGUARD2=A: named expert lock token returned by Shared.guard_*.
+//RS pub const TYPE_SHARED_GUARD: &str = "SharedGuard";
+//RS /// D-SHARED-CYCLE1=C: expert weak Shared handle for intentional cycles that free.
+//RS pub const TYPE_SHARED_WEAK: &str = "Shared.Weak";
+//RS /// D-SHAREDGUARD2=A: explicit wait/notification handle for Shared guards.
+//RS pub const TYPE_CONDITION: &str = "Condition";
+//RS 
+//RS /// S68 / D-IFGUARD1=A (ratified): `if` is the one branching keyword, including
+//RS /// ordered subjectless statement/value guard tables.
+//RS pub const KW_IF: &str = "if";
+//RS pub const KW_ELSE: &str = "else";
+//RS /// D-LOOP-IN1=A / D-TIME-IN1=C (ratified 2026-08-28, card #2283): bare `in` is
+//RS /// the source-loop binding/source separator and is not a membership operator
+//RS /// in value position; the postfix lexer/parser admits it only after `.`.
+//RS pub const KW_IN: &str = "in";
+//RS 
+//RS /// S22 (ratified): inclusive range between two `Int` ends — `1..10`.
+//RS pub const OP_RANGE: &str = "..";
+//RS 
+//RS /// D-RANGE-EXCL1=C (ratified): exclusive / half-open range — `0..<n` runs
+//RS /// `0` through `n - 1` and is empty when the start is not less than the end.
+//RS /// Inclusive `..` (S22) is unchanged.
+//RS pub const OP_RANGE_EXCLUSIVE: &str = "..<";
+//RS 
+//RS /// D-LOOP-HEADER2: retired loop-header spelling. It is an ordinary identifier;
+//RS /// retained only so the range-arm porting diagnostic can recognize it.
+//RS pub const RETIRED_LOOP_STEP: &str = "step";
+//RS 
+//RS /// S23 (ratified) + D-LOOPSTATE1=A: loop control. Bare payloads return from the innermost
+//RS /// loop; `break(name[, value])` and `next(name)` select named loop targets.
+//RS pub const KW_BREAK: &str = "break";
+//RS /// D-LOOP-CONTROLWORD1=B: contextual statement/fallback control.
+//RS pub const KW_NEXT: &str = "next";
+//RS /// D-S14-PAUSE: common foreign spelling recognized only for an ordinary E0003;
+//RS /// it is not accepted as a loop-control alias.
+//RS pub const FOREIGN_CONTINUE: &str = "continue";
+//RS 
+//RS /// D-ARROW-UNIFY1=B (ratified 2026-08-19): one arrow for callable results,
+//RS /// function types, lambdas, computed fields, conversions, task bodies, arms,
+//RS /// and loop bodies.
+//RS /// D-ARROW-RESPELL1=A: canonical callable/control arrow.
+//RS pub const OP_UNIFIED_ARROW: &str = "->";
+//RS 
+//RS /// S11 (ratified): the two `Bool` literals.
+//RS pub const LIT_TRUE: &str = "true";
+//RS pub const LIT_FALSE: &str = "false";
+//RS 
+//RS /// M1: arithmetic operator spellings. Sema owns operand and result rules.
+//RS pub const OP_PLUS: &str = "+";
+//RS pub const OP_MINUS: &str = "-";
+//RS pub const OP_STAR: &str = "*";
+//RS pub const OP_SLASH: &str = "/";
+//RS /// D-FLOORDIV1=A (ratified 2026-08-05): `/%` divides and rounds down, toward
+//RS /// negative infinity. It is the whole-number companion of `/`.
+//RS pub const OP_SLASH_PERCENT: &str = "/%";
+//RS /// D-MODSEM1=A (ratified 2026-08-05): `%` is the floored modulo — its answer
+//RS /// takes the divisor's sign, so `-7 % 2` is 1. It is the partner of `/%`.
+//RS pub const OP_PERCENT: &str = "%";
+//RS /// D-MODSEM1=A (ratified 2026-08-05): `%%` is the truncated remainder — its
+//RS /// answer takes the dividend's sign, so `-7 %% 2` is -1. It partners `/`.
+//RS pub const OP_PERCENT_PERCENT: &str = "%%";
+//RS pub const OP_AMP: &str = "&";
+//RS /// D-PATO / D-SHAPE-PIPE1=C / D-BITOREXPR1=A (ratified 2026-08-28): peer
+//RS /// alternatives and value-position bitwise OR use the single bar; it is not
+//RS /// a general flow operator.
+//RS pub const OP_PIPE: &str = "|";
+//RS /// D-EXPOP1=A (ratified 2026-08-05): infix `^` raises to a power. Prefix `^`
+//RS /// stays the take sigil (D-MEM1); parser position tells them apart.
+//RS pub const OP_CARET: &str = "^";
+//RS /// D-XORSPELL1=A (ratified 2026-08-05): bitwise exclusive-or, the exclusive
+//RS /// variant of `|`. Prefix `~` stays the copy sigil (D-SHAPE-COPY1).
+//RS pub const OP_TILDE_PIPE: &str = "~|";
+//RS /// D-BITNOT1=A (ratified 2026-08-05): prefix `!` turns over every bit it is
+//RS /// given — the one bit of a `Bool`, or every bit of a whole number.
+//RS pub const OP_BIT_NOT: &str = OP_NOT;
+//RS pub const OP_SHL: &str = "<<";
+//RS pub const OP_SHR: &str = ">>";
+//RS 
+//RS /// S20 (ratified): escape sequences inside quoted text, and `{{` `}}` for
+//RS /// literal braces.
+//RS pub const ESCAPES: &[(char, char)] = &[('n', '\n'), ('t', '\t'), ('"', '"'), ('\\', '\\')];
+//RS 
+//RS /// S67 (ratified 2026-06-15): numeric literal forms — `_` digit separators
+//RS /// (stripped before parsing), base prefixes, and a `e`/`E` float exponent.
+//RS pub const DIGIT_SEPARATOR: char = '_';
+//RS pub const NUM_PREFIX_HEX: &str = "0x";
+//RS pub const NUM_PREFIX_OCTAL: &str = "0o";
+//RS pub const NUM_PREFIX_BINARY: &str = "0b";
+//RS 
+//RS /// S13 (ratified): logical operators.
+//RS pub const OP_AND: &str = "&&";
+//RS pub const OP_OR: &str = "||";
+//RS pub const OP_NOT: &str = "!";
+//RS 
+//RS /// S13 (ratified): comparison operators.
+//RS pub const OP_EQ: &str = "==";
+//RS pub const OP_NE: &str = "!=";
+//RS pub const OP_LT: &str = "<";
+//RS pub const OP_GT: &str = ">";
+//RS pub const OP_LE: &str = "<=";
+//RS pub const OP_GE: &str = ">=";
+//RS /// D-CMP3WAY1=B (ratified 2026-08-13): three-way comparison over `Ordering`.
+//RS pub const OP_COMPARE: &str = "<=>";
+//RS 
+//RS /// S17 (ratified): compound assignment operators (M1).
+//RS pub const OP_PLUS_EQ: &str = "+=";
+//RS pub const OP_MINUS_EQ: &str = "-=";
+//RS pub const OP_STAR_EQ: &str = "*=";
+//RS pub const OP_SLASH_EQ: &str = "/=";
+//RS /// D-FLOORDIV1=A (ratified 2026-08-05): floor-division-assign.
+//RS pub const OP_SLASH_PERCENT_EQ: &str = "/%=";
+//RS pub const OP_PERCENT_EQ: &str = "%=";
+//RS /// D-MODSEM1=A (ratified 2026-08-05): truncated-remainder-assign.
+//RS pub const OP_PERCENT_PERCENT_EQ: &str = "%%=";
+//RS pub const OP_AMP_EQ: &str = "&=";
+//RS pub const OP_PIPE_EQ: &str = "|=";
+//RS /// D-EXPOP1=A (ratified 2026-08-05): power-assign.
+//RS pub const OP_CARET_EQ: &str = "^=";
+//RS /// D-XORSPELL1=A (ratified 2026-08-05): exclusive-or-assign.
+//RS pub const OP_TILDE_PIPE_EQ: &str = "~|=";
+//RS pub const OP_SHL_EQ: &str = "<<=";
+//RS pub const OP_SHR_EQ: &str = ">>=";
+//RS 
+//RS /// D-INCR1 retired (owner decision 2026-09-28): `++` and `--` are not
+//RS /// operators. The lexer keeps them only so the parser teaches E0160
+//RS /// (`x += 1` / `x -= 1`) instead of reading `--x` as a double negation.
+//RS pub const RETIRED_OP_PLUS_PLUS: &str = "++";
+//RS pub const RETIRED_OP_MINUS_MINUS: &str = "--";
+//RS 
+//RS /// D-PATW (ratified 2026-06-19): `_` in a variant payload slot ignores that field and binds nothing.
+//RS /// `_` remains a legal identifier character (digit-separator, S34) in all other positions.
+//RS /// No bare `_` arm in a switch — only `else ->` acts as a catch-all.
+//RS pub const PAT_WILDCARD_SLOT: &str = "_";
+//RS 
+//RS // D-PATR (ratified 2026-06-19): range patterns (`lo..hi`) reuse OP_RANGE (S22) at arm-head
+//RS // level and inside variant payload slots. Open Int/Char subjects always still require `else`.
+//RS 
+//RS // D-PATO (ratified 2026-06-19), D-SHAPE-PIPE1=C (ratified 2026-07-15), and
+//RS // D-BITOREXPR1=A (ratified 2026-08-28):
+//RS // structural or-patterns and choice alternatives use OP_PIPE (single `|`).
+//RS // `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
+//RS // Value-position `|` is bitwise OR and binds above comparisons. No general bar
+//RS // flow operator exists. `||` remains value-or / boolean-or; `|=` remains bitwise-or-assign under S17.
+//RS 
+//RS // D-ENUMDOT1 (ratified 2026-06-26, implemented): a leading `.` before a variant name in pattern
+//RS // position (`.Circle(r)`, `.Empty`) is now accepted everywhere a variant pattern is written —
+//RS // `if subject == { .Variant(b) -> … }`, `if x == .Variant(b)`, switch arms. The dot reads as
+//RS // "a member of the inferred enum" and resolves S31's bare-name-vs-variable ambiguity without
+//RS // requiring a qualified `Enum.Variant` spelling. Bare form still accepted; dot form is canonical
+//RS // (the formatter always emits `.` before a Pattern::Variant name). No new keyword or sigil —
+//RS // reuses OP_DOT (S21). Value-position dot (`.Red` where type is known) is D-ENUMDOT2 (open).
+//RS 
+//RS // D-TAG1 (ratified 2026-07-03): variant groups. A variant may enclose sub-variants
+//RS // in `{ }` (`enum Damage { Physical { Blunt, Pierce } Fire { Burn, Scald } Cold }`), to any
+//RS // depth. A group name matches its whole subtree in `==` pattern tests and dispatch arms
+//RS // (`d == .Fire` is true for `.Fire.Burn`); exhaustiveness is checked at the group level;
+//RS // payloads live on leaves only (E0331); a value is always a leaf — a group name is not a
+//RS // value (E0332). Ships with the core counted multiset `Tally<T>` (`Tally.new()`, `add`,
+//RS // `remove`, `has`, `count`; subtree queries stay an explicit `any` closure). No new keyword
+//RS // or sigil — reuses `{ }` blocks, OP_DOT paths, and D-ENUMDOT1 leading-dot patterns.
+//RS 
+//RS // D-RANGE2 (c25, ratified): porting-hazard teaching errors for constructs Jet does NOT use.
+//RS // E0318: `..=` (Rust inclusive range) — Jet's `..` is already inclusive; `0..=9` → teach `0..9`.
+//RS // E0319: the retired loop `step` spelling in an arm head remains a porting hazard.
+//RS 
+//RS /// S13 (ratified): word forms recognized only for S14 teaching errors.
+//RS pub const FOREIGN_AND: &str = "and";
+//RS pub const FOREIGN_OR: &str = "or";
+//RS pub const FOREIGN_NOT: &str = "not";
+//RS 
+//RS /// S16 (ratified M6; amended 2026-06-16, D-S16-USE, D-CORE-USELIST1): file path or module `use`; optional `as`.
+//RS pub const KW_USE: &str = "use";
+//RS pub const KW_AS: &str = "as";
+//RS 
+//RS /// D-AUTHORITY-MEM1: memory floors are effect-row denials. `#Policy` keeps
+//RS /// non-memory settings such as `copies: .Explicit`.
+//RS pub const MARKER_POLICY: &str = "Policy"; // D-POLICY-WORD1
+//RS pub const POLICY_COPIES: &str = "copies"; // D-MEM-COPYSEM1
+//RS /// D-WRAP-SCOPE1=A: lexical fixed-width arithmetic mode marker.
+//RS pub const MARKER_ARITHMETIC: &str = "Arithmetic";
+//RS 
+//RS /// S51 / D-CORENS-CANON1: compiler-known `core.*` library root.
+//RS pub const CORE_SHORT: &str = "core";
+//RS pub const CORE_CANONICAL_ROOT: &str = "core";
+//RS pub const CORE_CANONICAL: &str = "core";
+//RS 
+//RS /// S51 (ratified M10): first-party short names reserved before packages land.
+//RS pub const FIRST_PARTY_RESERVED: &[&str] = &[
+//RS     "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "cs", "tcl", "lua", "fortran",
+//RS     "cobol", "ada", "pascal", "dart", "pwsh", "perl", "r", "octave", "com", "http", "regex", "csv",
+//RS     "toml", "crypto", "archive",
+//RS ];
+//RS 
+//RS /// S50 (ratified M7): Rust FFI block introducers — `extern rust "…" { … }`.
+//RS pub const KW_EXTERN: &str = "extern"; // S50
+//RS pub const KW_RUST: &str = "rust"; // S50
+//RS 
+//RS /// D-FFI-UNIFY1: every foreign language mounts as `<lang>.<lib>`.
+//RS pub const FOREIGN_ROOTS: &[&str] = &[
+//RS     C_MODULE_ROOT,
+//RS     KW_RUST,
+//RS     PY_MODULE_ROOT,
+//RS     JS_MODULE_ROOT,
+//RS     SWIFT_MODULE_ROOT,
+//RS     GO_MODULE_ROOT,
+//RS     JAVA_MODULE_ROOT,
+//RS     CS_MODULE_ROOT,
+//RS     TCL_MODULE_ROOT,
+//RS     LUA_MODULE_ROOT,
+//RS     FORTRAN_MODULE_ROOT,
+//RS     COBOL_MODULE_ROOT,
+//RS     ADA_MODULE_ROOT,
+//RS     PASCAL_MODULE_ROOT,
+//RS     DART_MODULE_ROOT,
+//RS     PWSH_MODULE_ROOT,
+//RS     PERL_MODULE_ROOT,
+//RS     RUBY_MODULE_ROOT,
+//RS     PHP_MODULE_ROOT,
+//RS     R_MODULE_ROOT,
+//RS     OCTAVE_MODULE_ROOT,
+//RS     COM_MODULE_ROOT,
+//RS ];
+//RS pub const PY_MODULE_ROOT: &str = "py"; // D-FFI-PY1 / D-FFI-UNIFY1
+//RS pub const JS_MODULE_ROOT: &str = "js"; // D-FFI-JS1 / D-FFI-UNIFY1
+//RS pub const SWIFT_MODULE_ROOT: &str = "swift"; // D-FFI-SWIFT1 / D-FFI-UNIFY1
+//RS pub const GO_MODULE_ROOT: &str = "go"; // D-FFI-GO1 / D-FFI-UNIFY1
+//RS pub const JAVA_MODULE_ROOT: &str = "java"; // D-FFI-JVM1 / D-FFI-UNIFY1
+//RS pub const CS_MODULE_ROOT: &str = "cs"; // D-FFI-DOTNET1 / D-FFI-UNIFY1
+//RS pub const TCL_MODULE_ROOT: &str = "tcl"; // D-FFI-TCL1 / D-FFI-UNIFY1
+//RS pub const LUA_MODULE_ROOT: &str = "lua"; // D-FFI-LUA1 / D-FFI-UNIFY1
+//RS pub const FORTRAN_MODULE_ROOT: &str = "fortran"; // D-FFI-FORTRAN1 / D-FFI-UNIFY1
+//RS pub const COBOL_MODULE_ROOT: &str = "cobol"; // D-FFI-COBOL1 / D-FFI-UNIFY1
+//RS pub const ADA_MODULE_ROOT: &str = "ada"; // D-FFI-ADA1 / D-FFI-UNIFY1
+//RS pub const PASCAL_MODULE_ROOT: &str = "pascal"; // D-FFI-PASCAL1 / D-FFI-UNIFY1
+//RS pub const DART_MODULE_ROOT: &str = "dart"; // D-FFI-DART1 / D-FFI-UNIFY1
+//RS pub const PWSH_MODULE_ROOT: &str = "pwsh"; // D-FFI-PWSH1 / D-FFI-UNIFY1
+//RS pub const PERL_MODULE_ROOT: &str = "perl"; // D-FFI-PERL1 / D-FFI-UNIFY1
+//RS pub const RUBY_MODULE_ROOT: &str = "ruby"; // D-FFI-RUBY1 / D-FFI-UNIFY1
+//RS pub const PHP_MODULE_ROOT: &str = "php"; // D-FFI-PHP1 / D-FFI-UNIFY1
+//RS pub const R_MODULE_ROOT: &str = "r"; // D-FFI-R1 / D-FFI-UNIFY1
+//RS pub const OCTAVE_MODULE_ROOT: &str = "octave"; // D-FFI-OCTAVE1 / D-FFI-UNIFY1
+//RS pub const COM_MODULE_ROOT: &str = "com"; // D-FFI-COM1 / D-FFI-UNIFY1
+//RS 
+//RS /// S59 (ratified E2-M14): C FFI module path root — `c.<lib>`, `c.<lib>.__bindgen__`.
+//RS pub const C_MODULE_ROOT: &str = "c"; // S59
+//RS /// S59: reserved final segment for compiler-generated bindgen modules.
+//RS pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
+//RS /// S59 / D-CFFI-CANON1: marker on generated C binding modules — `#Bindgen module`.
+//RS pub const MARKER_BINDGEN: &str = "Bindgen"; // S59 / D-CFFI-CANON1
+//RS /// D-ADOPT-GUEST1=A: marker on user C import modules — `#Import module`.
+//RS /// The same marker name is used by per-function `#Import(c)` declarations.
+//RS /// `CModuleKind::Extern` remains an internal AST compatibility name only.
+//RS /// D-CFFI-SYNTAX-REOPEN / D-CFFI-CANON1: retired C FFI marker spellings,
+//RS /// recognized only for E0060 teaching diagnostics.
+//RS pub const MARKER_BINDGEN_RETIRED: &str = "bindgen";
+//RS pub const MARKER_EXTERN_MODULE_RETIRED: &str = "Extern";
+//RS 
+//RS /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): the inline foreign tier
+//RS /// directive marker — `#FFI(<lang>) fn name(sig) { """<foreign source>""" }`.
+//RS /// The Jet signature is the checked contract; the body is one string of
+//RS /// foreign source the per-language binder compiles on cache miss. Unsafe
+//RS /// languages (`c`, `cpp`, `asm`) additionally require the enclosing
+//RS /// `#Unsafe("reason")` gate (I1/S58). Spelled fully capitalized (S66).
+//RS pub const MARKER_FFI: &str = "FFI"; // D-FFI-INLINE1
+//RS /// D-FFI-CPP1=A (ratified 2026-07-11, card #501): C++ foreign root — the
+//RS /// `cpp.<lib>` namespace binder and the `#FFI(cpp)` inline-tier language name.
+//RS pub const CPP_MODULE_ROOT: &str = "cpp"; // D-FFI-CPP1 / D-FFI-UNIFY1
+//RS /// D-FFI-ASM1=A (ratified 2026-07-11, card #501): the assembly inline-tier
+//RS /// language name — `#FFI(asm) fn`. Assembly has no library namespace (it is
+//RS /// inline-only); it never appears as a `<lang>.<lib>` mount.
+//RS pub const ASM_LANG: &str = "asm"; // D-FFI-ASM1
+//RS /// D-UNSAFE2 (retired marker): `#Audit("…")` is the old two-line form;
+//RS /// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
+//RS /// only to emit the E0055 teaching error.
+//RS pub const MARKER_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
+//RS                                         // D-LOOPLABEL3=A: named loops use `outer :: loop { … }`;
+//RS                                         // `break(outer)` / `next(outer)` target them. Retired `@`
+//RS                                         // prefix and suffix forms emit E0988.
+//RS                                         // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
+//RS                                         // D-QUAL4=A (ratified 2026-06-26): `#TagName T` is a value-tag qualifier in type
+//RS                                         // position. Transparent to type identity (the underlying type is still `T`).
+//RS                                         // Documented intent only; does not affect codegen or runtime behaviour.
+//RS                                         // Parser: `TokKind::Hash` followed by PascalCase ident → `Type::Tagged { marker, inner }`.
+//RS /// S59: cache directory segment under `.jet/` for generated C bindings.
+//RS pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
+//RS /// D-FFI-UNIFY1: generated foreign bindings live under `.jet/bindings/<lang>/`.
+//RS pub const BINDINGS_ROOT_SUBDIR: &str = "bindings"; // D-FFI-UNIFY1
+//RS 
+//RS /// D-S14-PAUSE: retired foreign loop words are recognized only long enough to
+//RS /// report an ordinary current-syntax error; none is accepted as Jet syntax.
+//RS pub const FOREIGN_WHILE: &str = "while";
+//RS pub const FOREIGN_FOR: &str = "for";
+//RS pub const FOREIGN_DO: &str = "do";
+//RS /// D-S14-PAUSE: `repeat` and `until` are foreign loop words; they are
+//RS /// recognized only long enough to report an ordinary current-syntax error.
+//RS pub const FOREIGN_REPEAT: &str = "repeat";
+//RS pub const FOREIGN_UNTIL: &str = "until";
+//RS pub const FOREIGN_TRY: &str = "try";
+//RS /// D-S14-PAUSE: foreign declaration and binding words are diagnostic-only;
+//RS /// they never enter Jet grammar.
+//RS pub const FOREIGN_FUN: &str = "fun";
+//RS pub const FOREIGN_FUNC: &str = "func";
+//RS pub const FOREIGN_DEF: &str = "def";
+//RS pub const FOREIGN_FUNCTION: &str = "function";
+//RS pub const FOREIGN_LET: &str = "let";
+//RS pub const FOREIGN_VAR: &str = "var";
+//RS pub const FOREIGN_CONST: &str = "const";
+//RS pub const FOREIGN_VAL: &str = "val";
+//RS pub const FOREIGN_IMPORT: &str = "import";
+//RS pub const FOREIGN_PRINTLN: &str = "println";
+//RS pub const FOREIGN_TEXT: &str = "Text";
+//RS 
+//RS /// S24: `match` recognized only for a teaching error naming `when`.
+//RS pub const FOREIGN_MATCH: &str = "match";
+//RS /// S24 (D-SG1): `switch` recognized only for a teaching error naming `when`
+//RS /// (the keyword was `switch` before the 2026-06-15 rename).
+//RS pub const FOREIGN_SWITCH: &str = "switch";
+//RS 
+//RS /// S29 (ratified M3): `class` recognized only for teaching error E0021.
+//RS pub const FOREIGN_CLASS: &str = "class";
+//RS 
+//RS /// S28 (ratified M9): trait declaration keyword.
+//RS /// D-IMPLDOT1=A (ratified 2026-06-26): the trait separator in top-level impl blocks
+//RS /// is `.` — `impl Type.Trait { … }` / `impl Type.Trait using field`. The old `:`
+//RS /// separator emits E0320 (teaching error). Amends S28/S62; retires `~~` (S83).
+//RS pub const KW_TRAIT: &str = "trait";
+//RS 
+//RS /// D-QUAL2 (ratified 2026-06-21): tag declaration keyword — a marker qualifier
+//RS /// with no methods that erases at runtime. The beginner rule: methods → trait,
+//RS /// no methods → tag. Declaring a method on a `tag` is E0732; using a tag where
+//RS /// dispatch is expected is E0731.
+//RS pub const KW_TAG: &str = "tag";
+//RS 
+//RS /// S55 (ratified M9): opt-in built-in derive line in a type body.
+//RS pub const KW_DERIVE: &str = "derive";
+//RS 
+//RS /// D-VERDICT-1308-1: retired compile-time spelling. The lexer retains a token
+//RS /// only so the parser can emit E0374 and offer `@`; this is not live Jet.
+//RS pub const KW_COMPTIME: &str = "comptime";
+//RS 
+//RS /// S28: foreign trait spellings for teaching error E0022.
+//RS pub const FOREIGN_INTERFACE: &str = "interface";
+//RS pub const FOREIGN_TRAIT: &str = "trait";
+//RS /// D-NAMESPACE1=A: `namespace { }` is declined; in-file grouping uses `module name { }`.
+//RS /// Recognized to emit teaching error E0323 (S14-style).
+//RS pub const FOREIGN_NAMESPACE: &str = "namespace";
+//RS 
+//RS /// S48 (M9): foreign dynamic-dispatch spellings for teaching error E0036.
+//RS pub const FOREIGN_DYN: &str = "dyn";
+//RS pub const FOREIGN_BOX: &str = "Box";
+//RS 
+//RS /// S24 (ratified M3): foreign switch arm spellings for teaching error E0023.
+//RS pub const FOREIGN_CASE: &str = "case";
+//RS pub const FOREIGN_DEFAULT: &str = "default";
+//RS 
+//RS /// S10 (ratified M2): foreign read/write forms for teaching errors.
+//RS pub const FOREIGN_READ: &str = "read";
+//RS pub const FOREIGN_WRITE: &str = "write";
+//RS pub const FOREIGN_OWNED: &str = "owned";
+//RS 
+//RS /// S34 (ratified M4): old fallible type constructor, kept only for diagnostics.
+//RS pub const TYPE_RESULT: &str = "Result";
+//RS 
+//RS /// S34 / D-SHAPE3b (ratified): Result variants are `Ok` / `Err`, including `.Ok` / `.Err`
+//RS /// when the expected result type is known.
+//RS pub const LIT_OK: &str = "Ok";
+//RS pub const LIT_ERR: &str = "Err";
+//RS 
+//RS /// S35 (ratified M4; spelling updated by S71/D-SG6; D-ERR-DECON1=A): the
+//RS /// fallback operator supplies a value or route (`return`, `next`, `break`, or
+//RS /// `panic`) when a `?T` is absent or a `T !E` failed. A block route may run
+//RS /// ordinary statements before its final value or diverging tail. Spelled `??`
+//RS /// since the 2026-06-15 rename (was the word `or`).
+//RS pub const OP_FALLBACK: &str = "??";
+//RS 
+//RS /// S71 (ratified 2026-06-15, D-SG6): optional chaining — `a?.b` yields a `?T`
+//RS /// and short-circuits to absent on the first missing link.
+//RS pub const OP_OPTIONAL_CHAIN: &str = "?.";
+//RS 
+//RS /// S71 (ratified 2026-06-15, D-SG6): the retired word fallback, kept only for
+//RS /// the teaching error that points at `??`.
+//RS pub const FOREIGN_OR_FALLBACK: &str = "or";
+//RS 
+//RS /// S36 (ratified M4): bug-stop builtins (like `print`).
+//RS pub const BUILTIN_PANIC: &str = "panic";
+//RS /// D-INTBIG1/D-NUMOPS1: default `Int` is exact. Fixed-width per-op overflow
+//RS /// opt-ins wrap one integer `+`/`-`/`*`/`/`: `wrapping(…)` wraps around,
+//RS /// `saturating(…)` clamps to the type's range, and `checked(…) -> ?T` returns
+//RS /// `null` on overflow. Fixed-width receiver methods use the same policy.
+//RS pub const BUILTIN_WRAPPING: &str = "wrapping";
+//RS pub const BUILTIN_SATURATING: &str = "saturating";
+//RS pub const BUILTIN_CHECKED: &str = "checked";
+//RS pub const INTERNAL_ARITHMETIC_CHECKED: &str = "__jet_arithmetic_checked";
+//RS /// D-NUMWIDEN-CROSS1=E (ratified 2026-07-28): accept a possibly inexact
+//RS /// integer-to-float crossing at one use site.
+//RS pub const BUILTIN_APPROX: &str = "approx";
+//RS /// D-CLAIM-WORD1=B (ratified 2026-08-07, card #1641): the one assertion
+//RS /// family for code, tests, and scripts. The rich diff and one stop family
+//RS /// remain.
+//RS pub const BUILTIN_ASSERT: &str = "assert";
+//RS pub const BUILTIN_ASSERT_EQ: &str = "assert_eq";
+//RS 
+//RS /// D-CTIO1 (ratified 2026-06-22): the sanctioned build-time I/O builtins.
+//RS /// `embed_file("path") -> String` bakes a file's UTF-8 text into the binary;
+//RS /// `embed_bytes("path") -> [U8]` bakes its raw bytes (binary-safe). The path
+//RS /// must be a string literal, resolved relative to the source file, with no
+//RS /// `..`-escape past the project root. Only valid in a `comptime` binding.
+//RS /// D-CTFIND1/2: `find(glob) -> [String]` returns sorted relative file paths and
+//RS /// records each matched file hash for `.jet/lock`.
+//RS pub const BUILTIN_EMBED_FILE: &str = "embed_file";
+//RS pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";
+//RS /// D-CTEFFECT1 / D-PRELUDE-LAW1=A: gated build-time network fetch.
+//RS pub const BUILTIN_FETCH: &str = "fetch";
+//RS 
+//RS /// S43 (ratified M6; PascalCase marker D-CASING1 follow-on 2026-06-21):
+//RS /// top-level test-declaration block, written as the marker `#Test("name") { … }`.
+//RS /// D-TESTPAREN1=A (ratified 2026-06-26): the name is now a parenthesized string
+//RS /// argument, matching the `#FX(…)` marker family.
+//RS /// D-TESTFAULT1=A (ratified 2026-08-12): the optional `faults: [Effect]`
+//RS /// argument names effect-root call sites for the deterministic test harness.
+//RS /// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,
+//RS /// recognized only to emit the E0052 teaching error pointing at `#Test("name")`.
+//RS pub const KW_TEST: &str = "Test";
+//RS pub const TEST_FAULTS_PARAM: &str = "faults";
+//RS pub const TEST_EXPECTED_FAIL_PARAM: &str = "expected_fail";
+//RS 
+//RS /// D-DOTSCOPE1 (ratified 2026-07-02): scope-member vocabulary for `#Test`.
+//RS /// Inside a `#Test { … }` body a statement-position `.name { … }` /
+//RS /// `.name(args) { … }` (I8: the ONE spelling for scope vocabulary) resolves
+//RS /// against this list. `.setup` runs first (init region), `.expect_fail` marks
+//RS /// a region that must fail, `.timeout(dur)` bounds a region's elapsed time,
+//RS /// `.skip` skips a region (or the whole test when it is the first statement),
+//RS /// `.measure` selects measurement, and `.cases(rows)` supplies per-row claims.
+//RS pub const SCOPE_TEST_SETUP: &str = "setup";
+//RS pub const SCOPE_TEST_EXPECT_FAIL: &str = "expect_fail";
+//RS pub const SCOPE_TEST_TIMEOUT: &str = "timeout";
+//RS pub const SCOPE_TEST_SKIP: &str = "skip";
+//RS /// D-CLAIM-BENCH1=A (ratified 2026-08-07, card #1641): measurement is a
+//RS /// test member, selected by `jet test --measure`.
+//RS pub const SCOPE_TEST_MEASURE: &str = "measure";
+//RS /// D-CLAIM-CASES1=B (ratified 2026-08-07, card #1641): table-driven claims
+//RS /// use the same member grammar; the optional explicit row name is handled by
+//RS /// the member head and defaults to `AMBIENT_CASE`.
+//RS pub const SCOPE_TEST_CASES: &str = "cases";
+//RS 
+//RS /// D-JOB-NAME1=A / D-JOB-SUBCMD1=C: `#Job fn` — a top-level function Jet can
+//RS /// invoke as an argv subcommand, living beside `fn run()`. The word is `job`
+//RS /// everywhere (marker, `jet jobs`, diagnostics). Bare marker defaults to `.Dev`.
+//RS pub const KW_JOB: &str = "Job";
+//RS 
+//RS /// D-JOB-SUBCMD1=C: the closed scope menu accepted by `#Job(<scope>)`.
+//RS pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
+//RS 
+//RS /// D-JOB-NAMES1=A (amends D-JOB-SUBCMD1=C): the only names a `#Job fn` cannot
+//RS /// take. `run`, `dev`, `build`, and `test` are Jet's lifecycle entries
+//RS /// (D-JPK-TASKRUN1=A); a built program's own argument parser answers `help`
+//RS /// and `version`. Jobs run under `jet jobs <name>` (D-JOB-ARGV1=A), so every
+//RS /// other Jet command word is an ordinary job name. Sema rejects these as E0928.
+//RS pub const JOB_RESERVED_NAMES: &[&str] = &["run", "dev", "build", "test", "help", "version"];
+//RS 
+//RS /// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Job fn`.
+//RS /// Legal only alongside `#Job` (E0925 otherwise).
+//RS pub const MARKER_EVERY: &str = "Every";
+//RS 
+//RS /// D-DOTSCOPE1: the scope-member vocabulary an applied-rule block declares, or
+//RS /// `None` if the marker declares no members. Each marker that grows a member
+//RS /// vocabulary is added here (an API decision, not a syntax one — the `.name { }`
+//RS /// grammar is fixed). `#Test` is the only marker with members today; every
+//RS /// other block marker declares none, so a member statement inside it is
+//RS /// rejected against this empty vocabulary.
+//RS pub fn scope_members(marker: &str) -> Option<&'static [&'static str]> {
+//RS     match marker {
+//RS         KW_TEST => Some(&[
+//RS             SCOPE_TEST_SETUP,
+//RS             SCOPE_TEST_EXPECT_FAIL,
+//RS             SCOPE_TEST_TIMEOUT,
+//RS             SCOPE_TEST_SKIP,
+//RS             SCOPE_TEST_MEASURE,
+//RS             SCOPE_TEST_CASES,
+//RS         ]),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS /// D-REDUCE-VALUE1=A: closed Core enum used by SIMD lane reduction.
+//RS pub const TYPE_REDUCE_OP: &str = "ReduceOp"; // D-REDUCE-VALUE1
+//RS pub const REDUCE_OP_VALUES: &[&str] = &["Add", "Mul", "Min", "Max", "Avg"]; // D-REDUCE-VALUE1
+//RS 
+// END-PORT-PENDING 2126 crates/jet-foundation/src/Syntax/math_layout.rs:1-862
+

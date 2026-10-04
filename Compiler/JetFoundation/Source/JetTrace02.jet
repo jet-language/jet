@@ -1,0 +1,1573 @@
+// PORT-PENDING 2069 crates-jet-foundation-src-jettrace-slice-1801: crates/jet-foundation/src/JetTrace.rs:1801-3369
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS             &symbol_fields["path"],
+//RS             &format!("{label}.symbol.path"),
+//RS         )?;
+//RS         if symbol_path != path {
+//RS             return Err(format!("{label}.symbol.path does not match source.path"));
+//RS         }
+//RS         text(
+//RS             &symbol_fields["name"],
+//RS             &format!("{label}.symbol.name"),
+//RS         )?;
+//RS         let identity_matches = identities.iter().any(|identity| {
+//RS             let Ok(identity_fields) = object_keys(
+//RS                 identity,
+//RS                 "content.source_identity",
+//RS                 &["path", "sha256", "symbols"],
+//RS             ) else {
+//RS                 return false;
+//RS             };
+//RS             identity_fields.get("path") == Some(&CanonicalJson::String(path.into()))
+//RS                 && identity_fields.get("sha256")
+//RS                     == Some(&CanonicalJson::String(sha256.into()))
+//RS         });
+//RS         if !identity_matches {
+//RS             return Err(format!(
+//RS                 "{label}.source does not match content.source_identity"
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS 
+//RS fn validate_allocations(value: &CanonicalJson) -> Result<(), String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.allocations is not an array".into()),
+//RS     };
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.allocations[{i}]");
+//RS         let fields = object_keys(item, &label, &["bytes", "count", "symbol"])?;
+//RS         unsigned(&fields["bytes"], &format!("{label}.bytes"))?;
+//RS         unsigned(&fields["count"], &format!("{label}.count"))?;
+//RS         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_receipt_sections(value: &CanonicalJson) -> Result<(), String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.receipt_sections is not an array".into()),
+//RS     };
+//RS     let mut prior_name: Option<String> = None;
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.receipt_sections[{i}]");
+//RS         let section = TraceReceiptSection::from_json_at(item, &label)?;
+//RS         if prior_name
+//RS             .as_deref()
+//RS             .is_some_and(|prior| prior > section.name.as_str())
+//RS         {
+//RS             return Err("content.receipt_sections is not sorted by name".into());
+//RS         }
+//RS         if prior_name.as_deref() == Some(section.name.as_str()) {
+//RS             return Err(format!(
+//RS                 "{label}.name duplicates receipt section `{}`",
+//RS                 section.name
+//RS             ));
+//RS         }
+//RS         prior_name = Some(section.name);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_tasks(
+//RS     value: &CanonicalJson,
+//RS     row_limit: Option<usize>,
+//RS ) -> Result<BTreeMap<u64, (u64, String, String, CanonicalJson)>, String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.tasks is not an array".into()),
+//RS     };
+//RS     if row_limit.is_some_and(|limit| items.len() > limit) {
+//RS         return Err("content.tasks exceeds capture_policy.task_row_limit".into());
+//RS     }
+//RS     let mut tasks = BTreeMap::new();
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.tasks[{i}]");
+//RS         let fields = object_keys(
+//RS             item,
+//RS             &label,
+//RS             &["cancelled", "id", "parent", "state", "symbol", "wait"],
+//RS         )?;
+//RS         let id = unsigned(&fields["id"], &format!("{label}.id"))?;
+//RS         if id == 0 {
+//RS             return Err(format!("{label}.id must be greater than zero"));
+//RS         }
+//RS         let parent = unsigned(&fields["parent"], &format!("{label}.parent"))?;
+//RS         if id == parent {
+//RS             return Err(format!("{label}.parent cannot be self"));
+//RS         }
+//RS         let state = text(&fields["state"], &format!("{label}.state"))?;
+//RS         if !matches!(state, "running" | "queued" | "blocked" | "done") {
+//RS             return Err(format!("{label}.state must be a live observe task state"));
+//RS         }
+//RS         let wait = text(&fields["wait"], &format!("{label}.wait"))?;
+//RS         match &fields["cancelled"] {
+//RS             CanonicalJson::Bool(_) => {}
+//RS             _ => return Err(format!("{label}.cancelled is not a boolean")),
+//RS         }
+//RS         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+//RS         if tasks
+//RS             .insert(
+//RS                 id,
+//RS                 (parent, state.into(), wait.into(), fields["symbol"].clone()),
+//RS             )
+//RS             .is_some()
+//RS         {
+//RS             return Err(format!("{label}.id duplicates task {id}"));
+//RS         }
+//RS     }
+//RS     for (&id, (parent, _, _, _)) in &tasks {
+//RS         if *parent != 0 && !tasks.contains_key(parent) {
+//RS             return Err(format!(
+//RS                 "content.tasks task {id} has missing parent {parent}"
+//RS             ));
+//RS         }
+//RS         let mut seen = std::collections::BTreeSet::new();
+//RS         let mut current = id;
+//RS         while let Some((next, _, _, _)) = tasks.get(&current) {
+//RS             if *next == 0 {
+//RS                 break;
+//RS             }
+//RS             if !seen.insert(current) {
+//RS                 return Err(format!(
+//RS                     "content.tasks task {id} has cyclic parent causality"
+//RS                 ));
+//RS             }
+//RS             current = *next;
+//RS         }
+//RS     }
+//RS     Ok(tasks)
+//RS }
+//RS 
+//RS fn validate_locks(value: &CanonicalJson) -> Result<(), String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.locks is not an array".into()),
+//RS     };
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.locks[{i}]");
+//RS         let fields = object_keys(
+//RS             item,
+//RS             &label,
+//RS             &[
+//RS                 "capacity",
+//RS                 "closed",
+//RS                 "depth",
+//RS                 "id",
+//RS                 "kind",
+//RS                 "recv_waiters",
+//RS                 "send_waiters",
+//RS                 "symbol",
+//RS             ],
+//RS         )?;
+//RS         let kind = text(&fields["kind"], &format!("{label}.kind"))?;
+//RS         if kind != "channel" {
+//RS             return Err(format!("{label}.kind must be channel"));
+//RS         }
+//RS         unsigned(&fields["id"], &format!("{label}.id"))?;
+//RS         unsigned(&fields["depth"], &format!("{label}.depth"))?;
+//RS         match &fields["capacity"] {
+//RS             CanonicalJson::Null => {}
+//RS             other => {
+//RS                 unsigned(other, &format!("{label}.capacity"))?;
+//RS             }
+//RS         }
+//RS         let send_waiters = unsigned(&fields["send_waiters"], &format!("{label}.send_waiters"))?;
+//RS         let recv_waiters = unsigned(&fields["recv_waiters"], &format!("{label}.recv_waiters"))?;
+//RS         if send_waiters == 0 && recv_waiters == 0 {
+//RS             return Err(format!(
+//RS                 "{label} has no waiters (idle channel is not a lock fact)"
+//RS             ));
+//RS         }
+//RS         match &fields["closed"] {
+//RS             CanonicalJson::Bool(_) => {}
+//RS             _ => return Err(format!("{label}.closed is not a boolean")),
+//RS         }
+//RS         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_io(
+//RS     value: &CanonicalJson,
+//RS     tasks: &BTreeMap<u64, (u64, String, String, CanonicalJson)>,
+//RS     row_limit: Option<usize>,
+//RS ) -> Result<(), String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.io is not an array".into()),
+//RS     };
+//RS     if row_limit.is_some_and(|limit| items.len() > limit) {
+//RS         return Err("content.io exceeds capture_policy.io_row_limit".into());
+//RS     }
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.io[{i}]");
+//RS         let fields = object_keys(
+//RS             item,
+//RS             &label,
+//RS             &["end_ns", "kind", "start_ns", "symbol", "task_id", "wait"],
+//RS         )?;
+//RS         let kind = text(&fields["kind"], &format!("{label}.kind"))?;
+//RS         if !matches!(kind, "tcp" | "network" | "io") {
+//RS             return Err(format!("{label}.kind must be tcp, network, or io"));
+//RS         }
+//RS         let task_id = unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
+//RS         let Some((_, task_state, task_wait, task_symbol)) = tasks.get(&task_id) else {
+//RS             return Err(format!("{label}.task_id refers to missing task {task_id}"));
+//RS         };
+//RS         let start_ns = unsigned(&fields["start_ns"], &format!("{label}.start_ns"))?;
+//RS         let end_ns = unsigned(&fields["end_ns"], &format!("{label}.end_ns"))?;
+//RS         if end_ns < start_ns {
+//RS             return Err(format!("{label}.end_ns precedes start_ns"));
+//RS         }
+//RS         let wait = text(&fields["wait"], &format!("{label}.wait"))?;
+//RS         if wait.is_empty() {
+//RS             return Err(format!("{label}.wait is empty (vacuous I/O row)"));
+//RS         }
+//RS         let Some(expected) = TraceIo::kind_for_wait(wait) else {
+//RS             return Err(format!(
+//RS                 "{label}.wait is not an observe I/O wait (idle scrape is not an I/O fact)"
+//RS             ));
+//RS         };
+//RS         if kind != expected {
+//RS             return Err(format!("{label}.kind does not match wait classifier"));
+//RS         }
+//RS         match task_state.as_str() {
+//RS             "done" if task_wait.is_empty() => {}
+//RS             "blocked" if task_wait == wait => {}
+//RS             "done" => return Err(format!("{label} completed task must have an empty wait")),
+//RS             "blocked" => return Err(format!("{label}.wait does not match its blocked task")),
+//RS             _ => return Err(format!("{label} task must be blocked or done")),
+//RS         }
+//RS         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+//RS         if &fields["symbol"] != task_symbol {
+//RS             return Err(format!("{label}.symbol does not match its task"));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_native(
+//RS     value: &CanonicalJson,
+//RS     tasks: &BTreeMap<u64, (u64, String, String, CanonicalJson)>,
+//RS     row_limit: Option<usize>,
+//RS ) -> Result<(), String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.native is not an array".into()),
+//RS     };
+//RS     if let Some(row_limit) = row_limit {
+//RS         if items.len() > row_limit {
+//RS             return Err("content.native exceeds capture_policy.native_row_limit".into());
+//RS         }
+//RS     }
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.native[{i}]");
+//RS         let fields = object_keys(
+//RS             item,
+//RS             &label,
+//RS             &[
+//RS                 "clock",
+//RS                 "duration_ns",
+//RS                 "observed_at_ns",
+//RS                 "reason",
+//RS                 "status",
+//RS                 "symbol",
+//RS                 "target",
+//RS                 "task_id",
+//RS             ],
+//RS         )?;
+//RS         if text(&fields["clock"], &format!("{label}.clock"))? != "process_cpu" {
+//RS             return Err(format!("{label}.clock must be process_cpu"));
+//RS         }
+//RS         unsigned(
+//RS             &fields["observed_at_ns"],
+//RS             &format!("{label}.observed_at_ns"),
+//RS         )?;
+//RS         let reason = text(&fields["reason"], &format!("{label}.reason"))?;
+//RS         let status = text(&fields["status"], &format!("{label}.status"))?;
+//RS         if text(&fields["target"], &format!("{label}.target"))?.is_empty() {
+//RS             return Err(format!("{label}.target is empty"));
+//RS         }
+//RS         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+//RS         match status {
+//RS             "captured" => {
+//RS                 unsigned(&fields["duration_ns"], &format!("{label}.duration_ns"))?;
+//RS                 let task_id = unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
+//RS                 let Some((parent, _, _, task_symbol)) = tasks.get(&task_id) else {
+//RS                     return Err(format!("{label}.task_id refers to missing task {task_id}"));
+//RS                 };
+//RS                 if *parent != 0 {
+//RS                     return Err(format!("{label}.task_id must identify the root task"));
+//RS                 }
+//RS                 if &fields["symbol"] != task_symbol {
+//RS                     return Err(format!("{label}.symbol does not match its task"));
+//RS                 }
+//RS                 if !reason.is_empty() {
+//RS                     return Err(format!("{label}.reason must be empty when captured"));
+//RS                 }
+//RS             }
+//RS             "unavailable" => {
+//RS                 if fields["duration_ns"] != CanonicalJson::Null
+//RS                     || fields["task_id"] != CanonicalJson::Null
+//RS                 {
+//RS                     return Err(format!("{label} unavailable timing must not claim data"));
+//RS                 }
+//RS                 if reason.is_empty() {
+//RS                     return Err(format!("{label}.reason is empty"));
+//RS                 }
+//RS             }
+//RS             _ => return Err(format!("{label}.status must be captured or unavailable")),
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_spans(
+//RS     value: &CanonicalJson,
+//RS     tasks: &BTreeMap<u64, (u64, String, String, CanonicalJson)>,
+//RS     row_limit: Option<usize>,
+//RS ) -> Result<(), String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.spans is not an array".into()),
+//RS     };
+//RS     if let Some(row_limit) = row_limit {
+//RS         if items.len() > row_limit {
+//RS             return Err("content.spans exceeds capture_policy.span_row_limit".into());
+//RS         }
+//RS     }
+//RS     let mut captured = 0usize;
+//RS     let mut unavailable = 0usize;
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.spans[{i}]");
+//RS         let fields = object_keys(
+//RS             item,
+//RS             &label,
+//RS             &[
+//RS                 "clock",
+//RS                 "end_ns",
+//RS                 "kind",
+//RS                 "parent_task_id",
+//RS                 "reason",
+//RS                 "start_ns",
+//RS                 "status",
+//RS                 "symbol",
+//RS                 "task_id",
+//RS             ],
+//RS         )?;
+//RS         if text(&fields["clock"], &format!("{label}.clock"))? != "monotonic" {
+//RS             return Err(format!("{label}.clock must be monotonic"));
+//RS         }
+//RS         if text(&fields["kind"], &format!("{label}.kind"))? != "task_observed" {
+//RS             return Err(format!("{label}.kind must be task_observed"));
+//RS         }
+//RS         let reason = text(&fields["reason"], &format!("{label}.reason"))?;
+//RS         let status = text(&fields["status"], &format!("{label}.status"))?;
+//RS         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+//RS         match status {
+//RS             "captured" => {
+//RS                 captured += 1;
+//RS                 let start = unsigned(&fields["start_ns"], &format!("{label}.start_ns"))?;
+//RS                 let end = unsigned(&fields["end_ns"], &format!("{label}.end_ns"))?;
+//RS                 if end < start {
+//RS                     return Err(format!("{label} ends before it starts"));
+//RS                 }
+//RS                 let task_id = unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
+//RS                 let Some((parent, _, _, task_symbol)) = tasks.get(&task_id) else {
+//RS                     return Err(format!("{label}.task_id refers to missing task {task_id}"));
+//RS                 };
+//RS                 if &fields["symbol"] != task_symbol {
+//RS                     return Err(format!("{label}.symbol does not match its task"));
+//RS                 }
+//RS                 if *parent == 0 {
+//RS                     if fields["parent_task_id"] != CanonicalJson::Null {
+//RS                         return Err(format!("{label} root span must not claim a parent"));
+//RS                     }
+//RS                 } else {
+//RS                     let parent_task_id = unsigned(
+//RS                         &fields["parent_task_id"],
+//RS                         &format!("{label}.parent_task_id"),
+//RS                     )?;
+//RS                     if parent_task_id != *parent || !tasks.contains_key(&parent_task_id) {
+//RS                         return Err(format!("{label}.parent_task_id does not match its task"));
+//RS                     }
+//RS                 }
+//RS                 if !reason.is_empty() {
+//RS                     return Err(format!("{label}.reason must be empty when captured"));
+//RS                 }
+//RS             }
+//RS             "unavailable" => {
+//RS                 unavailable += 1;
+//RS                 if fields["start_ns"] != CanonicalJson::Null
+//RS                     || fields["end_ns"] != CanonicalJson::Null
+//RS                     || fields["task_id"] != CanonicalJson::Null
+//RS                     || fields["parent_task_id"] != CanonicalJson::Null
+//RS                 {
+//RS                     return Err(format!("{label} unavailable span must not claim data"));
+//RS                 }
+//RS                 if reason.is_empty() {
+//RS                     return Err(format!("{label}.reason is empty"));
+//RS                 }
+//RS             }
+//RS             _ => return Err(format!("{label}.status must be captured or unavailable")),
+//RS         }
+//RS     }
+//RS     if unavailable > 1 || (unavailable == 1 && captured != 0) {
+//RS         return Err("content.spans unavailable state must be the only row".into());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_source_identity(value: &CanonicalJson) -> Result<(), String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.source_identity is not an array".into()),
+//RS     };
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.source_identity[{i}]");
+//RS         let fields = object_keys(item, &label, &["path", "sha256", "symbols"])?;
+//RS         text(&fields["path"], &format!("{label}.path"))?;
+//RS         let hash = text(&fields["sha256"], &format!("{label}.sha256"))?;
+//RS         if hash.len() != 64
+//RS             || !hash
+//RS                 .bytes()
+//RS                 .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+//RS         {
+//RS             return Err(format!("{label}.sha256 is not lowercase Hex64"));
+//RS         }
+//RS         let symbols = match &fields["symbols"] {
+//RS             CanonicalJson::Array(symbols) => symbols,
+//RS             _ => return Err(format!("{label}.symbols is not an array")),
+//RS         };
+//RS         let mut prior: Option<(&str, &str)> = None;
+//RS         for (j, symbol) in symbols.iter().enumerate() {
+//RS             let slabel = format!("{label}.symbols[{j}]");
+//RS             let sfields = object_keys(symbol, &slabel, &["kind", "name"])?;
+//RS             let kind = text(&sfields["kind"], &format!("{slabel}.kind"))?;
+//RS             let name = text(&sfields["name"], &format!("{slabel}.name"))?;
+//RS             if prior.is_some_and(|p| p > (name, kind)) {
+//RS                 return Err(format!("{label}.symbols is not sorted"));
+//RS             }
+//RS             prior = Some((name, kind));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_source_maps(value: &CanonicalJson) -> Result<(), String> {
+//RS     let items = match value {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("content.source_maps is not an array".into()),
+//RS     };
+//RS     let mut prior_path: Option<&str> = None;
+//RS     for (i, item) in items.iter().enumerate() {
+//RS         let label = format!("content.source_maps[{i}]");
+//RS         let fields = object_keys(item, &label, &["kind", "map", "path", "sha256"])?;
+//RS         let kind = text(&fields["kind"], &format!("{label}.kind"))?;
+//RS         if !matches!(kind, "jet" | "js") {
+//RS             return Err(format!("{label}.kind must be jet or js"));
+//RS         }
+//RS         let path = text(&fields["path"], &format!("{label}.path"))?;
+//RS         if prior_path.is_some_and(|prior| prior > path) {
+//RS             return Err("content.source_maps is not sorted by path".into());
+//RS         }
+//RS         prior_path = Some(path);
+//RS         let map = text(&fields["map"], &format!("{label}.map"))?;
+//RS         let hash = text(&fields["sha256"], &format!("{label}.sha256"))?;
+//RS         if hash.len() != 64
+//RS             || !hash
+//RS                 .bytes()
+//RS                 .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+//RS         {
+//RS             return Err(format!("{label}.sha256 is not lowercase Hex64"));
+//RS         }
+//RS         if hash != SHA256::sha256_hex(map.as_bytes()) {
+//RS             return Err(format!("{label}.sha256 does not match map bytes"));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn unsigned(value: &CanonicalJson, label: &str) -> Result<u64, String> {
+//RS     match value {
+//RS         CanonicalJson::Integer(text) => text
+//RS             .parse::<u64>()
+//RS             .map_err(|_| format!("{label} is not an unsigned integer")),
+//RS         _ => Err(format!("{label} is not an integer")),
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct CaptureLimits {
+//RS     browser_rows: Option<usize>,
+//RS     io_rows: Option<usize>,
+//RS     native_rows: Option<usize>,
+//RS     span_rows: Option<usize>,
+//RS     task_rows: Option<usize>,
+//RS }
+//RS 
+//RS fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, String> {
+//RS     let schema = match value {
+//RS         CanonicalJson::Object(fields) => fields.get("schema"),
+//RS         _ => return Err("capture_policy is not an object".into()),
+//RS     };
+//RS     let (fields, limits) = match schema {
+//RS         Some(CanonicalJson::Integer(schema)) if schema == "1" => (
+//RS             object_keys(
+//RS                 value,
+//RS                 "capture_policy",
+//RS                 &["allowlist", "default_exclusions", "schema"],
+//RS             )?,
+//RS             // Schema 1 declared neither limits nor truncation. Absence remains
+//RS             // unknown/unbounded legacy semantics; never normalize it to false.
+//RS             CaptureLimits {
+//RS                 browser_rows: None,
+//RS                 io_rows: None,
+//RS                 native_rows: None,
+//RS                 span_rows: None,
+//RS                 task_rows: None,
+//RS             },
+//RS         ),
+//RS         Some(CanonicalJson::Integer(schema)) if schema == "2" => (
+//RS             object_keys(
+//RS                 value,
+//RS                 "capture_policy",
+//RS                 &[
+//RS                     "allowlist",
+//RS                     "default_exclusions",
+//RS                     "io_row_limit",
+//RS                     "io_rows_truncated",
+//RS                     "schema",
+//RS                     "task_row_limit",
+//RS                     "task_rows_truncated",
+//RS                 ],
+//RS             )?,
+//RS             CaptureLimits {
+//RS                 browser_rows: None,
+//RS                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+//RS                 native_rows: None,
+//RS                 span_rows: None,
+//RS                 task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
+//RS             },
+//RS         ),
+//RS         Some(CanonicalJson::Integer(schema)) if schema == "3" => (
+//RS             object_keys(
+//RS                 value,
+//RS                 "capture_policy",
+//RS                 &[
+//RS                     "allowlist",
+//RS                     "default_exclusions",
+//RS                     "io_row_limit",
+//RS                     "io_rows_truncated",
+//RS                     "native_row_limit",
+//RS                     "native_rows_truncated",
+//RS                     "schema",
+//RS                     "task_row_limit",
+//RS                     "task_rows_truncated",
+//RS                 ],
+//RS             )?,
+//RS             CaptureLimits {
+//RS                 browser_rows: None,
+//RS                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+//RS                 native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
+//RS                 span_rows: None,
+//RS                 task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
+//RS             },
+//RS         ),
+//RS         Some(CanonicalJson::Integer(schema)) if schema == "4" => (
+//RS             object_keys(
+//RS                 value,
+//RS                 "capture_policy",
+//RS                 &[
+//RS                     "allowlist",
+//RS                     "default_exclusions",
+//RS                     "io_row_limit",
+//RS                     "io_rows_truncated",
+//RS                     "native_row_limit",
+//RS                     "native_rows_truncated",
+//RS                     "schema",
+//RS                     "span_row_limit",
+//RS                     "span_rows_truncated",
+//RS                     "task_row_limit",
+//RS                     "task_rows_truncated",
+//RS                 ],
+//RS             )?,
+//RS             CaptureLimits {
+//RS                 browser_rows: None,
+//RS                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+//RS                 native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
+//RS                 span_rows: Some(TRACE_SPAN_ROW_LIMIT as usize),
+//RS                 task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
+//RS             },
+//RS         ),
+//RS         Some(CanonicalJson::Integer(schema)) if schema == CAPTURE_POLICY_SCHEMA => (
+//RS             object_keys(
+//RS                 value,
+//RS                 "capture_policy",
+//RS                 &[
+//RS                     "allowlist",
+//RS                     "browser_row_limit",
+//RS                     "browser_rows_truncated",
+//RS                     "default_exclusions",
+//RS                     "io_row_limit",
+//RS                     "io_rows_truncated",
+//RS                     "native_row_limit",
+//RS                     "native_rows_truncated",
+//RS                     "schema",
+//RS                     "span_row_limit",
+//RS                     "span_rows_truncated",
+//RS                     "task_row_limit",
+//RS                     "task_rows_truncated",
+//RS                 ],
+//RS             )?,
+//RS             CaptureLimits {
+//RS                 browser_rows: Some(TRACE_BROWSER_ROW_LIMIT as usize),
+//RS                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+//RS                 native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
+//RS                 span_rows: Some(TRACE_SPAN_ROW_LIMIT as usize),
+//RS                 task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
+//RS             },
+//RS         ),
+//RS         Some(CanonicalJson::Integer(_)) => return Err("unsupported capture_policy schema".into()),
+//RS         _ => return Err("capture_policy schema is not an integer".into()),
+//RS     };
+//RS     let exclusions = match &fields["default_exclusions"] {
+//RS         CanonicalJson::Array(items) => items,
+//RS         _ => return Err("capture_policy.default_exclusions is not an array".into()),
+//RS     };
+//RS     let expected = DEFAULT_EXCLUSIONS
+//RS         .iter()
+//RS         .map(|item| CanonicalJson::String((*item).into()))
+//RS         .collect::<Vec<_>>();
+//RS     if exclusions.as_slice() != expected.as_slice() {
+//RS         return Err(
+//RS             "capture_policy.default_exclusions does not match D-PERFSESSION1 defaults".into(),
+//RS         );
+//RS     }
+//RS     if limits.task_rows.is_some() {
+//RS         if unsigned(&fields["io_row_limit"], "capture_policy.io_row_limit")? != TRACE_IO_ROW_LIMIT
+//RS             || unsigned(&fields["task_row_limit"], "capture_policy.task_row_limit")?
+//RS                 != TRACE_TASK_ROW_LIMIT
+//RS         {
+//RS             return Err("capture_policy row limits do not match this schema".into());
+//RS         }
+//RS         for key in ["io_rows_truncated", "task_rows_truncated"] {
+//RS             if !matches!(fields[key], CanonicalJson::Bool(_)) {
+//RS                 return Err(format!("capture_policy.{key} is not a boolean"));
+//RS             }
+//RS         }
+//RS     }
+//RS     if limits.browser_rows.is_some() {
+//RS         if unsigned(
+//RS             &fields["browser_row_limit"],
+//RS             "capture_policy.browser_row_limit",
+//RS         )? != TRACE_BROWSER_ROW_LIMIT
+//RS         {
+//RS             return Err("capture_policy browser row limit does not match this schema".into());
+//RS         }
+//RS         if !matches!(fields["browser_rows_truncated"], CanonicalJson::Bool(_)) {
+//RS             return Err("capture_policy.browser_rows_truncated is not a boolean".into());
+//RS         }
+//RS     }
+//RS     if limits.native_rows.is_some() {
+//RS         if unsigned(
+//RS             &fields["native_row_limit"],
+//RS             "capture_policy.native_row_limit",
+//RS         )? != TRACE_NATIVE_ROW_LIMIT
+//RS         {
+//RS             return Err("capture_policy native row limit does not match this schema".into());
+//RS         }
+//RS         if !matches!(fields["native_rows_truncated"], CanonicalJson::Bool(_)) {
+//RS             return Err("capture_policy.native_rows_truncated is not a boolean".into());
+//RS         }
+//RS     }
+//RS     if limits.span_rows.is_some() {
+//RS         if unsigned(&fields["span_row_limit"], "capture_policy.span_row_limit")?
+//RS             != TRACE_SPAN_ROW_LIMIT
+//RS         {
+//RS             return Err("capture_policy span row limit does not match this schema".into());
+//RS         }
+//RS         if !matches!(fields["span_rows_truncated"], CanonicalJson::Bool(_)) {
+//RS             return Err("capture_policy.span_rows_truncated is not a boolean".into());
+//RS         }
+//RS     }
+//RS     match &fields["allowlist"] {
+//RS         CanonicalJson::Array(items) => {
+//RS             let mut prior: Option<&str> = None;
+//RS             for item in items.iter() {
+//RS                 let item_text = match item {
+//RS                     CanonicalJson::String(value) => value.as_str(),
+//RS                     _ => {
+//RS                         return Err(
+//RS                             "capture_policy.allowlist item is not text".into()
+//RS                         );
+//RS                     }
+//RS                 };
+//RS                 if prior.is_some_and(|previous| previous > item_text) {
+//RS                     return Err("capture_policy.allowlist is not sorted".into());
+//RS                 }
+//RS                 prior = Some(item_text);
+//RS             }
+//RS         }
+//RS         _ => return Err("capture_policy.allowlist is not an array".into()),
+//RS     }
+//RS     Ok(limits)
+//RS }
+//RS 
+//RS fn validate_toolchain(value: &CanonicalJson) -> Result<(), String> {
+//RS     let fields = object_keys(
+//RS         value,
+//RS         "toolchain",
+//RS         &[
+//RS             "compiler_build_id",
+//RS             "digest",
+//RS             "jet_version",
+//RS             "runner_id",
+//RS             "stdlib_id",
+//RS         ],
+//RS     )?;
+//RS     for key in ["compiler_build_id", "jet_version", "runner_id", "stdlib_id"] {
+//RS         text(&fields[key], &format!("toolchain.{key}"))?;
+//RS     }
+//RS     let digest = text(&fields["digest"], "toolchain.digest")?;
+//RS     if digest.len() != 64
+//RS         || !digest
+//RS             .bytes()
+//RS             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+//RS     {
+//RS         return Err("toolchain.digest is not lowercase Hex64".into());
+//RS     }
+//RS     let digest_content = CanonicalJson::object([
+//RS         (
+//RS             "compiler_build_id".into(),
+//RS             fields["compiler_build_id"].clone(),
+//RS         ),
+//RS         ("jet_version".into(), fields["jet_version"].clone()),
+//RS         ("runner_id".into(), fields["runner_id"].clone()),
+//RS         ("stdlib_id".into(), fields["stdlib_id"].clone()),
+//RS     ])?;
+//RS     verify_stable_id(&digest_content, digest)
+//RS         .map_err(|_| "toolchain digest mismatch".to_string())?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn object_keys<'a>(
+//RS     value: &'a CanonicalJson,
+//RS     label: &str,
+//RS     keys: &[&str],
+//RS ) -> Result<&'a BTreeMap<String, CanonicalJson>, String> {
+//RS     let fields = match value {
+//RS         CanonicalJson::Object(fields) => fields,
+//RS         _ => return Err(format!("{label} is not an object")),
+//RS     };
+//RS     if fields.len() != keys.len() || !keys.iter().all(|key| fields.contains_key(*key)) {
+//RS         return Err(format!("{label} has missing or unknown keys"));
+//RS     }
+//RS     Ok(fields)
+//RS }
+//RS 
+//RS fn text<'a>(value: &'a CanonicalJson, label: &str) -> Result<&'a str, String> {
+//RS     match value {
+//RS         CanonicalJson::String(text) => Ok(text),
+//RS         _ => Err(format!("{label} is not text")),
+//RS     }
+//RS }
+//RS 
+//RS pub fn trace_id(value: &CanonicalJson) -> Result<&str, String> {
+//RS     let fields = match value {
+//RS         CanonicalJson::Object(fields) => fields,
+//RS         _ => return Err("jettrace wrapper is not an object".into()),
+//RS     };
+//RS     text(
+//RS         fields.get("trace_id").ok_or("jettrace missing trace_id")?,
+//RS         "trace_id",
+//RS     )
+//RS }
+//RS 
+//RS pub fn artifact_extension() -> &'static str {
+//RS     ARTIFACT_EXT_TRACE
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn trace_version_has_one_typed_home() {
+//RS         let source = include_str!("JetTrace.rs");
+//RS         assert_eq!(
+//RS             source
+//RS                 .lines()
+//RS                 .filter(|line| line.trim_start().starts_with("pub const TRACE_VERSION:"))
+//RS                 .count(),
+//RS             1
+//RS         );
+//RS         assert!(source.contains("pub const TRACE_VERSION: u32 = 1;"));
+//RS     }
+//RS 
+//RS     fn sample_skeleton() -> TraceSkeleton {
+//RS         TraceSkeleton {
+//RS             command: "run".into(),
+//RS             argv: vec!["run".into(), "app.jet".into()],
+//RS             toolchain: TraceToolchain {
+//RS                 jet_version: "0.0.0-test".into(),
+//RS                 compiler_build_id: "build-test".into(),
+//RS                 stdlib_id: "stdlib-test".into(),
+//RS                 runner_id: "runner-test".into(),
+//RS             },
+//RS             hardware: TraceHardware {
+//RS                 cpu_arch: "x86_64".into(),
+//RS                 logical_cpus: 1,
+//RS                 os: "linux".into(),
+//RS                 target: "x86_64-unknown-linux-gnu".into(),
+//RS             },
+//RS             capture_policy: CapturePolicy::default_exclusions(),
+//RS             samples: Vec::new(),
+//RS             profile: TraceProfile::unsupported("test fixture has no source capture"),
+//RS             allocations: Vec::new(),
+//RS             browser: Vec::new(),
+//RS             game_frames: Vec::new(),
+//RS             game_draw_events: Vec::new(),
+//RS             tasks: Vec::new(),
+//RS             locks: Vec::new(),
+//RS             io: Vec::new(),
+//RS             native: Vec::new(),
+//RS             spans: Vec::new(),
+//RS             receipt_sections: Vec::new(),
+//RS             source_identity: Vec::new(),
+//RS             source_maps: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn profile_run_window_status_governs_its_measurements() {
+//RS         let window = |status: &str, wall: Option<u64>, cpu: Option<u64>| {
+//RS             let mut skeleton = sample_skeleton();
+//RS             skeleton.profile.window_status = status.into();
+//RS             skeleton.profile.window_wall_ns = wall;
+//RS             skeleton.profile.window_cpu_ns = cpu;
+//RS             verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap())
+//RS         };
+//RS         assert!(window("exit", Some(5), Some(4)).is_ok());
+//RS         // A target without a process CPU clock still has a run wall.
+//RS         assert!(window("live", Some(5), None).is_ok());
+//RS         assert!(window("unavailable", None, None).is_ok());
+//RS         assert!(window("exit", None, None).is_err(), "exit window without wall time");
+//RS         assert!(window("unavailable", Some(5), None).is_err(), "unavailable window with wall time");
+//RS         assert!(window("unavailable", None, Some(4)).is_err(), "unavailable window with CPU time");
+//RS         assert!(window("complete", Some(5), Some(4)).is_err(), "unknown window status");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn captured_wall_and_alloc_round_trip_with_symbol() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.samples.push(TraceSample {
+//RS             domain: "wall".into(),
+//RS             duration_ns: 42,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         skeleton.allocations.push(TraceAllocation {
+//RS             count: 3,
+//RS             bytes: 96,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         skeleton.source_identity.push(SourceIdentity {
+//RS             path: "app.jet".into(),
+//RS             sha256: "a".repeat(64),
+//RS             symbols: vec![("run".into(), "fn".into())],
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let verified = verify_jettrace(&bytes).unwrap();
+//RS         let text = String::from_utf8(bytes).unwrap();
+//RS         assert!(text.contains("\"domain\":\"wall\""), "{text}");
+//RS         assert!(text.contains("\"duration_ns\":42"), "{text}");
+//RS         assert!(text.contains("\"count\":3"), "{text}");
+//RS         assert!(text.contains("\"name\":\"run\""), "{text}");
+//RS         assert_eq!(trace_id(&verified).unwrap().len(), 64);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn captured_tasks_round_trip_with_parent_causality() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.tasks.push(TraceTask {
+//RS             id: 1,
+//RS             parent: 0,
+//RS             state: "running".into(),
+//RS             wait: String::new(),
+//RS             cancelled: false,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         skeleton.tasks.push(TraceTask {
+//RS             id: 2,
+//RS             parent: 1,
+//RS             state: "blocked".into(),
+//RS             wait: "time sleep".into(),
+//RS             cancelled: false,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         assert!(text.contains("\"tasks\":[{"), "{text}");
+//RS         assert!(text.contains("\"parent\":1"), "{text}");
+//RS         assert!(text.contains("\"state\":\"blocked\""), "{text}");
+//RS         assert!(text.contains("\"wait\":\"time sleep\""), "{text}");
+//RS         verify_jettrace(&bytes).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn captured_locks_round_trip_with_channel_waiters() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.locks.push(TraceLock {
+//RS             kind: "channel".into(),
+//RS             id: 3,
+//RS             depth: 0,
+//RS             capacity: Some(1),
+//RS             send_waiters: 0,
+//RS             recv_waiters: 1,
+//RS             closed: false,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         assert!(text.contains("\"locks\":[{"), "{text}");
+//RS         assert!(text.contains("\"kind\":\"channel\""), "{text}");
+//RS         assert!(text.contains("\"recv_waiters\":1"), "{text}");
+//RS         assert!(text.contains("\"capacity\":1"), "{text}");
+//RS         verify_jettrace(&bytes).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn idle_channel_lock_row_is_rejected() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         skeleton.locks.push(TraceLock {
+//RS             kind: "channel".into(),
+//RS             id: 1,
+//RS             depth: 0,
+//RS             capacity: Some(1),
+//RS             send_waiters: 0,
+//RS             recv_waiters: 0,
+//RS             closed: false,
+//RS             symbol: JetSymbolRef {
+//RS                 path: "app.jet".into(),
+//RS                 name: "run".into(),
+//RS             },
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let err = verify_jettrace(&bytes).unwrap_err();
+//RS         assert!(err.contains("no waiters"), "{err}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn captured_io_round_trip_with_tcp_accept_wait() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.tasks.push(TraceTask {
+//RS             id: 3,
+//RS             parent: 0,
+//RS             state: "done".into(),
+//RS             wait: String::new(),
+//RS             cancelled: false,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         skeleton.io.push(TraceIo {
+//RS             end_ns: 29,
+//RS             kind: "tcp".into(),
+//RS             start_ns: 11,
+//RS             task_id: 3,
+//RS             wait: "tcp accept".into(),
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         assert!(text.contains("\"io\":[{"), "{text}");
+//RS         assert!(text.contains("\"kind\":\"tcp\""), "{text}");
+//RS         assert!(text.contains("\"start_ns\":11"), "{text}");
+//RS         assert!(text.contains("\"end_ns\":29"), "{text}");
+//RS         assert!(text.contains("\"wait\":\"tcp accept\""), "{text}");
+//RS         assert!(text.contains("\"task_id\":3"), "{text}");
+//RS         verify_jettrace(&bytes).unwrap();
+//RS 
+//RS         skeleton.tasks[0].wait = "tcp accept".into();
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         assert!(verify_jettrace(&bytes)
+//RS             .unwrap_err()
+//RS             .contains("completed task must have an empty wait"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn vacuous_io_row_is_rejected() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.tasks.push(TraceTask {
+//RS             id: 1,
+//RS             parent: 0,
+//RS             state: "blocked".into(),
+//RS             wait: "time sleep".into(),
+//RS             cancelled: false,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         skeleton.io.push(TraceIo {
+//RS             end_ns: 2,
+//RS             kind: "tcp".into(),
+//RS             start_ns: 1,
+//RS             task_id: 1,
+//RS             wait: "time sleep".into(),
+//RS             symbol,
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let err = verify_jettrace(&bytes).unwrap_err();
+//RS         assert!(err.contains("not an observe I/O wait"), "{err}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn orphan_task_and_io_causality_are_rejected() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.tasks.push(TraceTask {
+//RS             id: 2,
+//RS             parent: 1,
+//RS             state: "done".into(),
+//RS             wait: String::new(),
+//RS             cancelled: false,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         assert!(verify_jettrace(&bytes)
+//RS             .unwrap_err()
+//RS             .contains("missing parent 1"));
+//RS 
+//RS         skeleton.tasks[0].parent = 0;
+//RS         skeleton.io.push(TraceIo {
+//RS             end_ns: 2,
+//RS             kind: "tcp".into(),
+//RS             start_ns: 1,
+//RS             task_id: 3,
+//RS             wait: "tcp accept".into(),
+//RS             symbol,
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         assert!(verify_jettrace(&bytes)
+//RS             .unwrap_err()
+//RS             .contains("missing task 3"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_timing_round_trips_with_root_causality_and_unavailable_state() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.tasks.push(TraceTask {
+//RS             id: 1,
+//RS             parent: 0,
+//RS             state: "done".into(),
+//RS             wait: String::new(),
+//RS             cancelled: false,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         skeleton.native.push(TraceNative {
+//RS             clock: "process_cpu".into(),
+//RS             duration_ns: Some(42),
+//RS             observed_at_ns: 99,
+//RS             reason: String::new(),
+//RS             status: "captured".into(),
+//RS             symbol: symbol.clone(),
+//RS             target: "x86_64-unknown-linux-gnu".into(),
+//RS             task_id: Some(1),
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         assert!(text.contains("\"native\":[{"), "{text}");
+//RS         assert!(text.contains("\"duration_ns\":42"), "{text}");
+//RS         assert!(text.contains("\"observed_at_ns\":99"), "{text}");
+//RS         assert!(text.contains("\"task_id\":1"), "{text}");
+//RS         verify_jettrace(&bytes).unwrap();
+//RS 
+//RS         skeleton.tasks.clear();
+//RS         skeleton.native[0] = TraceNative {
+//RS             clock: "process_cpu".into(),
+//RS             duration_ns: None,
+//RS             observed_at_ns: 0,
+//RS             reason: "process CPU timing is unavailable on target wasm32-unknown-unknown".into(),
+//RS             status: "unavailable".into(),
+//RS             symbol,
+//RS             target: "wasm32-unknown-unknown".into(),
+//RS             task_id: None,
+//RS         };
+//RS         verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap()).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn task_observation_spans_round_trip_with_parent_causality_and_unavailable_state() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         for (id, parent) in [(1, 0), (2, 1)] {
+//RS             skeleton.tasks.push(TraceTask {
+//RS                 id,
+//RS                 parent,
+//RS                 state: "done".into(),
+//RS                 wait: String::new(),
+//RS                 cancelled: false,
+//RS                 symbol: symbol.clone(),
+//RS             });
+//RS             skeleton.spans.push(TraceSpan {
+//RS                 clock: "monotonic".into(),
+//RS                 end_ns: Some(90 + id),
+//RS                 kind: "task_observed".into(),
+//RS                 parent_task_id: (parent != 0).then_some(parent),
+//RS                 reason: String::new(),
+//RS                 start_ns: Some(10 + id),
+//RS                 status: "captured".into(),
+//RS                 symbol: symbol.clone(),
+//RS                 task_id: Some(id),
+//RS             });
+//RS         }
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         assert!(text.contains("\"spans\":[{"), "{text}");
+//RS         assert!(text.contains("\"parent_task_id\":1"), "{text}");
+//RS         verify_jettrace(&bytes).unwrap();
+//RS 
+//RS         skeleton.spans[1].parent_task_id = Some(99);
+//RS         let error = verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap()).unwrap_err();
+//RS         assert!(error.contains("parent_task_id does not match"), "{error}");
+//RS 
+//RS         skeleton.tasks.clear();
+//RS         skeleton.spans = vec![TraceSpan {
+//RS             clock: "monotonic".into(),
+//RS             end_ns: None,
+//RS             kind: "task_observed".into(),
+//RS             parent_task_id: None,
+//RS             reason: "task span requires multiple live observations".into(),
+//RS             start_ns: None,
+//RS             status: "unavailable".into(),
+//RS             symbol,
+//RS             task_id: None,
+//RS         }];
+//RS         verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap()).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn capture_policy_audits_fixed_row_caps_and_truncation() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         skeleton.capture_policy.io_rows_truncated = true;
+//RS         skeleton.capture_policy.browser_rows_truncated = true;
+//RS         skeleton.capture_policy.native_rows_truncated = true;
+//RS         skeleton.capture_policy.span_rows_truncated = true;
+//RS         skeleton.capture_policy.task_rows_truncated = true;
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         assert!(
+//RS             text.contains("\"capture_policy\":{\"allowlist\":[]"),
+//RS             "{text}"
+//RS         );
+//RS         assert!(text.contains("\"browser_row_limit\":4096"), "{text}");
+//RS         assert!(text.contains("\"browser_rows_truncated\":true"), "{text}");
+//RS         assert!(text.contains("\"schema\":5,\"span_row_limit\""), "{text}");
+//RS         assert!(text.contains("\"io_row_limit\":4096"), "{text}");
+//RS         assert!(text.contains("\"io_rows_truncated\":true"), "{text}");
+//RS         assert!(text.contains("\"native_row_limit\":4096"), "{text}");
+//RS         assert!(text.contains("\"native_rows_truncated\":true"), "{text}");
+//RS         assert!(text.contains("\"span_row_limit\":4096"), "{text}");
+//RS         assert!(text.contains("\"span_rows_truncated\":true"), "{text}");
+//RS         assert!(text.contains("\"task_row_limit\":4096"), "{text}");
+//RS         assert!(text.contains("\"task_rows_truncated\":true"), "{text}");
+//RS         verify_jettrace(&bytes).unwrap();
+//RS 
+//RS         let mut content = skeleton.content_json().unwrap();
+//RS         let CanonicalJson::Object(content) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         let CanonicalJson::Object(policy) = content.get_mut("capture_policy").unwrap() else {
+//RS             unreachable!()
+//RS         };
+//RS         policy.insert("task_row_limit".into(), CanonicalJson::Integer("0".into()));
+//RS         let bytes = jettrace_artifact(CanonicalJson::Object(content.clone())).bytes();
+//RS         assert!(verify_jettrace(&bytes)
+//RS             .unwrap_err()
+//RS             .contains("row limits do not match"));
+//RS 
+//RS         let mut content = skeleton.content_json().unwrap();
+//RS         let CanonicalJson::Object(fields) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         fields.insert(
+//RS             "tasks".into(),
+//RS             CanonicalJson::Array(vec![CanonicalJson::Null; TRACE_TASK_ROW_LIMIT as usize + 1]),
+//RS         );
+//RS         let bytes = jettrace_artifact(content).bytes();
+//RS         assert!(verify_jettrace(&bytes)
+//RS             .unwrap_err()
+//RS             .contains("exceeds capture_policy.task_row_limit"));
+//RS 
+//RS         let mut content = skeleton.content_json().unwrap();
+//RS         let CanonicalJson::Object(fields) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         fields.insert(
+//RS             "spans".into(),
+//RS             CanonicalJson::Array(vec![CanonicalJson::Null; TRACE_SPAN_ROW_LIMIT as usize + 1]),
+//RS         );
+//RS         let error = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
+//RS         assert!(
+//RS             error.contains("exceeds capture_policy.span_row_limit"),
+//RS             "{error}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn legacy_capture_policy_v1_keeps_unknown_limit_semantics() {
+//RS         let mut content = sample_skeleton().content_json().unwrap();
+//RS         let CanonicalJson::Object(fields) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+//RS             unreachable!()
+//RS         };
+//RS         for key in [
+//RS             "browser_row_limit",
+//RS             "browser_rows_truncated",
+//RS             "io_row_limit",
+//RS             "io_rows_truncated",
+//RS             "native_row_limit",
+//RS             "native_rows_truncated",
+//RS             "span_row_limit",
+//RS             "span_rows_truncated",
+//RS             "task_row_limit",
+//RS             "task_rows_truncated",
+//RS         ] {
+//RS             policy.remove(key);
+//RS         }
+//RS         policy.insert("schema".into(), CanonicalJson::Integer("1".into()));
+//RS         let bytes = jettrace_artifact(content).bytes();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         assert!(
+//RS             text.contains("\"capture_policy\":{\"allowlist\":[]"),
+//RS             "{text}"
+//RS         );
+//RS         assert!(text.contains("\"schema\":1},\"command\""), "{text}");
+//RS         // Other sections (the source profile) carry their own row caps; only
+//RS         // the capture policy object must stay free of fabricated limits.
+//RS         let policy_start = text.find("\"capture_policy\":{").expect("capture policy");
+//RS         let policy_len = text[policy_start..]
+//RS             .find("\"schema\":1}")
+//RS             .expect("capture policy schema");
+//RS         let policy = &text[policy_start..policy_start + policy_len];
+//RS         assert!(
+//RS             !policy.contains("row_limit"),
+//RS             "legacy limits were fabricated: {policy}"
+//RS         );
+//RS         assert!(
+//RS             !policy.contains("rows_truncated"),
+//RS             "legacy truncation was fabricated: {policy}"
+//RS         );
+//RS         assert!(
+//RS             text.contains("\"version\":1"),
+//RS             "outer version changed: {text}"
+//RS         );
+//RS         verify_jettrace(&bytes).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn capture_policy_v2_remains_readable_with_unknown_native_limit() {
+//RS         let mut content = sample_skeleton().content_json().unwrap();
+//RS         let CanonicalJson::Object(fields) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+//RS             unreachable!()
+//RS         };
+//RS         policy.remove("browser_row_limit");
+//RS         policy.remove("browser_rows_truncated");
+//RS         policy.remove("native_row_limit");
+//RS         policy.remove("native_rows_truncated");
+//RS         policy.remove("span_row_limit");
+//RS         policy.remove("span_rows_truncated");
+//RS         policy.insert("schema".into(), CanonicalJson::Integer("2".into()));
+//RS         verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn capture_policy_v3_remains_readable_with_unknown_span_limit() {
+//RS         let mut content = sample_skeleton().content_json().unwrap();
+//RS         let CanonicalJson::Object(fields) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+//RS             unreachable!()
+//RS         };
+//RS         policy.remove("browser_row_limit");
+//RS         policy.remove("browser_rows_truncated");
+//RS         policy.remove("span_row_limit");
+//RS         policy.remove("span_rows_truncated");
+//RS         policy.insert("schema".into(), CanonicalJson::Integer("3".into()));
+//RS         verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn capture_policy_v4_remains_readable_with_empty_browser_domain() {
+//RS         let mut content = sample_skeleton().content_json().unwrap();
+//RS         let CanonicalJson::Object(fields) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+//RS             unreachable!()
+//RS         };
+//RS         policy.remove("browser_row_limit");
+//RS         policy.remove("browser_rows_truncated");
+//RS         policy.insert("schema".into(), CanonicalJson::Integer("4".into()));
+//RS         verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn browser_rows_are_closed_bounded_and_source_attributed() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.browser.push(TraceBrowser {
+//RS             class: "event".into(),
+//RS             duration_ns: 25,
+//RS             start_ns: 100,
+//RS             symbol,
+//RS         });
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         verify_jettrace(&bytes).unwrap();
+//RS         let text = String::from_utf8(bytes).unwrap();
+//RS         assert!(
+//RS             text.contains("\"clock\":\"browser_monotonic_mapped\""),
+//RS             "{text}"
+//RS         );
+//RS         assert!(!text.contains("nonce"), "{text}");
+//RS 
+//RS         skeleton.browser[0].class = "payload".into();
+//RS         assert!(verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap())
+//RS             .unwrap_err()
+//RS             .contains("class must be"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn legacy_capture_policy_v3_still_rejects_malformed_spans() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         let symbol = JetSymbolRef {
+//RS             path: "app.jet".into(),
+//RS             name: "run".into(),
+//RS         };
+//RS         skeleton.tasks.push(TraceTask {
+//RS             id: 1,
+//RS             parent: 0,
+//RS             state: "done".into(),
+//RS             wait: String::new(),
+//RS             cancelled: false,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS         skeleton.spans.push(TraceSpan {
+//RS             clock: "monotonic".into(),
+//RS             end_ns: Some(10),
+//RS             kind: "task_observed".into(),
+//RS             parent_task_id: None,
+//RS             reason: String::new(),
+//RS             start_ns: Some(20),
+//RS             status: "captured".into(),
+//RS             symbol,
+//RS             task_id: Some(1),
+//RS         });
+//RS         let mut content = skeleton.content_json().unwrap();
+//RS         let CanonicalJson::Object(fields) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+//RS             unreachable!()
+//RS         };
+//RS         policy.remove("browser_row_limit");
+//RS         policy.remove("browser_rows_truncated");
+//RS         policy.remove("span_row_limit");
+//RS         policy.remove("span_rows_truncated");
+//RS         policy.insert("schema".into(), CanonicalJson::Integer("3".into()));
+//RS         let error = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
+//RS         assert!(error.contains("ends before it starts"), "{error}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn legacy_capture_policies_still_reject_malformed_native_rows() {
+//RS         for schema in ["1", "2"] {
+//RS             let mut skeleton = sample_skeleton();
+//RS             let symbol = JetSymbolRef {
+//RS                 path: "app.jet".into(),
+//RS                 name: "run".into(),
+//RS             };
+//RS             skeleton.tasks.push(TraceTask {
+//RS                 id: 1,
+//RS                 parent: 0,
+//RS                 state: "done".into(),
+//RS                 wait: String::new(),
+//RS                 cancelled: false,
+//RS                 symbol: symbol.clone(),
+//RS             });
+//RS             skeleton.native.push(TraceNative {
+//RS                 clock: "process_cpu".into(),
+//RS                 duration_ns: Some(42),
+//RS                 observed_at_ns: 99,
+//RS                 reason: String::new(),
+//RS                 status: "captured".into(),
+//RS                 symbol,
+//RS                 target: "x86_64-unknown-linux-gnu".into(),
+//RS                 task_id: Some(1),
+//RS             });
+//RS             let mut content = skeleton.content_json().unwrap();
+//RS             let CanonicalJson::Object(fields) = &mut content else {
+//RS                 unreachable!()
+//RS             };
+//RS             let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+//RS                 unreachable!()
+//RS             };
+//RS             policy.remove("browser_row_limit");
+//RS             policy.remove("browser_rows_truncated");
+//RS             policy.remove("native_row_limit");
+//RS             policy.remove("native_rows_truncated");
+//RS             policy.remove("span_row_limit");
+//RS             policy.remove("span_rows_truncated");
+//RS             if schema == "1" {
+//RS                 for key in [
+//RS                     "io_row_limit",
+//RS                     "io_rows_truncated",
+//RS                     "task_row_limit",
+//RS                     "task_rows_truncated",
+//RS                 ] {
+//RS                     policy.remove(key);
+//RS                 }
+//RS             }
+//RS             policy.insert("schema".into(), CanonicalJson::Integer(schema.into()));
+//RS             let CanonicalJson::Array(native) = fields.get_mut("native").unwrap() else {
+//RS                 unreachable!()
+//RS             };
+//RS             let CanonicalJson::Object(row) = &mut native[0] else {
+//RS                 unreachable!()
+//RS             };
+//RS             row.insert("status".into(), CanonicalJson::String("forged".into()));
+//RS 
+//RS             let error = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
+//RS             assert!(
+//RS                 error.contains("status must be captured or unavailable"),
+//RS                 "{schema}: {error}"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn skeleton_round_trips_with_schema_identity() {
+//RS         let bytes = build_skeleton_bytes(&sample_skeleton()).unwrap();
+//RS         let verified = verify_jettrace(&bytes).unwrap();
+//RS         assert_eq!(
+//RS             match &verified {
+//RS                 CanonicalJson::Object(fields) => fields.get("schema"),
+//RS                 _ => None,
+//RS             },
+//RS             Some(&CanonicalJson::String(TRACE_SCHEMA.into()))
+//RS         );
+//RS         let id = trace_id(&verified).unwrap();
+//RS         assert_eq!(id.len(), 64);
+//RS         assert!(artifact_extension().ends_with("jettrace"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn forged_trace_id_is_rejected() {
+//RS         let mut bytes = build_skeleton_bytes(&sample_skeleton()).unwrap();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         let forged = text.replacen(
+//RS             &stable_id(&sample_skeleton().content_json().unwrap()),
+//RS             &"0".repeat(64),
+//RS             1,
+//RS         );
+//RS         bytes = forged.into_bytes();
+//RS         assert!(verify_jettrace(&bytes)
+//RS             .unwrap_err()
+//RS             .contains("content hash mismatch"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn newer_major_version_names_required_toolchain() {
+//RS         let content = sample_skeleton().content_json().unwrap();
+//RS         let wrapper = CanonicalJson::object([
+//RS             ("content".into(), content.clone()),
+//RS             ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
+//RS             (
+//RS                 "trace_id".into(),
+//RS                 CanonicalJson::String(stable_id(&content)),
+//RS             ),
+//RS             ("version".into(), CanonicalJson::Integer("2".into())),
+//RS         ])
+//RS         .unwrap();
+//RS         let err = verify_jettrace(&wrapper.bytes()).unwrap_err();
+//RS         assert!(err.contains("newer jet toolchain"), "{err}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn embedded_source_maps_hash_and_sort_for_offline_truth() {
+//RS         let mut skeleton = sample_skeleton();
+//RS         skeleton
+//RS             .source_maps
+//RS             .push(TraceSourceMap::jet_with_source("b.jet", "fn run() {}\n"));
+//RS         skeleton
+//RS             .source_maps
+//RS             .push(TraceSourceMap::jet_with_source("a.jet", "fn run() {}\n"));
+//RS         let bytes = build_skeleton_bytes(&skeleton).unwrap();
+//RS         let text = String::from_utf8(bytes.clone()).unwrap();
+//RS         assert!(text.contains("\"source_maps\":[{"), "{text}");
+//RS         assert!(text.contains("\"kind\":\"jet\""), "{text}");
+//RS         assert!(text.contains("sourcesContent"), "{text}");
+//RS         // Sorted by path: a.jet before b.jet.
+//RS         let a = text.find("\"path\":\"a.jet\"").unwrap();
+//RS         let b = text.find("\"path\":\"b.jet\"").unwrap();
+//RS         assert!(a < b, "{text}");
+//RS         verify_jettrace(&bytes).unwrap();
+//RS 
+//RS         let mut content = skeleton.content_json().unwrap();
+//RS         let CanonicalJson::Object(fields) = &mut content else {
+//RS             unreachable!()
+//RS         };
+//RS         let CanonicalJson::Array(maps) = fields.get_mut("source_maps").unwrap() else {
+//RS             unreachable!()
+//RS         };
+//RS         let CanonicalJson::Object(first) = &mut maps[0] else {
+//RS             unreachable!()
+//RS         };
+//RS         first.insert("sha256".into(), CanonicalJson::String("0".repeat(64)));
+//RS         let err = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
+//RS         assert!(err.contains("does not match map bytes"), "{err}");
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2069 crates/jet-foundation/src/JetTrace.rs:1801-3369
+

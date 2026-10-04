@@ -1,45 +1,32 @@
-// PORT-PENDING 0066 crates-jet-foundation-src-hex-module-group: crates/jet-foundation/src/Hex.rs:1-41
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Lowercase hexadecimal byte encoding shared by host tools.
-//RS //!
-//RS //! Encoding always writes two lowercase digits per byte. Decoding accepts
-//RS //! either case, requires an even number of digits, and rejects anything else
-//RS //! (signs, whitespace, non-ASCII). Callers that need a stricter alphabet or a
-//RS //! different error shape map the `None` themselves.
-//RS 
-//RS const DIGITS: &[u8; 16] = b"0123456789abcdef";
-//RS 
-//RS /// Two lowercase hex digits per byte.
-//RS pub fn encode(bytes: &[u8]) -> String {
-//RS     let mut text = String::with_capacity(bytes.len() * 2);
-//RS     for byte in bytes {
-//RS         text.push(DIGITS[(byte >> 4) as usize] as char);
-//RS         text.push(DIGITS[(byte & 0x0f) as usize] as char);
-//RS     }
-//RS     text
-//RS }
-//RS 
-//RS /// Value of one ASCII hex digit in either case.
-//RS pub fn nibble(byte: u8) -> Option<u8> {
-//RS     match byte {
-//RS         b'0'..=b'9' => Some(byte - b'0'),
-//RS         b'a'..=b'f' => Some(byte - b'a' + 10),
-//RS         b'A'..=b'F' => Some(byte - b'A' + 10),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Decode an even-length run of hex digits in either case.
-//RS pub fn decode(text: &str) -> Option<Vec<u8>> {
-//RS     let bytes = text.as_bytes();
-//RS     if bytes.len() % 2 != 0 {
-//RS         return None;
-//RS     }
-//RS     let mut decoded = Vec::with_capacity(bytes.len() / 2);
-//RS     for pair in bytes.chunks_exact(2) {
-//RS         decoded.push((nibble(pair[0])? << 4) | nibble(pair[1])?);
-//RS     }
-//RS     Some(decoded)
-//RS }
-// END-PORT-PENDING 0066 crates/jet-foundation/src/Hex.rs:1-41
-
+// Lowercase hexadecimal byte encoding. Decode accepts either case, never
+// signs/whitespace/non-ASCII; callers own stricter alphabets/error shapes.
+// Rust: crates/jet-foundation/src/Hex.rs:8
+const DIGITS: String = "0123456789abcdef"
+// Rust: crates/jet-foundation/src/Hex.rs:11
+pub fn encode(bytes: View<U8>) -> String Never! {
+    text := String.with_capacity(bytes.len() * 2)
+    loop byte in bytes {
+        text.push(DIGITS[(byte >> 4) as Int] as Char)
+        text.push(DIGITS[(byte & 0x0f) as Int] as Char)
+    }
+    text
+}
+// Rust: crates/jet-foundation/src/Hex.rs:21
+pub fn nibble(byte: U8) -> U8? Never! {
+    if byte >= 48 && byte <= 57 -> return Val(byte - 48)
+    if byte >= 97 && byte <= 102 -> return Val(byte - 97 + 10)
+    if byte >= 65 && byte <= 70 -> return Val(byte - 65 + 10)
+    None
+}
+// Rust: crates/jet-foundation/src/Hex.rs:31
+pub fn decode(text: String) -> [U8]? Never! {
+    bytes :: text.bytes()
+    if bytes.len() % 2 != 0 -> return None
+    decoded := [U8].with_capacity(bytes.len() / 2)
+    loop at in (0..<bytes.len()).step_by(2) {
+        hi :: nibble(bytes[at]) ?? return None
+        lo :: nibble(bytes[at + 1]) ?? return None
+        decoded.push((hi << 4) | lo)
+    }
+    Val(^decoded)
+}

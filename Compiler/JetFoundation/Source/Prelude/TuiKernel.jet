@@ -1,390 +1,214 @@
-// PORT-PENDING 0089 crates-jet-foundation-src-prelude-matchscan-module-group: crates/jet-foundation/src/Prelude/TuiKernel.rs:1-386
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum ColorProfile {
-//RS     Ansi16,
-//RS     Ansi256,
-//RS     TrueColor,
-//RS     Ascii,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct Capabilities {
-//RS     pub profile: ColorProfile,
-//RS     pub color: bool,
-//RS     pub unicode: bool,
-//RS     pub mouse: bool,
-//RS     pub resize: bool,
-//RS     pub clipboard: bool,
-//RS     pub width: usize,
-//RS     pub height: usize,
-//RS }
-//RS 
-//RS pub fn capabilities(profile: ColorProfile, width: usize, height: usize) -> Capabilities {
-//RS     let ascii = profile == ColorProfile::Ascii;
-//RS     Capabilities {
-//RS         profile,
-//RS         color: !ascii,
-//RS         unicode: !ascii,
-//RS         mouse: !ascii,
-//RS         resize: !ascii,
-//RS         clipboard: !ascii,
-//RS         width: width.max(1),
-//RS         height: height.max(1),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum Color {
-//RS     Ansi16(u8),
-//RS     Ansi256(u8),
-//RS     Rgb(u8, u8, u8),
-//RS }
-//RS 
-//RS pub fn color_ansi16(index: i64) -> Color {
-//RS     Color::Ansi16(index.clamp(0, 15) as u8)
-//RS }
-//RS 
-//RS pub fn color_ansi256(index: i64) -> Color {
-//RS     Color::Ansi256(index.clamp(0, 255) as u8)
-//RS }
-//RS 
-//RS pub fn color_rgb(red: i64, green: i64, blue: i64) -> Color {
-//RS     Color::Rgb(
-//RS         red.clamp(0, 255) as u8,
-//RS         green.clamp(0, 255) as u8,
-//RS         blue.clamp(0, 255) as u8,
-//RS     )
-//RS }
-//RS 
-//RS fn rgb_ansi256(red: u8, green: u8, blue: u8) -> u8 {
-//RS     let cube = |value: u8| -> u8 {
-//RS         if value < 48 {
-//RS             0
-//RS         } else if value < 115 {
-//RS             1
-//RS         } else {
-//RS             ((value as u16 - 55) / 40).min(5) as u8
-//RS         }
-//RS     };
-//RS     16 + 36 * cube(red) + 6 * cube(green) + cube(blue)
-//RS }
-//RS 
-//RS fn rgb_ansi16(red: u8, green: u8, blue: u8) -> u8 {
-//RS     let bright = u8::from(red.max(green).max(blue) > 170);
-//RS     let mut index = 0;
-//RS     if red > 96 {
-//RS         index |= 1;
-//RS     }
-//RS     if green > 96 {
-//RS         index |= 2;
-//RS     }
-//RS     if blue > 96 {
-//RS         index |= 4;
-//RS     }
-//RS     if index == 0 && red.max(green).max(blue) > 48 {
-//RS         index = 7;
-//RS     }
-//RS     index + bright * 8
-//RS }
-//RS 
-//RS fn color_code(color: Color, profile: ColorProfile, background: bool) -> String {
-//RS     let base = if background { 48 } else { 38 };
-//RS     match (color, profile) {
-//RS         (Color::Rgb(red, green, blue), ColorProfile::TrueColor) => {
-//RS             format!("{base};2;{red};{green};{blue}")
-//RS         }
-//RS         (Color::Rgb(red, green, blue), ColorProfile::Ansi256) => {
-//RS             format!("{base};5;{}", rgb_ansi256(red, green, blue))
-//RS         }
-//RS         (Color::Rgb(red, green, blue), ColorProfile::Ansi16) => {
-//RS             color_code(Color::Ansi16(rgb_ansi16(red, green, blue)), profile, background)
-//RS         }
-//RS         (Color::Ansi256(index), ColorProfile::TrueColor)
-//RS         | (Color::Ansi256(index), ColorProfile::Ansi256) => {
-//RS             format!("{base};5;{index}")
-//RS         }
-//RS         (Color::Ansi256(index), ColorProfile::Ansi16) => {
-//RS             color_code(Color::Ansi16(index % 16), profile, background)
-//RS         }
-//RS         (Color::Ansi16(index), ColorProfile::TrueColor)
-//RS         | (Color::Ansi16(index), ColorProfile::Ansi256) => {
-//RS             format!("{base};5;{}", index % 16)
-//RS         }
-//RS         (Color::Ansi16(index), ColorProfile::Ansi16) => {
-//RS             let index = index % 16;
-//RS             if index < 8 {
-//RS                 format!("{}", base - 8 + i32::from(index))
-//RS             } else {
-//RS                 format!("{}", base + 44 + i32::from(index))
-//RS             }
-//RS         }
-//RS         (_, ColorProfile::Ascii) => String::new(),
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
-//RS pub struct Style {
-//RS     pub foreground: Option<Color>,
-//RS     pub background: Option<Color>,
-//RS     pub bold: bool,
-//RS     pub dim: bool,
-//RS     pub underline: bool,
-//RS }
-//RS 
-//RS pub fn style_text(text: &str, style: &Style, capabilities: &Capabilities) -> String {
-//RS     let text = if capabilities.unicode {
-//RS         text.to_string()
-//RS     } else {
-//RS         ascii(text)
-//RS     };
-//RS     if !capabilities.color || capabilities.profile == ColorProfile::Ascii {
-//RS         return text;
-//RS     }
-//RS     let mut codes = Vec::new();
-//RS     if style.bold {
-//RS         codes.push("1".to_string());
-//RS     }
-//RS     if style.dim {
-//RS         codes.push("2".to_string());
-//RS     }
-//RS     if style.underline {
-//RS         codes.push("4".to_string());
-//RS     }
-//RS     if let Some(color) = style.foreground {
-//RS         codes.push(color_code(color, capabilities.profile, false));
-//RS     }
-//RS     if let Some(color) = style.background {
-//RS         codes.push(color_code(color, capabilities.profile, true));
-//RS     }
-//RS     if codes.is_empty() {
-//RS         text
-//RS     } else {
-//RS         format!("\x1b[{}m{text}\x1b[0m", codes.join(";"))
-//RS     }
-//RS }
-//RS 
-//RS pub fn ascii(text: &str) -> String {
-//RS     text.chars()
-//RS         .map(|ch| match ch {
-//RS             '─' | '━' | '═' => '-',
-//RS             '│' | '┃' | '║' => '|',
-//RS             '┌' | '┏' | '╔' | '┐' | '┓' | '╗' | '└' | '┗' | '╚' | '┘' | '┛' | '╝'
-//RS             | '├' | '┤' | '┬' | '┴' | '┼' | '╋' | '╬' => '+',
-//RS             '→' | '⇒' | '➜' => '>',
-//RS             '←' | '⇐' => '<',
-//RS             '↑' | '⇑' => '^',
-//RS             '↓' | '⇓' => 'v',
-//RS             ch if ch.is_ascii() => ch,
-//RS             _ => '?',
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn strip_ansi(text: &str) -> String {
-//RS     let mut output = String::with_capacity(text.len());
-//RS     let mut escape = false;
-//RS     for ch in text.chars() {
-//RS         if escape {
-//RS             if ch.is_ascii_alphabetic() || ch == '@' {
-//RS                 escape = false;
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if ch == '\x1b' {
-//RS             escape = true;
-//RS         } else {
-//RS             output.push(ch);
-//RS         }
-//RS     }
-//RS     output
-//RS }
-//RS 
-//RS pub fn char_width(ch: char) -> usize {
-//RS     if ch.is_control()
-//RS         || matches!(
-//RS             ch,
-//RS             '\u{0300}'..='\u{036f}'
-//RS                 | '\u{0483}'..='\u{0489}'
-//RS                 | '\u{0591}'..='\u{05bd}'
-//RS                 | '\u{0610}'..='\u{061a}'
-//RS                 | '\u{064b}'..='\u{065f}'
-//RS                 | '\u{1ab0}'..='\u{1aff}'
-//RS                 | '\u{1dc0}'..='\u{1dff}'
-//RS                 | '\u{20d0}'..='\u{20ff}'
-//RS                 | '\u{fe20}'..='\u{fe2f}'
-//RS         )
-//RS     {
-//RS         return 0;
-//RS     }
-//RS     if matches!(
-//RS         ch,
-//RS         '\u{1100}'..='\u{115f}'
-//RS             | '\u{2329}'..='\u{232a}'
-//RS             | '\u{2e80}'..='\u{303e}'
-//RS             | '\u{3040}'..='\u{a4cf}'
-//RS             | '\u{ac00}'..='\u{d7a3}'
-//RS             | '\u{f900}'..='\u{faff}'
-//RS             | '\u{fe10}'..='\u{fe19}'
-//RS             | '\u{fe30}'..='\u{fe6f}'
-//RS             | '\u{ff00}'..='\u{ff60}'
-//RS             | '\u{ffe0}'..='\u{ffe6}'
-//RS             | '\u{1f300}'..='\u{1faff}'
-//RS     ) {
-//RS         2
-//RS     } else {
-//RS         1
-//RS     }
-//RS }
-//RS 
-//RS pub fn display_width(text: &str) -> usize {
-//RS     strip_ansi(text).chars().map(char_width).sum()
-//RS }
-//RS 
-//RS pub fn truncate(text: &str, width: usize) -> String {
-//RS     if width == 0 {
-//RS         return String::new();
-//RS     }
-//RS     let mut output = String::new();
-//RS     let mut used = 0;
-//RS     for ch in strip_ansi(text).chars() {
-//RS         let char_width = char_width(ch);
-//RS         if used + char_width > width {
-//RS             break;
-//RS         }
-//RS         output.push(ch);
-//RS         used += char_width;
-//RS     }
-//RS     output
-//RS }
-//RS 
-//RS pub fn pad(text: &str, width: usize) -> String {
-//RS     let text = truncate(text, width);
-//RS     let padding = width.saturating_sub(display_width(&text));
-//RS     format!("{text}{}", " ".repeat(padding))
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq)]
-//RS pub enum Constraint {
-//RS     Length(f64),
-//RS     Min(f64),
-//RS     Max(f64),
-//RS     Percent(f64),
-//RS     Fill(u16),
-//RS }
-//RS 
-//RS pub fn length(value: f64) -> Constraint {
-//RS     Constraint::Length(nonnegative(value))
-//RS }
-//RS 
-//RS pub fn min(value: f64) -> Constraint {
-//RS     Constraint::Min(nonnegative(value))
-//RS }
-//RS 
-//RS pub fn max(value: f64) -> Constraint {
-//RS     Constraint::Max(nonnegative(value))
-//RS }
-//RS 
-//RS pub fn percent(value: f64) -> Constraint {
-//RS     Constraint::Percent(if value.is_finite() {
-//RS         value.clamp(0.0, 100.0)
-//RS     } else {
-//RS         0.0
-//RS     })
-//RS }
-//RS 
-//RS pub fn fill(weight: f64) -> Constraint {
-//RS     Constraint::Fill(if weight.is_finite() {
-//RS         weight.max(0.0).round().min(u16::MAX as f64) as u16
-//RS     } else {
-//RS         0
-//RS     })
-//RS }
-//RS 
-//RS fn nonnegative(value: f64) -> f64 {
-//RS     if value.is_finite() {
-//RS         value.max(0.0)
-//RS     } else {
-//RS         0.0
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq)]
-//RS pub struct Rect {
-//RS     pub x: f64,
-//RS     pub y: f64,
-//RS     pub width: f64,
-//RS     pub height: f64,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum Direction {
-//RS     Horizontal,
-//RS     Vertical,
-//RS }
-//RS 
-//RS pub fn layout(area: Rect, direction: Direction, constraints: &[Constraint]) -> Vec<Rect> {
-//RS     if constraints.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     let total = match direction {
-//RS         Direction::Horizontal => nonnegative(area.width),
-//RS         Direction::Vertical => nonnegative(area.height),
-//RS     };
-//RS     let desired: Vec<f64> = constraints
-//RS         .iter()
-//RS         .map(|constraint| match constraint {
-//RS             Constraint::Length(value)
-//RS             | Constraint::Min(value)
-//RS             | Constraint::Max(value) => nonnegative(*value),
-//RS             Constraint::Percent(value) => total * nonnegative(*value).min(100.0) / 100.0,
-//RS             Constraint::Fill(_) => 0.0,
-//RS         })
-//RS         .collect();
-//RS     let desired_total: f64 = desired.iter().sum();
-//RS     let scale = if desired_total > total && desired_total > 0.0 {
-//RS         total / desired_total
-//RS     } else {
-//RS         1.0
-//RS     };
-//RS     let mut sizes: Vec<f64> = desired.iter().map(|value| value * scale).collect();
-//RS     let remaining = (total - sizes.iter().sum::<f64>()).max(0.0);
-//RS     let fill_weight: f64 = constraints
-//RS         .iter()
-//RS         .map(|constraint| match constraint {
-//RS             Constraint::Fill(weight) => f64::from(*weight),
-//RS             _ => 0.0,
-//RS         })
-//RS         .sum();
-//RS     if fill_weight > 0.0 {
-//RS         for (size, constraint) in sizes.iter_mut().zip(constraints.iter()) {
-//RS             if let Constraint::Fill(weight) = constraint {
-//RS                 *size = remaining * f64::from(*weight) / fill_weight;
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut cursor = 0.0;
-//RS     sizes
-//RS         .into_iter()
-//RS         .map(|size| {
-//RS             let frame = match direction {
-//RS                 Direction::Horizontal => Rect {
-//RS                     x: area.x + cursor,
-//RS                     y: area.y,
-//RS                     width: size,
-//RS                     height: area.height,
-//RS                 },
-//RS                 Direction::Vertical => Rect {
-//RS                     x: area.x,
-//RS                     y: area.y + cursor,
-//RS                     width: area.width,
-//RS                     height: size,
-//RS                 },
-//RS             };
-//RS             cursor += size;
-//RS             frame
-//RS         })
-//RS         .collect()
-//RS }
-// END-PORT-PENDING 0089 crates/jet-foundation/src/Prelude/TuiKernel.rs:1-386
-
+// Portable terminal presentation kernel; public carriers remain at their canonical Core owners.
+use core.tui.[TUIColorProfile, TUICapabilities, TUIColor, TUIStyle, TUIConstraint, TUIDirection]
+use core.ui.[Rect]
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:2 ColorProfile -> core.tui.TUIColorProfile
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:10 Capabilities -> core.tui.TUICapabilities
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:21
+pub fn capabilities(profile: TUIColorProfile, width: Int, height: Int) -> TUICapabilities Never! {
+    is_ascii :: profile == TUIColorProfile.ASCII
+    TUICapabilities{color_profile: profile, color: !is_ascii, unicode: !is_ascii, mouse: !is_ascii, resize: !is_ascii, clipboard: !is_ascii, width: width.max(1), height: height.max(1)}
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:36 Color -> core.tui.TUIColor
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:42
+pub fn color_ansi16(index: I64) -> TUIColor Never! { TUIColor.ANSI16(Int{index.clamp(I64{0}, I64{15})}) }
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:46
+pub fn color_ansi256(index: I64) -> TUIColor Never! { TUIColor.ANSI256(Int{index.clamp(I64{0}, I64{255})}) }
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:50
+pub fn color_rgb(red: I64, green: I64, blue: I64) -> TUIColor Never! {
+    TUIColor.RGB(Int{red.clamp(I64{0}, I64{255})}, Int{green.clamp(I64{0}, I64{255})}, Int{blue.clamp(I64{0}, I64{255})})
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:58
+fn rgb_ansi256(red: Int, green: Int, blue: Int) -> Int Never! {
+    cube :: fn(value: Int) -> Int Never! {
+        if value < 48 -> 0 else if value < 115 -> 1 else -> ((value - 55) / 40).min(5)
+    }
+    16 + 36 * cube(red) + 6 * cube(green) + cube(blue)
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:71
+fn rgb_ansi16(red: Int, green: Int, blue: Int) -> Int Never! {
+    bright :: if red.max(green).max(blue) > 170 -> 1 else -> 0
+    index := 0
+    if red > 96 -> index |= 1
+    if green > 96 -> index |= 2
+    if blue > 96 -> index |= 4
+    if index == 0 && red.max(green).max(blue) > 48 -> index = 7
+    index + bright * 8
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:89
+fn color_code(color: TUIColor, profile: TUIColorProfile, background: Bool) -> String Never! {
+    base :: if background -> 48 else -> 38
+    if profile == TUIColorProfile.ASCII -> return ""
+    if color == {
+        .RGB(red, green, blue) -> {
+            if profile == TUIColorProfile.TrueColor -> return "{base};2;{red};{green};{blue}"
+            if profile == TUIColorProfile.ANSI256 -> return "{base};5;{rgb_ansi256(red, green, blue)}"
+            color_code(TUIColor.ANSI16(rgb_ansi16(red, green, blue)), profile, background)
+        }
+        .ANSI256(index) -> {
+            if profile != TUIColorProfile.ANSI16 -> return "{base};5;{index}"
+            color_code(TUIColor.ANSI16(index % 16), profile, background)
+        }
+        .ANSI16(raw_index) -> {
+            index :: raw_index % 16
+            if profile != TUIColorProfile.ANSI16 -> return "{base};5;{index}"
+            if index < 8 -> "{base - 8 + index}" else -> "{base + 44 + index}"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:125 Style -> core.tui.TUIStyle
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:133
+pub fn style_text(text: String, style: TUIStyle, capabilities: TUICapabilities) -> String Never! {
+    rendered :: if capabilities.unicode -> text.to_string() else -> ascii(text)
+    if !capabilities.color || capabilities.color_profile == TUIColorProfile.ASCII -> return ^rendered
+    codes := [String]{}
+    if style.bold -> &codes.push("1")
+    if style.dim -> &codes.push("2")
+    if style.underline -> &codes.push("4")
+    if style.foreground == .Val(color) -> &codes.push(color_code(color, capabilities.color_profile, false))
+    if style.background == .Val(color) -> &codes.push(color_code(color, capabilities.color_profile, true))
+    if codes.is_empty() -> return ^rendered
+    escape :: String.from_bytes([U8]{U8{27}}) ?? panic("ASCII escape is UTF-8")
+    "{escape}[{codes.join(";")}m{rendered}{escape}[0m"
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:165
+pub fn ascii(text: String) -> String Never! {
+    output := ""
+    loop ch in text.chars() {
+        replacement :: if ch == {
+            '─' -> '-', '━' -> '-', '═' -> '-'
+            '│' -> '|', '┃' -> '|', '║' -> '|'
+            '┌' -> '+', '┏' -> '+', '╔' -> '+', '┐' -> '+', '┓' -> '+', '╗' -> '+'
+            '└' -> '+', '┗' -> '+', '╚' -> '+', '┘' -> '+', '┛' -> '+', '╝' -> '+'
+            '├' -> '+', '┤' -> '+', '┬' -> '+', '┴' -> '+', '┼' -> '+', '╋' -> '+', '╬' -> '+'
+            '→' -> '>', '⇒' -> '>', '➜' -> '>'
+            '←' -> '<', '⇐' -> '<', '↑' -> '^', '⇑' -> '^', '↓' -> 'v', '⇓' -> 'v'
+            else -> if ch.is_ascii() -> ch else -> '?'
+        }
+        &output.push(replacement)
+    }
+    ^output
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:182
+pub fn strip_ansi(text: String) -> String Never! {
+    output := String.with_capacity(text.bytes().len())
+    escape := false
+    loop ch in text.chars() {
+        if escape {
+            if ch.is_ascii_alphabetic() || ch == '@' -> escape = false
+            next
+        }
+        if U32{ch} == U32{27} -> escape = true
+        else -> &output.push(ch)
+    }
+    ^output
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:201
+pub fn char_width(ch: Char) -> Int Never! {
+    c :: U32{ch}
+    if ch.is_control()
+        || (c >= U32{0x0300} && c <= U32{0x036f})
+        || (c >= U32{0x0483} && c <= U32{0x0489})
+        || (c >= U32{0x0591} && c <= U32{0x05bd})
+        || (c >= U32{0x0610} && c <= U32{0x061a})
+        || (c >= U32{0x064b} && c <= U32{0x065f})
+        || (c >= U32{0x1ab0} && c <= U32{0x1aff})
+        || (c >= U32{0x1dc0} && c <= U32{0x1dff})
+        || (c >= U32{0x20d0} && c <= U32{0x20ff})
+        || (c >= U32{0xfe20} && c <= U32{0xfe2f}) -> return 0
+    if (c >= U32{0x1100} && c <= U32{0x115f})
+        || (c >= U32{0x2329} && c <= U32{0x232a})
+        || (c >= U32{0x2e80} && c <= U32{0x303e})
+        || (c >= U32{0x3040} && c <= U32{0xa4cf})
+        || (c >= U32{0xac00} && c <= U32{0xd7a3})
+        || (c >= U32{0xf900} && c <= U32{0xfaff})
+        || (c >= U32{0xfe10} && c <= U32{0xfe19})
+        || (c >= U32{0xfe30} && c <= U32{0xfe6f})
+        || (c >= U32{0xff00} && c <= U32{0xff60})
+        || (c >= U32{0xffe0} && c <= U32{0xffe6})
+        || (c >= U32{0x1f300} && c <= U32{0x1faff}) -> 2
+    else -> 1
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:238
+pub fn display_width(text: String) -> Int Never! {
+    total := 0
+    loop ch in strip_ansi(text).chars() -> total += char_width(ch)
+    total
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:242
+pub fn truncate(text: String, width: Int) -> String Never! {
+    if width == 0 -> return ""
+    output := ""
+    used := 0
+    loop ch in strip_ansi(text).chars() {
+        size :: char_width(ch)
+        if used + size > width -> break
+        &output.push(ch)
+        used += size
+    }
+    ^output
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:259
+pub fn pad(text: String, width: Int) -> String Never! {
+    clipped :: truncate(text, width)
+    padding :: (width - display_width(clipped)).max(0)
+    "{clipped}{" ".repeat(padding)}"
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:266 Constraint -> core.tui.TUIConstraint
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:274
+pub fn length(value: Float) -> TUIConstraint Never! { TUIConstraint.Length(nonnegative(value)) }
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:278
+pub fn min(value: Float) -> TUIConstraint Never! { TUIConstraint.Min(nonnegative(value)) }
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:282
+pub fn max(value: Float) -> TUIConstraint Never! { TUIConstraint.Max(nonnegative(value)) }
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:286
+pub fn percent(value: Float) -> TUIConstraint Never! {
+    TUIConstraint.Percent(if value.is_finite() -> value.clamp(0.0, 100.0) else -> 0.0)
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:294
+pub fn fill(weight: Float) -> TUIConstraint Never! {
+    bounded :: if weight.is_finite() -> weight.max(0.0).round().min(65535.0) else -> 0.0
+    TUIConstraint.Fill(bounded)
+}
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:302
+fn nonnegative(value: Float) -> Float Never! { if value.is_finite() -> value.max(0.0) else -> 0.0 }
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:311 Rect -> core.ui.Rect
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:319 Direction -> core.tui.TUIDirection
+// Rust: crates/jet-foundation/src/Prelude/TuiKernel.rs:324
+pub fn layout(area: Rect, direction: TUIDirection, constraints: View<TUIConstraint>) -> [Rect] Never! {
+    if constraints.is_empty() -> return []
+    total :: if direction == { .Horizontal -> nonnegative(area.width), .Vertical -> nonnegative(area.height) }
+    sizes := [Float].with_capacity(constraints.len())
+    desired_total := 0.0
+    fill_weight := 0.0
+    loop constraint in constraints {
+        desired :: if constraint == {
+            .Length(value) -> nonnegative(value)
+            .Min(value) -> nonnegative(value)
+            .Max(value) -> nonnegative(value)
+            .Percent(value) -> total * nonnegative(value).min(100.0) / 100.0
+            .Fill(weight) -> { fill_weight += weight; 0.0 }
+        }
+        &sizes.push(desired)
+        desired_total += desired
+    }
+    scale :: if desired_total > total && desired_total > 0.0 -> total / desired_total else -> 1.0
+    scaled_total := 0.0
+    loop index in 0..<sizes.len() { sizes[index] *= scale; scaled_total += sizes[index] }
+    remaining :: (total - scaled_total).max(0.0)
+    if fill_weight > 0.0 {
+        loop index in 0..<sizes.len() {
+            if constraints[index] == .Fill(weight) -> sizes[index] = remaining * weight / fill_weight
+        }
+    }
+    cursor := 0.0
+    frames := [Rect].with_capacity(sizes.len())
+    loop size in sizes {
+        frame :: if direction == {
+            .Horizontal -> Rect{x: area.x + cursor, y: area.y, width: size, height: area.height}
+            .Vertical -> Rect{x: area.x, y: area.y + cursor, width: area.width, height: size}
+        }
+        cursor += size
+        &frames.push(frame)
+    }
+    ^frames
+}

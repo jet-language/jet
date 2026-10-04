@@ -1,0 +1,588 @@
+// PORT-PENDING 2141 crates-jet-sema-src-sema-checkercore-types: crates/jet-sema/src/Sema/CheckerCore/types.rs:1-584
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use crate::Generics::substitute_type;
+//RS use crate::Sema::{Checker, TypeRegistry};
+//RS use crate::AST::Type;
+//RS use std::collections::HashMap;
+//RS impl<'a> Checker<'a> {
+//RS     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
+//RS     /// ordinary nominal and trait registries. The returned name is canonical
+//RS     /// for imported types; the error comes from the ordinary trait impl.
+//RS     pub(crate) fn checked_text_type_name(&self, name: &str) -> Option<(String, Type)> {
+//RS         let (import_ns, leaf) = Self::split_type_name(name);
+//RS         let owner = self.struct_owner_module(leaf, import_ns)?;
+//RS         let (registry, trait_reg, items) = if owner == self.module_idx {
+//RS             (self.registry, self.trait_reg, self.items)
+//RS         } else {
+//RS             let module = self.modules?.get(owner)?;
+//RS             (&module.registry, &module.trait_reg, module.items.as_slice())
+//RS         };
+//RS         if registry.distinct_base(leaf) != Some(&Type::String)
+//RS             || !trait_reg.implements_trait(leaf, crate::Generics::CHECKED_TEXT)
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let error = items.iter().find_map(|item| {
+//RS             let blocks = match item {
+//RS                 crate::AST::Item::Impl(implementation)
+//RS                     if implementation.type_name == leaf
+//RS                         && implementation.trait_name.as_deref()
+//RS                             == Some(crate::Generics::CHECKED_TEXT) =>
+//RS                 {
+//RS                     Some(implementation.assoc_type_impls.as_slice())
+//RS                 }
+//RS                 crate::AST::Item::Struct(definition) if definition.name == leaf => definition
+//RS                     .trait_impls
+//RS                     .iter()
+//RS                     .find(|block| block.trait_name == crate::Generics::CHECKED_TEXT)
+//RS                     .map(|block| block.assoc_type_impls.as_slice()),
+//RS                 crate::AST::Item::Enum(definition) if definition.name == leaf => definition
+//RS                     .trait_impls
+//RS                     .iter()
+//RS                     .find(|block| block.trait_name == crate::Generics::CHECKED_TEXT)
+//RS                     .map(|block| block.assoc_type_impls.as_slice()),
+//RS                 _ => None,
+//RS             }?;
+//RS             blocks
+//RS                 .iter()
+//RS                 .find(|(assoc, _, _)| assoc == "Error")
+//RS                 .map(|(_, _, ty)| ty.clone())
+//RS         })?;
+//RS         let canonical = if owner == self.module_idx {
+//RS             leaf.to_string()
+//RS         } else {
+//RS             self.canonical_nominal_name(owner, leaf)
+//RS         };
+//RS         Some((canonical, error))
+//RS     }
+//RS 
+//RS     // Card #2185 owns the library-defined checked-text surface; this predicate
+//RS     // is the shared consumer guard for every nominal assignment boundary.
+//RS     pub(crate) fn is_checked_text_type_name(&self, name: &str) -> bool {
+//RS         self.checked_text_type_name(name).is_some()
+//RS     }
+//RS 
+//RS     fn imported_nominal_type(&self, name: &str) -> Option<Type> {
+//RS         let (import_ns, leaf) = Self::split_type_name(name);
+//RS         let owner = self.struct_owner_module(leaf, import_ns)?;
+//RS         if owner == self.module_idx {
+//RS             return None;
+//RS         }
+//RS         let module = self.modules?.get(owner)?;
+//RS         if module.trait_reg.is_trait_name(leaf) && !module.registry.contains(leaf) {
+//RS             Some(Type::TraitObject(vec![leaf.to_string()]))
+//RS         } else if module.registry.contains(leaf) {
+//RS             let canonical = self.canonical_nominal_name(owner, leaf);
+//RS             Some(Type::Named(canonical))
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS     /// A struct field keeps its declared spelling in the registry, so a bare
+//RS     /// trait name there is still `Named`. Lift every declared trait name to
+//RS     /// the S48 trait value, as `resolve_type` does for signatures, against the
+//RS     /// field's owning module: `config.adapter: Adapter?` then dispatches and
+//RS     /// coerces exactly like an `Adapter?` parameter.
+//RS     pub(crate) fn owner_trait_values(&self, owner: usize, ty: Type) -> Type {
+//RS         let (registry, trait_reg) = if owner == self.module_idx {
+//RS             (self.registry, self.trait_reg)
+//RS         } else {
+//RS             match self.modules.and_then(|modules| modules.get(owner)) {
+//RS                 Some(module) => (&module.registry, &module.trait_reg),
+//RS                 None => return ty,
+//RS             }
+//RS         };
+//RS         let traits = std::cell::RefCell::new(HashMap::new());
+//RS         ty.map_named_types(&|name| {
+//RS             if trait_reg.traits.contains_key(name) && !registry.contains(name) {
+//RS                 traits
+//RS                     .borrow_mut()
+//RS                     .insert(name.to_string(), Type::TraitObject(vec![name.to_string()]));
+//RS             }
+//RS             None
+//RS         });
+//RS         let traits = traits.into_inner();
+//RS         if traits.is_empty() {
+//RS             ty
+//RS         } else {
+//RS             substitute_type(&ty, &traits)
+//RS         }
+//RS     }
+//RS 
+//RS     /// A source-owned `core.crypto` struct under its owner's canonical
+//RS     /// identity, the one its signatures and methods carry. Enums keep their
+//RS     /// leaf spelling so contextual `.Variant` inference is unchanged.
+//RS     fn core_crypto_struct_type(&self, name: &str) -> Option<Type> {
+//RS         let (import_ns, leaf) = Self::split_type_name(name);
+//RS         let owner = self.struct_owner_module(leaf, import_ns)?;
+//RS         let module = self.modules?.get(owner)?;
+//RS         if owner == self.module_idx || module.registry.enum_variants(leaf).is_some() {
+//RS             return None;
+//RS         }
+//RS         self.imported_nominal_type(name)
+//RS     }
+//RS 
+//RS     pub(crate) fn imported_nominal_head(&self, name: &str) -> String {
+//RS         if name.contains("::") {
+//RS             return name.to_string();
+//RS         }
+//RS         let (import_ns, leaf) = Self::split_type_name(name);
+//RS         if let Some(module) = import_ns.and_then(|alias| self.core_imports.get(alias)) {
+//RS             if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
+//RS                 return self
+//RS                     .core_nominal_shadowing_builtin(module, leaf)
+//RS                     .unwrap_or_else(|| leaf.to_string());
+//RS             }
+//RS         }
+//RS         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+//RS             return name.to_string();
+//RS         };
+//RS         if owner == self.module_idx {
+//RS             name.to_string()
+//RS         } else {
+//RS             self.canonical_nominal_name(owner, leaf)
+//RS         }
+//RS     }
+//RS 
+//RS     fn record_type_import_use(&mut self, ty: &Type) {
+//RS         let name = match ty {
+//RS             Type::Named(name) | Type::Apply { name, .. } => name,
+//RS             Type::TraitObject(names) => {
+//RS                 for name in names {
+//RS                     self.record_type_import_name_use(name);
+//RS                 }
+//RS                 return;
+//RS             }
+//RS             _ => return,
+//RS         };
+//RS         self.record_type_import_name_use(name);
+//RS     }
+//RS 
+//RS     pub(crate) fn record_type_import_name_use(&mut self, name: &str) {
+//RS         let alias = name.split_once('.').map_or(name, |(alias, _)| alias);
+//RS         if self.lookup(alias).is_none()
+//RS             && (self.core_imports.contains_key(alias)
+//RS                 || self.core_item_imports.contains_key(alias)
+//RS                 || self.imports.contains_key(alias)
+//RS                 || self
+//RS                     .name_ledger
+//RS                     .alias(self.module_idx, alias)
+//RS                     .is_some_and(|binding| binding.target_module.is_some()))
+//RS         {
+//RS             self.record_import_alias_use(alias);
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn resolve_type(&mut self, ty: Type) -> Type {
+//RS         self.record_type_import_use(&ty);
+//RS         match ty {
+//RS             // D-NUMOPS1: typed numeric heads such as `Float{…}` are
+//RS             // source spellings for primitive carriers, not nominal types.
+//RS             // Resolve them before ordinary nominal lookup so call seams
+//RS             // see `Type::Float` (and the matching fixed-width primitive).
+//RS             Type::Named(n) if crate::AST::numeric_type_from_name(&n).is_some() => {
+//RS                 crate::AST::numeric_type_from_name(&n).expect("numeric head was checked")
+//RS             }
+//RS             // D-ENC-DYN1=A+: `JSON`/`TOML`/`YAML`/`CSV` are type aliases over the one
+//RS             // dynamic `Data` value — canonicalize every alias to `Data` so they unify.
+//RS             Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {
+//RS                 Type::Named(crate::Syntax::TYPE_DATA.to_string())
+//RS             }
+//RS             // D-BOUND-HEAD1=A: the shared typed-head descriptor owns the
+//RS             // source-to-nominal spelling for URL (`Url` remains internal).
+//RS             Type::Named(n)
+//RS                 if crate::Syntax::typed_head_kind(&n)
+//RS                     .is_some_and(|kind| kind.internal_type_name() != n.as_str()) =>
+//RS             {
+//RS                 Type::Named(
+//RS                     crate::Syntax::typed_head_kind(&n)
+//RS                         .expect("descriptor guard checked above")
+//RS                         .internal_type_name()
+//RS                         .to_string(),
+//RS                 )
+//RS             }
+//RS             // ordinary generated enum declarations. Membership is decided by
+//RS             // the rule table, not a fixed leaf list, so it can't join the
+//RS             // generic Core-export table below.
+//RS             Type::Named(n)
+//RS                 if self
+//RS                     .core_item_imports
+//RS                     .get(&n)
+//RS                     .zip(self.core_imports.get(&n))
+//RS                     .is_some_and(|(item, module)| {
+//RS                         crate::Sema::CheckerCoreLib::core_module_type_item(module, item)
+//RS                     }) =>
+//RS             {
+//RS                 let module = self
+//RS                     .core_imports
+//RS                     .get(&n)
+//RS                     .expect("Core item imports have a module alias");
+//RS                 if module == "core.crypto" {
+//RS                     // Source-owned Core crypto types use the owner's canonical
+//RS                     // identity, the one its signatures and methods carry.
+//RS                     self.core_crypto_struct_type(&n).unwrap_or_else(|| {
+//RS                         crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
+//RS                     })
+//RS                 } else {
+//RS                     let item = self.core_item_imports.get(&n).map_or(n.as_str(), String::as_str);
+//RS                     match self.core_nominal_shadowing_builtin(module, item) {
+//RS                         Some(canonical) => Type::Named(canonical),
+//RS                         None => Type::Named(n),
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Type::Named(n)
+//RS                 if n.rsplit_once('.').is_some_and(|(alias, leaf)| {
+//RS                     self.core_imports.get(alias).is_some_and(|module| {
+//RS                         module == "core.compiler.lang"
+//RS                             && crate::Policy::rule_arg_declaration(leaf).is_some()
+//RS                     })
+//RS                 }) =>
+//RS             {
+//RS                 Type::Named(n.rsplit_once('.').unwrap().1.to_string())
+//RS             }
+//RS             // Every other qualified Core import (crypto, encoding, email,
+//RS             // env, ...) resolves through one table of module -> exported
+//RS             // leaves (`jet_foundation::CoreModuleExports`). Adding a Core
+//RS             // module's exported types needs a table row, not a match arm.
+//RS             Type::Named(n)
+//RS                 if n.rsplit_once('.').is_some_and(|(alias, leaf)| {
+//RS                     self.core_imports.get(alias).is_some_and(|module| {
+//RS                         jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some()
+//RS                     })
+//RS                 }) =>
+//RS             {
+//RS                 let (alias, leaf) = n.rsplit_once('.').unwrap();
+//RS                 let module = self.core_imports.get(alias).unwrap();
+//RS                 if module == "core.crypto" {
+//RS                     self.core_crypto_struct_type(&n).unwrap_or_else(|| {
+//RS                         crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf.to_string()))
+//RS                     })
+//RS                 } else {
+//RS                     match jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf) {
+//RS                         Some(jet_foundation::CoreModuleExports::CoreLeafKind::Plain)
+//RS                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Generic(_))
+//RS                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
+//RS                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::CryptoNominal)
+//RS                         | None => Type::Named(
+//RS                             self.core_nominal_shadowing_builtin(module, leaf)
+//RS                                 .unwrap_or_else(|| leaf.to_string()),
+//RS                         ),
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Type::Named(n)
+//RS                 if n.rsplit_once('.').is_some_and(|(alias, leaf)| {
+//RS                     self.imports.get(alias).is_some_and(|&idx| {
+//RS                         self.modules.is_some_and(|modules| {
+//RS                             modules[idx].registry.contains(leaf)
+//RS                                 || modules[idx].trait_reg.is_trait_name(leaf)
+//RS                         })
+//RS                     })
+//RS                 }) =>
+//RS             {
+//RS                 let (_, leaf) = n.rsplit_once('.').unwrap();
+//RS                 if self.modules.is_some_and(|modules| {
+//RS                     self.imports
+//RS                         .get(n.rsplit_once('.').unwrap().0)
+//RS                         .is_some_and(|&idx| modules[idx].trait_reg.is_trait_name(leaf))
+//RS                 }) {
+//RS                     Type::TraitObject(vec![leaf.to_string()])
+//RS                 } else {
+//RS                     self.imported_nominal_type(&n)
+//RS                         .unwrap_or_else(|| Type::Named(n))
+//RS                 }
+//RS             }
+//RS             Type::Named(n) if self.trait_reg.is_trait_name(&n) && !self.registry.contains(&n) => {
+//RS                 Type::TraitObject(vec![n])
+//RS             }
+//RS             Type::Named(n) => self.imported_nominal_type(&n).unwrap_or(Type::Named(n)),
+//RS             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
+//RS             Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
+//RS             Type::Apply { name, args } => {
+//RS                 if self.registry.is_type_alias(&name) {
+//RS                     if let Some((params, target)) = self.registry.type_alias(&name) {
+//RS                         let subst: std::collections::HashMap<String, Type> = params
+//RS                             .iter()
+//RS                             .zip(args.iter().cloned())
+//RS                             .map(|(p, a)| (p.name.clone(), a))
+//RS                             .collect();
+//RS                         let expanded = substitute_type(target, &subst);
+//RS                         return self.resolve_type(expanded);
+//RS                     }
+//RS                 }
+//RS                 Type::Apply {
+//RS                     name: self.imported_nominal_head(&name),
+//RS                     args: args.into_iter().map(|a| self.resolve_type(a)).collect(),
+//RS                 }
+//RS             }
+//RS             Type::Option(inner) => Type::Option(Box::new(self.resolve_type(*inner))),
+//RS             Type::Map {
+//RS                 key,
+//RS                 key_span,
+//RS                 value,
+//RS             } => Type::Map {
+//RS                 key: Box::new(self.resolve_type(*key)),
+//RS                 key_span,
+//RS                 value: Box::new(self.resolve_type(*value)),
+//RS             },
+//RS             Type::Result { ok, err } => Type::Result {
+//RS                 ok: Box::new(self.resolve_type(*ok)),
+//RS                 err: Box::new(self.resolve_type(*err)),
+//RS             },
+//RS             Type::Tuple(fields) => Type::Tuple(
+//RS                 fields
+//RS                     .into_iter()
+//RS                     .map(|(n, t)| (n, Box::new(self.resolve_type(*t))))
+//RS                     .collect(),
+//RS             ),
+//RS             Type::FixedList { elem, len } => Type::FixedList {
+//RS                 elem: Box::new(self.resolve_type(*elem)),
+//RS                 len,
+//RS             },
+//RS             Type::InlineRange { base, lo, hi } => Type::InlineRange {
+//RS                 base: Box::new(self.resolve_type(*base)),
+//RS                 lo,
+//RS                 hi,
+//RS             },
+//RS             Type::Fn {
+//RS                 params,
+//RS                 ret,
+//RS                 effect_bound,
+//RS                 param_contract,
+//RS                 call_metadata,
+//RS                 return_view_provenance,
+//RS             } => Type::Fn {
+//RS                 params: params.into_iter().map(|ty| self.resolve_type(ty)).collect(),
+//RS                 ret: ret.map(|ty| Box::new(self.resolve_type(*ty))),
+//RS                 effect_bound,
+//RS                 param_contract,
+//RS                 call_metadata,
+//RS                 return_view_provenance,
+//RS             },
+//RS             Type::Tagged {
+//RS                 marker:
+//RS                     crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+//RS                 inner,
+//RS             } => Type::Tagged {
+//RS                 marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+//RS                 inner,
+//RS             },
+//RS             Type::Tagged { marker, inner } => Type::Tagged {
+//RS                 marker,
+//RS                 inner: Box::new(self.resolve_type(*inner)),
+//RS             },
+//RS             Type::Union(members) => crate::AST::canonicalize_union(
+//RS                 members.into_iter().map(|m| self.resolve_type(m)).collect(),
+//RS             ),
+//RS             Type::Int => Type::Int,
+//RS             Type::Float => Type::Float,
+//RS             Type::Bool => Type::Bool,
+//RS             Type::String => Type::String,
+//RS             Type::Char => Type::Char,
+//RS             Type::TraitObject(names) => Type::TraitObject(names),
+//RS             Type::IntN { signed, bits } => Type::IntN { signed, bits },
+//RS             Type::Float32 => Type::Float32,
+//RS             Type::Quantity { base, dimension } => Type::Quantity {
+//RS                 base: Box::new(self.resolve_type(*base)),
+//RS                 dimension,
+//RS             },
+//RS             Type::Measure(measure) => Type::Measure(measure),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Resolve a callable's declared return before projecting its failure
+//RS     /// carrier. A transparent alias may itself name a `Result`; projecting
+//RS     /// first would add the implicit default carrier around that result.
+//RS     pub(crate) fn checked_return_types(
+//RS         &mut self,
+//RS         return_type: Option<Type>,
+//RS         raw_protocol_return: bool,
+//RS     ) -> (Type, Type) {
+//RS         let has_declared_return = return_type.is_some();
+//RS         let declared = return_type.map(|ty| self.resolve_type(ty));
+//RS         let source = declared.clone().unwrap_or_else(|| {
+//RS             if raw_protocol_return {
+//RS                 Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())
+//RS             } else {
+//RS                 crate::AST::FailureContract::from_return_type(None).effective_type()
+//RS             }
+//RS         });
+//RS         let effective = if raw_protocol_return {
+//RS             source.clone()
+//RS         } else if has_declared_return {
+//RS             crate::AST::FailureContract::from_return_type(declared.as_ref()).effective_type()
+//RS         } else {
+//RS             source.clone()
+//RS         };
+//RS         (source, effective)
+//RS     }
+//RS 
+//RS     /// Publish the canonical declared return on the checked AST function so
+//RS     /// body checking, signatures, and TIR all project the same carrier.
+//RS     pub(crate) fn canonicalize_function_return_type(
+//RS         &mut self,
+//RS         function: &mut crate::AST::Func,
+//RS     ) {
+//RS         function.return_type = function.return_type.take().map(|ty| self.resolve_type(ty));
+//RS     }
+//RS 
+//RS     /// D-FAILURE-FOUNDATION1=A: validate an explicit failure domain after
+//RS     /// resolving source/import spellings. The local registry remains the
+//RS     /// source of truth; this method only selects the owning registry for a
+//RS     /// public imported nominal so validation does not reject a valid imported
+//RS     /// `#Error` type.
+//RS     pub(crate) fn is_error_domain(&self, ty: &Type) -> bool {
+//RS         fn visit(checker: &Checker<'_>, ty: &Type) -> bool {
+//RS             if checker.registry.is_error_domain(ty) {
+//RS                 return true;
+//RS             }
+//RS             match ty {
+//RS                 Type::Union(members) => {
+//RS                     !members.is_empty() && members.iter().all(|member| visit(checker, member))
+//RS                 }
+//RS                 Type::Named(name) => {
+//RS                     let (_, leaf) = Checker::split_type_name(name);
+//RS                     checker
+//RS                         .imported_error_registry(name)
+//RS                         .is_some_and(|registry| {
+//RS                             registry.is_error_domain(&Type::Named(leaf.to_string()))
+//RS                         })
+//RS                 }
+//RS                 Type::Apply { name, args } => {
+//RS                     let (_, leaf) = Checker::split_type_name(name);
+//RS                     checker
+//RS                         .imported_error_registry(name)
+//RS                         .is_some_and(|registry| {
+//RS                             registry.is_error_domain(&Type::Apply {
+//RS                                 name: leaf.to_string(),
+//RS                                 args: args.clone(),
+//RS                             })
+//RS                         })
+//RS                 }
+//RS                 _ => false,
+//RS             }
+//RS         }
+//RS 
+//RS         visit(self, ty)
+//RS     }
+//RS 
+//RS     fn imported_error_registry(&self, name: &str) -> Option<&TypeRegistry> {
+//RS         let (import_ns, leaf) = Self::split_type_name(name);
+//RS         let owner = self.struct_owner_module(leaf, import_ns)?;
+//RS         if owner == self.module_idx {
+//RS             Some(self.registry)
+//RS         } else {
+//RS             self.modules?.get(owner).map(|module| &module.registry)
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn type_param_has_bound(&self, ty: &Type, bound: &str) -> bool {
+//RS         match ty {
+//RS             Type::Named(n) => self
+//RS                 .type_param_scope
+//RS                 .iter()
+//RS                 .find(|p| p.name == *n)
+//RS                 .is_some_and(|p| p.bounds.iter().any(|b| b == bound)),
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn struct_subst(
+//RS         &self,
+//RS         type_name: &str,
+//RS         type_args: &[Type],
+//RS     ) -> HashMap<String, Type> {
+//RS         let (import_ns, leaf) = Self::split_type_name(type_name);
+//RS         if let Some(owner) = self.struct_owner_module(leaf, import_ns) {
+//RS             return self.struct_subst_for_owner(owner, leaf, type_args);
+//RS         }
+//RS         self.struct_subst_for_owner(self.module_idx, leaf, type_args)
+//RS     }
+//RS 
+//RS     /// The number of type parameters `owner_mod` declares for `type_name`.
+//RS     pub(crate) fn struct_type_param_count(&self, owner_mod: usize, type_name: &str) -> usize {
+//RS         let leaf = Self::split_type_name(type_name).1;
+//RS         if owner_mod == self.module_idx {
+//RS             self.trait_reg
+//RS                 .struct_params
+//RS                 .get(leaf)
+//RS                 .or_else(|| self.trait_reg.enum_params.get(leaf))
+//RS                 .map_or(0, |params| params.len())
+//RS         } else {
+//RS             self.modules
+//RS                 .and_then(|modules| modules.get(owner_mod))
+//RS                 .and_then(|module| {
+//RS                     module
+//RS                         .trait_reg
+//RS                         .struct_params
+//RS                         .get(leaf)
+//RS                         .or_else(|| module.trait_reg.enum_params.get(leaf))
+//RS                 })
+//RS                 .map_or(0, |params| params.len())
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn struct_subst_for_owner(
+//RS         &self,
+//RS         owner_mod: usize,
+//RS         type_name: &str,
+//RS         type_args: &[Type],
+//RS     ) -> HashMap<String, Type> {
+//RS         let leaf = Self::split_type_name(type_name).1;
+//RS         let params = if owner_mod == self.module_idx {
+//RS             self.trait_reg
+//RS                 .struct_params
+//RS                 .get(leaf)
+//RS                 .or_else(|| self.trait_reg.enum_params.get(leaf))
+//RS                 .cloned()
+//RS         } else {
+//RS             self.modules.and_then(|modules| {
+//RS                 modules.get(owner_mod).and_then(|module| {
+//RS                     module
+//RS                         .trait_reg
+//RS                         .struct_params
+//RS                         .get(leaf)
+//RS                         .or_else(|| module.trait_reg.enum_params.get(leaf))
+//RS                         .cloned()
+//RS                 })
+//RS             })
+//RS         }
+//RS         .unwrap_or_default();
+//RS         if params.is_empty() {
+//RS             return HashMap::new();
+//RS         }
+//RS         if type_args.is_empty() {
+//RS             params
+//RS                 .iter()
+//RS                 .map(|p| (p.name.clone(), Type::Named(p.name.clone())))
+//RS                 .collect()
+//RS         } else {
+//RS             params
+//RS                 .iter()
+//RS                 .zip(type_args.iter())
+//RS                 .map(|(p, a)| (p.name.clone(), a.clone()))
+//RS                 .collect()
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn instantiate_type_for_owner(
+//RS         &self,
+//RS         owner_mod: usize,
+//RS         ty: &Type,
+//RS         subst: &HashMap<String, Type>,
+//RS     ) -> Type {
+//RS         if owner_mod == self.module_idx {
+//RS             self.trait_reg.instantiate_type(ty, subst)
+//RS         } else {
+//RS             self.modules
+//RS                 .and_then(|modules| modules.get(owner_mod))
+//RS                 .map(|module| module.trait_reg.instantiate_type(ty, subst))
+//RS                 .unwrap_or_else(|| substitute_type(ty, subst))
+//RS         }
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2141 crates/jet-sema/src/Sema/CheckerCore/types.rs:1-584
+

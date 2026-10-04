@@ -1,0 +1,51 @@
+use JetFoundation.MatchScan.[str_match_scan, str_match_consumed, bin_match_scan, BinBind]
+use JetFoundation.AST.[StrMatchPart, BinMatchPart, BinSpec, BinEndian, Type]
+use JetFoundation.Diagnostics.[Span]
+// Rust: crates/jet-foundation/src/MatchScan.rs:194
+fn hole(name: String, ty: Type) -> StrMatchPart Never! {
+    StrMatchPart.Hole(name: name, ty: Val(ty), span: Span.new(0, 0))
+}
+// Rust: crates/jet-foundation/src/MatchScan.rs:203
+#Test("str_scan_binds_and_reports_consumption") {
+    parts :: [StrMatchPart]{.Lit("inc-"), hole("id", Type.Int), .Lit(" sev "), hole("sev", Type.Int), .Lit(": ")}
+    subject :: "inc-42 sev 3: disk full"
+    binds :: str_match_scan(subject, parts, true) ?? panic("consume-mode match")
+    assert(binds[0].2 == "42")
+    assert(binds[1].2 == "3")
+    assert(str_match_consumed(subject, parts) == Val(14))
+    assert(str_match_scan(subject, parts, false) == None)
+    assert(str_match_scan("inc-x sev 3: y", parts, true) == None)
+}
+// Rust: crates/jet-foundation/src/MatchScan.rs:223
+#Test("bin_scan_reads_widths_and_rest") {
+    parts :: [BinMatchPart]{
+        .Hole(name: "tag", spec: .Bits(width: 16, endian: BinEndian.Little), span: Span.new(0, 0)),
+        .Hole(name: "body", spec: .Rest, span: Span.new(0, 0))
+    }
+    bytes :: [U8]{1, 0, 9, 9}
+    (bits, binds) :: bin_match_scan(bytes.view(), parts, false) ?? panic("match")
+    assert(bits == 32)
+    assert(binds[0].2 == BinBind.Int(1))
+    assert(binds[1].2 == BinBind.Rest([U8]{9, 9}))
+}
+// Rust: crates/jet-foundation/src/MatchScan.rs:246
+#Test("bin_scan_reads_new_byte_widths_both_endians_and_rejects_short_input") {
+    cases :: [(U8,[U8],Int,Int)]{
+        (24, [U8]{1, 2, 3}, 66051, 197121),
+        (40, [U8]{1, 2, 3, 4, 5}, 4328719365, 21542142465),
+        (48, [U8]{1, 2, 3, 4, 5, 6}, 1108152157446, 6618611909121),
+        (56, [U8]{1, 2, 3, 4, 5, 6, 7}, 283686952306183, 1976943448883713)
+    }
+    loop (width, bytes, big, little) in cases {
+        loop (endian, expected) in [(BinEndian,Int)]{(BinEndian.Big, big), (BinEndian.Little, little)} {
+            parts :: [BinMatchPart]{.Hole(name: "value", spec: .Bits(width: width, endian: endian), span: Span.new(0, 0))}
+            (bits, binds) :: bin_match_scan(bytes.view(), parts, false) ?? panic("full-width match")
+            assert(bits == width as Int)
+            carrier :: if width <= 32 { 32 } else { 64 }
+            assert(binds[0].1 == Type.IntN(signed: false, bits: carrier))
+            assert(binds[0].2 == BinBind.Int(expected))
+            assert(bin_match_scan([U8]{}.view(), parts, false) == None)
+            assert(bin_match_scan(bytes.view(0..<bytes.len() - 1), parts, false) == None)
+        }
+    }
+}

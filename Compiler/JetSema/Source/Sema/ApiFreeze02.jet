@@ -1,0 +1,1462 @@
+// PORT-PENDING 2108 crates-jet-sema-src-sema-apifreeze: crates/jet-sema/src/Sema/ApiFreeze.rs:1-1458
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! S2/D-MEM1 (was c129/D-CAP4/D-CAP6/D-CAP8): snapshot a library target's
+//RS //! public-fn surface into durable interface metadata, unconditionally on
+//RS //! every publish — pub-metadata semver diffing (feeds E1218/E2601). The
+//RS //! former `api: stable|explicit` opt-in gate and the capability-tier
+//RS //! freeze/drift check (E0912, elevation-based) are retired: a param's sigil
+//RS //! is decided at parse time and never drifts silently, so there is nothing
+//RS //! left to freeze at that tier — only an ordinary public-signature diff.
+//RS //!
+//RS //! Format (std-only, lockfile-style — no serde, I6):
+//RS //!
+//RS //! ```text
+//RS //! api_version = 3
+//RS //! package = mathkit
+//RS //! published_version = 1.2.0
+//RS //! fn scale(v: &Vec3, factor: Float)
+//RS //! fn length(v: Vec3) Float
+//RS //! ```
+//RS //!
+//RS //! Each `fn` line is the canonical signature: every public function's
+//RS //! parameter list carries its D-MEM1 sigil (`&`/`^`/`*`; plain read emits
+//RS //! none) plus the return type. The struct/enum/trait surface is diffed
+//RS //! separately by the SemVer API check (`Publish::diff_public_api`); this
+//RS //! snapshot is the *function-signature* surface specifically.
+//RS //!
+//RS //! Lives at `.jet/cache/api/<package>.api` (committed, durable contract — the same
+//RS //! discipline as the D-MIGRATE1 `#PublishedSchema` snapshot).
+//RS 
+//RS use crate::Sema::{inline_effect_key, EffectSet};
+//RS use crate::Syntax;
+//RS use crate::AST::{Func, Item, TraitMethodSig, Type};
+//RS use std::collections::HashMap;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS pub const API_SNAPSHOT_VERSION: u32 = 3;
+//RS 
+//RS /// One frozen public function in a package's capability API.
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct FrozenFn {
+//RS     pub name: String,
+//RS     /// The canonical capability signature, e.g. `fn scale(v: &Vec3, factor: Float)`.
+//RS     /// Carries the resolved D-MEM1 sigils that the caller must honour.
+//RS     pub signature: String,
+//RS }
+//RS 
+//RS /// The frozen public-capability surface of one package's library target.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct ApiSnapshot {
+//RS     pub api_version: u32,
+//RS     pub package: String,
+//RS     pub published_version: String,
+//RS     /// Public functions, sorted by name for a stable diff.
+//RS     pub funcs: Vec<FrozenFn>,
+//RS }
+//RS 
+//RS impl ApiSnapshot {
+//RS     /// Serialise to the lockfile-style text format.
+//RS     pub fn write(&self) -> String {
+//RS         let mut out = String::new();
+//RS         out.push_str(&format!("api_version = {}\n", self.api_version));
+//RS         out.push_str(&format!("package = {}\n", self.package));
+//RS         out.push_str(&format!("published_version = {}\n", self.published_version));
+//RS         for f in &self.funcs {
+//RS             out.push_str(&f.signature);
+//RS             out.push('\n');
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     /// Parse from the lockfile-style text format.
+//RS     pub fn parse(raw: &str) -> Result<Self, String> {
+//RS         let mut api_version: Option<u32> = None;
+//RS         let mut package: Option<String> = None;
+//RS         let mut published_version: Option<String> = None;
+//RS         let mut funcs = Vec::new();
+//RS 
+//RS         for line in raw.lines() {
+//RS             let line = line.trim();
+//RS             if line.is_empty() {
+//RS                 continue;
+//RS             }
+//RS             if let Some(rest) = line.strip_prefix("api_version = ") {
+//RS                 api_version = Some(
+//RS                     rest.parse()
+//RS                         .map_err(|_| format!("invalid api_version: {}", rest))?,
+//RS                 );
+//RS             } else if let Some(rest) = line.strip_prefix("package = ") {
+//RS                 package = Some(rest.to_string());
+//RS             } else if let Some(rest) = line.strip_prefix("published_version = ") {
+//RS                 published_version = Some(rest.to_string());
+//RS             } else if line.starts_with("fn ") {
+//RS                 let name =
+//RS                     fn_name_of(line).ok_or_else(|| format!("malformed fn line: {}", line))?;
+//RS                 funcs.push(FrozenFn {
+//RS                     name,
+//RS                     signature: line.to_string(),
+//RS                 });
+//RS             } else {
+//RS                 return Err(format!("unknown line in api snapshot: {}", line));
+//RS             }
+//RS         }
+//RS 
+//RS         Ok(ApiSnapshot {
+//RS             api_version: api_version.ok_or("missing api_version")?,
+//RS             package: package.ok_or("missing package")?,
+//RS             published_version: published_version.ok_or("missing published_version")?,
+//RS             funcs,
+//RS         })
+//RS     }
+//RS 
+//RS     /// The concatenated, canonical text of every frozen `fn` signature, sorted by
+//RS     /// name. Folded into the package pin/hash (c129) so a capability change shifts
+//RS     /// the lock fingerprint. Excludes the version/package header so the hash tracks
+//RS     /// the *shape* of the contract, not the release number.
+//RS     pub fn capability_digest(&self) -> String {
+//RS         let mut sigs: Vec<&str> = self.funcs.iter().map(|f| f.signature.as_str()).collect();
+//RS         sigs.sort_unstable();
+//RS         sigs.join("\n")
+//RS     }
+//RS }
+//RS 
+//RS /// The public function name in a `fn name(...) ...` line, or `None`.
+//RS fn fn_name_of(line: &str) -> Option<String> {
+//RS     let rest = line.strip_prefix("fn ")?;
+//RS     let end = rest.find('(').unwrap_or(rest.len());
+//RS     let name = rest[..end].trim();
+//RS     if name.is_empty() {
+//RS         None
+//RS     } else {
+//RS         Some(name.to_string())
+//RS     }
+//RS }
+//RS 
+//RS /// The canonical capability signature of a public function — its parameter list
+//RS /// with frozen D-CAP7 sigils and the return type. Shared with the SemVer
+//RS /// `Publish::API` extractor (same surface; this one is exposed for the freeze).
+//RS pub fn fn_signature(f: &Func) -> String {
+//RS     canonical_fn_signature(f, &HashMap::new())
+//RS }
+//RS 
+//RS /// Concrete inferred effects plus symbolic contract entries that cannot be
+//RS /// closed until a call site (`..E`, `via f`) or that prohibit an effect.
+//RS pub fn normalized_public_effect_row(f: &Func, inferred: &EffectSet) -> EffectSet {
+//RS     let mut row = inferred.clone();
+//RS     if let Some(declared) = &f.declared_effects {
+//RS         row.extend(
+//RS             declared
+//RS                 .iter()
+//RS                 .map(|(name, _)| name)
+//RS                 .filter(|name| crate::Sema::effect_row_var(name).is_some() || name.starts_with('!'))
+//RS                 .cloned(),
+//RS         );
+//RS     }
+//RS     if let Some((param, _)) = &f.effect_via {
+//RS         row.insert(format!("via {param}"));
+//RS     }
+//RS     row
+//RS }
+//RS 
+//RS /// Canonical public signature with the normalized inferred row. Source may
+//RS /// omit the row, but published metadata may not: effect drift is API drift.
+//RS pub fn fn_signature_with_effects(f: &Func, inferred: Option<&EffectSet>) -> String {
+//RS     canonical_fn_signature_with_effects(f, inferred, &HashMap::new())
+//RS }
+//RS 
+//RS pub type ApiUnitDimensions = HashMap<String, String>;
+//RS 
+//RS pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> String {
+//RS     match ty {
+//RS         Type::Named(name) => dimensions
+//RS             .get(name)
+//RS             .map_or_else(|| ty.name(), |identity| format!("{name}{identity}")),
+//RS         Type::List(inner) => format!("[{}]", canonical_api_type_name(inner, dimensions)),
+//RS         Type::Map { key, value, .. } => format!(
+//RS             "[{}:{}]",
+//RS             canonical_api_type_name(key, dimensions),
+//RS             canonical_api_type_name(value, dimensions)
+//RS         ),
+//RS         Type::Shared(inner) => format!("Shared<{}>", canonical_api_type_name(inner, dimensions)),
+//RS         Type::Option(inner) => format!(
+//RS             "{}{}",
+//RS             canonical_api_marked_name(inner, dimensions),
+//RS             crate::Syntax::TYPE_OPTION_MARK
+//RS         ),
+//RS         Type::Result { ok, err } => {
+//RS             let default_error =
+//RS                 matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR);
+//RS             let unit_success =
+//RS                 matches!(ok.as_ref(), Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE);
+//RS             let contract = format!(
+//RS                 "{}{}",
+//RS                 canonical_api_marked_name(err, dimensions),
+//RS                 crate::Syntax::TYPE_FALLIBLE_MARK
+//RS             );
+//RS             if unit_success {
+//RS                 contract
+//RS             } else if default_error {
+//RS                 canonical_api_type_name(ok, dimensions)
+//RS             } else {
+//RS                 format!("{} {contract}", canonical_api_marked_name(ok, dimensions))
+//RS             }
+//RS         }
+//RS         Type::Fn {
+//RS             params,
+//RS             ret,
+//RS             effect_bound,
+//RS             ..
+//RS         } => {
+//RS             let params = params
+//RS                 .iter()
+//RS                 .map(|ty| canonical_api_type_name(ty, dimensions))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             let mut signature = format!("fn({params})");
+//RS             if let Some(ret) = ret {
+//RS                 signature.push(' ');
+//RS                 signature.push_str(&canonical_api_type_name(ret, dimensions));
+//RS             }
+//RS             if let Some(row) = effect_bound {
+//RS                 signature.push_str(" -[");
+//RS                 signature.push_str(
+//RS                     &row.iter()
+//RS                         .map(|(name, _)| name.as_str())
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", "),
+//RS                 );
+//RS                 signature.push_str("]>");
+//RS             }
+//RS             signature
+//RS         }
+//RS         Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
+//RS             format!("*{}", canonical_api_type_name(&args[0], dimensions))
+//RS         }
+//RS         Type::Apply { .. } if ty.quantity_parts().is_some() => ty.name(),
+//RS         Type::Apply { name, args } => format!(
+//RS             "{}<{}>",
+//RS             name,
+//RS             args.iter()
+//RS                 .map(|ty| canonical_api_type_name(ty, dimensions))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         ),
+//RS         Type::Tuple(fields) => format!(
+//RS             "({})",
+//RS             fields
+//RS                 .iter()
+//RS                 .map(|(name, ty)| format!("{name}: {}", canonical_api_type_name(ty, dimensions)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         ),
+//RS         Type::FixedList { elem, len } => format!(
+//RS             "[{}#{}]",
+//RS             canonical_api_type_name(elem, dimensions),
+//RS             len.expression()
+//RS         ),
+//RS         Type::Tagged { marker, inner }
+//RS             if matches!(
+//RS                 marker,
+//RS                 crate::AST::TagMarker::Internal(
+//RS                     crate::AST::InternalTag::CoreCryptoNominal
+//RS                         | crate::AST::InternalTag::TerminalFactSet
+//RS                 )
+//RS             ) =>
+//RS         {
+//RS             canonical_api_type_name(inner, dimensions)
+//RS         }
+//RS         Type::Tagged { marker, inner } => {
+//RS             format!("#{marker} {}", canonical_api_type_name(inner, dimensions))
+//RS         }
+//RS         Type::Union(members) => members
+//RS             .iter()
+//RS             .map(|member| canonical_api_type_name(member, dimensions))
+//RS             .collect::<Vec<_>>()
+//RS             .join(" | "),
+//RS         _ => ty.name(),
+//RS     }
+//RS }
+//RS 
+//RS /// D-TYPE-SUFFIX1=A: a type written before a suffix mark is grouped when the
+//RS /// mark would otherwise bind to its last member.
+//RS fn canonical_api_marked_name(ty: &Type, dimensions: &ApiUnitDimensions) -> String {
+//RS     let name = canonical_api_type_name(ty, dimensions);
+//RS     if matches!(
+//RS         ty,
+//RS         Type::Union(_) | Type::Fn { .. } | Type::Result { .. } | Type::Tagged { .. }
+//RS     ) {
+//RS         format!("({name})")
+//RS     } else {
+//RS         name
+//RS     }
+//RS }
+//RS 
+//RS pub fn canonical_fn_signature(f: &Func, dimensions: &ApiUnitDimensions) -> String {
+//RS     canonical_fn_signature_with_effects(f, None, dimensions)
+//RS }
+//RS 
+//RS pub fn canonical_fn_signature_with_effects(
+//RS     f: &Func,
+//RS     inferred: Option<&EffectSet>,
+//RS     dimensions: &ApiUnitDimensions,
+//RS ) -> String {
+//RS     let type_params = canonical_type_params(&f.type_params);
+//RS     let params: Vec<String> = f
+//RS         .params
+//RS         .iter()
+//RS         .map(|p| {
+//RS             format!(
+//RS                 "{}: {}{}",
+//RS                 p.name,
+//RS                 p.convention.sigil(),
+//RS                 canonical_api_type_name(&p.ty, dimensions)
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     let mut signature = format!("fn {}{}({})", f.name, type_params, params.join(", "));
+//RS     if let Some(return_type) = &f.return_type {
+//RS         signature.push(' ');
+//RS         signature.push_str(&canonical_api_type_name(return_type, dimensions));
+//RS     }
+//RS     if let Some(row) = inferred {
+//RS         signature.push_str(" -[");
+//RS         signature.push_str(
+//RS             &normalized_public_effect_row(f, row)
+//RS                 .iter()
+//RS                 .cloned()
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", "),
+//RS         );
+//RS         signature.push_str("]>");
+//RS     }
+//RS     let provenance = f
+//RS         .return_view_provenance
+//RS         .as_ref()
+//RS         .map_or_else(String::new, |map| {
+//RS             if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
+//RS                 format!(" ; view_source = {}", direct.canonical())
+//RS             } else {
+//RS                 format!(
+//RS                     " ; view_sources = {}",
+//RS                     crate::AST::canonical_view_provenance_map(map)
+//RS                 )
+//RS             }
+//RS         });
+//RS     signature.push_str(&provenance);
+//RS     let declared_never = f
+//RS         .return_type
+//RS         .as_ref()
+//RS         .is_some_and(Type::has_never_success);
+//RS     if declared_never || f.diverges {
+//RS         // D-NEVER2=B: freeze the written contract separately from the
+//RS         // inferred bottom fact. A declared `Never` can carry a real `Err`
+//RS         // route, while an inferred-only fact remains an advisory API hint.
+//RS         signature.push_str(&format!(
+//RS             " ; never_declared = {} ; never_inferred = {}",
+//RS             declared_never, f.diverges
+//RS         ));
+//RS     }
+//RS     signature
+//RS }
+//RS 
+//RS pub fn canonical_type_params(params: &[crate::AST::TypeParam]) -> String {
+//RS     if params.is_empty() {
+//RS         return String::new();
+//RS     }
+//RS     let params = params
+//RS         .iter()
+//RS         .map(|param| match param.bounds.as_slice() {
+//RS             [] => param.name.clone(),
+//RS             [bound] => format!("{}: {bound}", param.name),
+//RS             bounds => format!("{}: [{}]", param.name, bounds.join(", ")),
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     format!("<{params}>")
+//RS }
+//RS 
+//RS /// D-EFF3's public dynamic-dispatch contract. Unlike ordinary functions, a
+//RS /// trait method publishes its declared bound because callers cannot inspect a
+//RS /// concrete implementation through a trait value.
+//RS pub fn trait_method_signature(
+//RS     owner: &str,
+//RS     method: &TraitMethodSig,
+//RS     dimensions: &ApiUnitDimensions,
+//RS ) -> String {
+//RS     let params = method
+//RS         .params
+//RS         .iter()
+//RS         .map(|param| {
+//RS             format!(
+//RS                 "{}: {}{}",
+//RS                 param.name,
+//RS                 param.convention.sigil(),
+//RS                 canonical_api_type_name(&param.ty, dimensions)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let mut signature = format!("fn {owner}.{}({params})", method.name);
+//RS     if let Some(return_type) = &method.return_type {
+//RS         signature.push(' ');
+//RS         signature.push_str(&canonical_api_type_name(return_type, dimensions));
+//RS     }
+//RS     if let Some(row) = &method.declared_effects {
+//RS         signature.push_str(" -[");
+//RS         signature.push_str(
+//RS             &row.iter()
+//RS                 .map(|(name, _)| name.as_str())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", "),
+//RS         );
+//RS         signature.push_str("]>");
+//RS     }
+//RS     signature
+//RS }
+//RS 
+//RS /// Compare a new effect-bearing signature to a pre-v3 snapshot without
+//RS /// treating the metadata-format upgrade itself as an API break.
+//RS pub fn signature_without_effect_row(signature: &str) -> String {
+//RS     let (start, marker_len, close_marker, current) = if let Some(start) = signature.rfind(" -[") {
+//RS         (start, 3, "]>", true)
+//RS     } else if let Some(start) = signature.rfind(" =[") {
+//RS         (start, 3, "]=>", false)
+//RS     } else if let Some(start) = signature.rfind(" --[") {
+//RS         (start, 4, "]->", false)
+//RS     } else {
+//RS         return signature.to_string();
+//RS     };
+//RS     let Some(close) = signature[start + marker_len..].find(close_marker) else {
+//RS         return signature.to_string();
+//RS     };
+//RS     let end = start + marker_len + close + close_marker.len();
+//RS     let suffix = &signature[end..];
+//RS     if current {
+//RS         return format!("{}{}", &signature[..start], suffix);
+//RS     }
+//RS     let arrow = if suffix.starts_with(' ') { " ->" } else { "" };
+//RS     format!("{}{}{}", &signature[..start], arrow, suffix)
+//RS }
+//RS 
+//RS /// Pre-v3 snapshots keyed inline-module functions only by their leaf name.
+//RS pub fn legacy_api_name(name: &str) -> &str {
+//RS     name.rsplit('.').next().unwrap_or(name)
+//RS }
+//RS 
+//RS pub fn qualify_api_signature(namespace: Option<&str>, signature: &str) -> String {
+//RS     let Some(namespace) = namespace else {
+//RS         return signature.to_string();
+//RS     };
+//RS     signature
+//RS         .strip_prefix("fn ")
+//RS         .map(|rest| format!("fn {namespace}.{rest}"))
+//RS         .unwrap_or_else(|| signature.to_string())
+//RS }
+//RS 
+//RS pub fn legacy_api_signature(signature: &str) -> String {
+//RS     let signature = [
+//RS         ("Int (a whole number)", "Int"),
+//RS         ("Float (an approximate binary number)", "Float"),
+//RS         ("Bool (true or false)", "Bool"),
+//RS         ("String (text)", "String"),
+//RS         ("Char (one character)", "Char"),
+//RS         ("F32 (a 32-bit approximate binary number)", "F32"),
+//RS     ]
+//RS     .into_iter()
+//RS     .fold(
+//RS         signature_without_effect_row(signature),
+//RS         |signature, (old, new)| signature.replace(old, new),
+//RS     );
+//RS     let Some(rest) = signature.strip_prefix("fn ") else {
+//RS         return signature;
+//RS     };
+//RS     let Some(open) = rest.find('(') else {
+//RS         return signature;
+//RS     };
+//RS     format!("fn {}{}", legacy_api_name(&rest[..open]), &rest[open..])
+//RS }
+//RS 
+//RS fn frozen_name(code_module: Option<&str>, name: &str) -> String {
+//RS     code_module
+//RS         .map(|module| format!("{module}.{name}"))
+//RS         .unwrap_or_else(|| name.to_string())
+//RS }
+//RS 
+//RS /// Build a pre-v3 compatibility snapshot from AST items without solved effect
+//RS /// facts. Current publish metadata must use [`snapshot_from_items_with_ledger`].
+//RS pub fn snapshot_from_items(items: &[Item], package: &str, version: &str) -> ApiSnapshot {
+//RS     snapshot_from_items_with_effects(items, package, version, None, None)
+//RS }
+//RS 
+//RS /// Build the public snapshot after sema has solved the bundle effect graph.
+//RS pub fn snapshot_from_items_with_effects(
+//RS     items: &[Item],
+//RS     package: &str,
+//RS     version: &str,
+//RS     solved: Option<&std::collections::HashMap<String, EffectSet>>,
+//RS     module_alias: Option<&str>,
+//RS ) -> ApiSnapshot {
+//RS     snapshot_from_items_with_context(items, package, version, solved, module_alias, 0, None)
+//RS }
+//RS 
+//RS /// Build current publish metadata from sema's one name ledger.
+//RS pub fn snapshot_from_items_with_ledger(
+//RS     items: &[Item],
+//RS     package: &str,
+//RS     version: &str,
+//RS     solved: Option<&std::collections::HashMap<String, EffectSet>>,
+//RS     module_alias: Option<&str>,
+//RS     module_idx: usize,
+//RS     ledger: &crate::AST::NameLedger,
+//RS ) -> ApiSnapshot {
+//RS     snapshot_from_items_with_context(
+//RS         items,
+//RS         package,
+//RS         version,
+//RS         solved,
+//RS         module_alias,
+//RS         module_idx,
+//RS         Some(ledger),
+//RS     )
+//RS }
+//RS 
+//RS fn snapshot_from_items_with_context(
+//RS     items: &[Item],
+//RS     package: &str,
+//RS     version: &str,
+//RS     solved: Option<&std::collections::HashMap<String, EffectSet>>,
+//RS     module_alias: Option<&str>,
+//RS     module_idx: usize,
+//RS     ledger: Option<&crate::AST::NameLedger>,
+//RS ) -> ApiSnapshot {
+//RS     let mut funcs = Vec::new();
+//RS     let mut dimensions = HashMap::new();
+//RS     collect_api_unit_dimensions(items, package, &mut dimensions);
+//RS     collect_pub_fns(
+//RS         items,
+//RS         solved,
+//RS         module_alias,
+//RS         None,
+//RS         None,
+//RS         &dimensions,
+//RS         module_idx,
+//RS         ledger,
+//RS         &mut funcs,
+//RS     );
+//RS     funcs.sort();
+//RS     ApiSnapshot {
+//RS         // Effect rows became mandatory in v3. AST-only callers have no solved
+//RS         // effect graph, so they may create compatibility fixtures but cannot
+//RS         // claim current-format metadata.
+//RS         api_version: if solved.is_some() {
+//RS             API_SNAPSHOT_VERSION
+//RS         } else {
+//RS             API_SNAPSHOT_VERSION - 1
+//RS         },
+//RS         package: package.to_string(),
+//RS         published_version: version.to_string(),
+//RS         funcs,
+//RS     }
+//RS }
+//RS 
+//RS /// Recursively collect `pub fn`s from `items`, descending into inline
+//RS /// `module { … }` bodies. The package's own module block carries the library's
+//RS /// surface (`module foo { pub fn … }`) and need not itself be marked `pub`; it is
+//RS /// the `pub` on the *function* that puts it on the contract.
+//RS pub fn collect_api_unit_dimensions(items: &[Item], package: &str, out: &mut ApiUnitDimensions) {
+//RS     let mut resolved = HashMap::<String, crate::AST::Dimension>::new();
+//RS     for item in items {
+//RS         let Item::UnitFamily(family) = item else {
+//RS             continue;
+//RS         };
+//RS         if let Some(dimension) = family.resolved_dimension.clone() {
+//RS             resolved.insert(family.family.clone(), dimension);
+//RS         } else if matches!(
+//RS             family.dimension,
+//RS             Some(crate::AST::UnitDimensionDecl::Base(_))
+//RS         ) {
+//RS             resolved.insert(
+//RS                 family.family.clone(),
+//RS                 crate::AST::Dimension::base(format!("{package}::{}", family.family)),
+//RS             );
+//RS         }
+//RS     }
+//RS     loop {
+//RS         let mut progress = false;
+//RS         for item in items {
+//RS             let Item::UnitFamily(family) = item else {
+//RS                 continue;
+//RS             };
+//RS             if resolved.contains_key(&family.family) {
+//RS                 continue;
+//RS             }
+//RS             let Some(crate::AST::UnitDimensionDecl::Derived(expression)) = &family.dimension else {
+//RS                 continue;
+//RS             };
+//RS             let Some(dimension) = resolve_api_dimension(expression, &resolved) else {
+//RS                 continue;
+//RS             };
+//RS             resolved.insert(family.family.clone(), dimension);
+//RS             progress = true;
+//RS         }
+//RS         if !progress {
+//RS             break;
+//RS         }
+//RS     }
+//RS     for item in items {
+//RS         match item {
+//RS             Item::UnitFamily(family) => {
+//RS                 let dimension = resolved.get(&family.family).cloned();
+//RS                 // D-QUANTITY-DECL1=A: "API snapshots record dimension, base,
+//RS                 // scale, offset, and package provenance" — a scaled/affine
+//RS                 // family (explicit `base`) is API/SemVer identity on its own,
+//RS                 // whether or not it also claims a `dimension`. A dimension
+//RS                 // claim alone (no base — D-DIMENSION-OPEN1's plain-tag case
+//RS                 // reaching here through a derived-dimension member) still
+//RS                 // carries the erasure identity.
+//RS                 if dimension.is_none() && family.base.is_none() {
+//RS                     continue;
+//RS                 }
+//RS                 // The caller's `package` is the canonical provenance already
+//RS                 // resolved by the publish flow (doc comment on
+//RS                 // `extract_public_api_for_package`) and must win for a family
+//RS                 // declared in the checked bundle itself. `resolved_owner` only
+//RS                 // overrides it for the one genuine cross-boundary identity Sema
+//RS                 // stamps unconditionally: the standard Prelude catalog's
+//RS                 // reserved "core.units" owner (`Bundle/Units.rs`,
+//RS                 // `resolve_standard_unit_dimensions`), which every package
+//RS                 // shares by construction and must never be locally renamed.
+//RS                 let owner = match family.resolved_owner.as_deref() {
+//RS                     Some("core.units") => "core.units",
+//RS                     _ => package,
+//RS                 };
+//RS                 let base = family
+//RS                     .base
+//RS                     .as_ref()
+//RS                     .map(|base| crate::AST::UnitFamilyDef::type_name(&base.0));
+//RS                 let affine = family.base.is_some()
+//RS                     && family
+//RS                         .members
+//RS                         .iter()
+//RS                         .any(|member| member.offset != crate::AST::UnitRatio::zero());
+//RS                 for member in &family.members {
+//RS                     let names = if affine {
+//RS                         vec![
+//RS                             (
+//RS                                 format!(
+//RS                                     "{}Point",
+//RS                                     crate::AST::UnitFamilyDef::type_name(&member.name)
+//RS                                 ),
+//RS                                 member.offset.to_string(),
+//RS                             ),
+//RS                             (
+//RS                                 format!(
+//RS                                     "{}Delta",
+//RS                                     crate::AST::UnitFamilyDef::type_name(&member.name)
+//RS                                 ),
+//RS                                 "0".to_string(),
+//RS                             ),
+//RS                         ]
+//RS                     } else {
+//RS                         vec![(
+//RS                             crate::AST::UnitFamilyDef::type_name(&member.name),
+//RS                             member.offset.to_string(),
+//RS                         )]
+//RS                     };
+//RS                     for (name, offset) in names {
+//RS                         let identity = match (&base, &dimension) {
+//RS                             (None, Some(dimension)) => format!(
+//RS                                 "{{family={}; base=Float; dimension={}}}",
+//RS                                 family.family,
+//RS                                 dimension.identity()
+//RS                             ),
+//RS                             (Some(base), Some(dimension)) => format!(
+//RS                                 "{{package={owner}; family={}; base={base}; dimension={}; scale={}; provenance={}; offset={offset}}}",
+//RS                                 family.family,
+//RS                                 dimension.identity(),
+//RS                                 member.scale,
+//RS                                 unit_scale_provenance_identity(&member.scale_provenance)
+//RS                             ),
+//RS                             (Some(base), None) => format!(
+//RS                                 "{{package={owner}; family={}; base={base}; scale={}; provenance={}; offset={offset}}}",
+//RS                                 family.family,
+//RS                                 member.scale,
+//RS                                 unit_scale_provenance_identity(&member.scale_provenance)
+//RS                             ),
+//RS                             (None, None) => unreachable!("guarded above"),
+//RS                         };
+//RS                         out.insert(name, identity);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     collect_api_unit_dimensions(body, package, out);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn resolve_api_dimension(
+//RS     expression: &crate::AST::Expr,
+//RS     visible: &HashMap<String, crate::AST::Dimension>,
+//RS ) -> Option<crate::AST::Dimension> {
+//RS     match expression {
+//RS         crate::AST::Expr::Ident(name, _) => visible.get(name).cloned(),
+//RS         crate::AST::Expr::Binary(
+//RS             op @ (crate::AST::BinOp::Mul | crate::AST::BinOp::Div),
+//RS             left,
+//RS             right,
+//RS             _,
+//RS         ) => {
+//RS             let left = resolve_api_dimension(left, visible)?;
+//RS             let right = resolve_api_dimension(right, visible)?;
+//RS             if *op == crate::AST::BinOp::Mul {
+//RS                 left.multiply(&right)
+//RS             } else {
+//RS                 left.divide(&right)
+//RS             }
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn unit_scale_provenance_identity(provenance: &crate::AST::UnitScaleProvenance) -> String {
+//RS     match provenance {
+//RS         crate::AST::UnitScaleProvenance::Rational => "Rational".to_string(),
+//RS         crate::AST::UnitScaleProvenance::SymbolicPi {
+//RS             numerator,
+//RS             denominator,
+//RS         } => format!("SymbolicPi({numerator}/{denominator})"),
+//RS         crate::AST::UnitScaleProvenance::Conventional { value, source } => {
+//RS             format!("Conventional({value};{source})")
+//RS         }
+//RS         crate::AST::UnitScaleProvenance::Measured {
+//RS             central_value,
+//RS             standard_uncertainty,
+//RS             source,
+//RS         } => format!("Measured({central_value};{standard_uncertainty};{source})"),
+//RS     }
+//RS }
+//RS 
+//RS fn collect_pub_fns(
+//RS     items: &[Item],
+//RS     solved: Option<&std::collections::HashMap<String, EffectSet>>,
+//RS     module_alias: Option<&str>,
+//RS     semantic_module: Option<&str>,
+//RS     display_module: Option<&str>,
+//RS     dimensions: &ApiUnitDimensions,
+//RS     module_idx: usize,
+//RS     ledger: Option<&crate::AST::NameLedger>,
+//RS     out: &mut Vec<FrozenFn>,
+//RS ) {
+//RS     let empty_effects = EffectSet::new();
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f)
+//RS                 if crate::Syntax::classify_identifier(&f.name)
+//RS                     == crate::Syntax::IdentifierClass::Ordinary =>
+//RS             {
+//RS                 let ledger_name = semantic_module
+//RS                     .map(|module| jet_foundation::Names::member_name(module, &f.name))
+//RS                     .unwrap_or_else(|| f.name.clone());
+//RS                 let effect_name = semantic_module
+//RS                     .map(|module| inline_effect_key(module, &f.name))
+//RS                     .unwrap_or_else(|| f.name.clone());
+//RS                 let is_public = ledger
+//RS                     .map(|ledger| ledger.public(module_idx, &ledger_name))
+//RS                     .unwrap_or(f.is_pub && !f.is_package_pub);
+//RS                 if !is_public {
+//RS                     continue;
+//RS                 }
+//RS                 out.push(FrozenFn {
+//RS                     name: frozen_name(display_module, &f.name),
+//RS                     signature: qualify_api_signature(
+//RS                         display_module,
+//RS                         &canonical_fn_signature_with_effects(
+//RS                             f,
+//RS                             solved.map(|sets| {
+//RS                                 module_alias
+//RS                                     .and_then(|alias| sets.get(&format!("{alias}::{effect_name}")))
+//RS                                     .or_else(|| sets.get(&f.name))
+//RS                                     .unwrap_or(&empty_effects)
+//RS                             }),
+//RS                             dimensions,
+//RS                         ),
+//RS                     ),
+//RS                 });
+//RS             }
+//RS             Item::Trait(trait_def) => {
+//RS                 let ledger_name = semantic_module
+//RS                     .map(|module| jet_foundation::Names::member_name(module, &trait_def.name))
+//RS                     .unwrap_or_else(|| trait_def.name.clone());
+//RS                 let is_public = ledger
+//RS                     .map(|ledger| ledger.public(module_idx, &ledger_name))
+//RS                     .unwrap_or(trait_def.is_pub && !trait_def.is_package_pub);
+//RS                 if !is_public {
+//RS                     continue;
+//RS                 }
+//RS                 for method in &trait_def.methods {
+//RS                     if crate::Syntax::classify_identifier(&method.name)
+//RS                         == crate::Syntax::IdentifierClass::Ordinary
+//RS                     {
+//RS                         out.push(FrozenFn {
+//RS                             name: frozen_name(
+//RS                                 display_module,
+//RS                                 &format!("{}.{}", trait_def.name, method.name),
+//RS                             ),
+//RS                             signature: qualify_api_signature(
+//RS                                 display_module,
+//RS                                 &trait_method_signature(&trait_def.name, method, dimensions),
+//RS                             ),
+//RS                         });
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(m) => {
+//RS                 if let Some(body) = &m.body {
+//RS                     let nested_semantic_module = semantic_module
+//RS                         .map(|parent| jet_foundation::Names::member_name(parent, &m.name))
+//RS                         .unwrap_or_else(|| m.name.clone());
+//RS                     let nested_display_module = display_module
+//RS                         .map(|parent| format!("{parent}.{}", m.name))
+//RS                         .unwrap_or_else(|| m.name.clone());
+//RS                     collect_pub_fns(
+//RS                         body,
+//RS                         solved,
+//RS                         module_alias,
+//RS                         Some(&nested_semantic_module),
+//RS                         Some(&nested_display_module),
+//RS                         dimensions,
+//RS                         module_idx,
+//RS                         ledger,
+//RS                         out,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The API cache directory for a project (`<root>/.jet/cache/api/`), honouring the
+//RS /// `JET_API_CACHE_DIR` test override (mirrors the schema cache override).
+//RS pub fn api_cache_dir(project_root: &Path) -> PathBuf {
+//RS     if let Some(override_dir) = jet_foundation::CheckReads::env_var("JET_API_CACHE_DIR") {
+//RS         PathBuf::from(override_dir)
+//RS     } else {
+//RS         project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(Syntax::API_CACHE_SUBDIR)
+//RS     }
+//RS }
+//RS 
+//RS /// Load a package's frozen-API snapshot from disk, or `None` if no prior freeze.
+//RS pub fn load_snapshot(project_root: &Path, package: &str) -> Option<ApiSnapshot> {
+//RS     let path = api_cache_dir(project_root).join(format!("{}.api", package));
+//RS     let raw = jet_foundation::CheckReads::read_to_string(&path).ok()?;
+//RS     ApiSnapshot::parse(&raw).ok()
+//RS }
+//RS 
+//RS /// Write a snapshot to disk under `<project_root>/.jet/cache/api/`.
+//RS pub fn save_snapshot(project_root: &Path, snap: &ApiSnapshot) -> Result<(), String> {
+//RS     let dir = api_cache_dir(project_root);
+//RS     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create api cache dir: {}", e))?;
+//RS     let path = dir.join(format!("{}.api", snap.package));
+//RS     std::fs::write(&path, snap.write()).map_err(|e| format!("could not write api snapshot: {}", e))
+//RS }
+//RS 
+//RS /// Load every frozen-API snapshot in the project's api cache. Used to fold the
+//RS /// capability contract into the package pin/hash (c129).
+//RS pub fn load_all_snapshots(project_root: &Path) -> Vec<ApiSnapshot> {
+//RS     let dir = api_cache_dir(project_root);
+//RS     let mut out = Vec::new();
+//RS     if let Ok(entries) = jet_foundation::CheckReads::read_dir_sorted(&dir) {
+//RS         for path in entries {
+//RS             if path.extension().and_then(|x| x.to_str()) != Some("api") {
+//RS                 continue;
+//RS             }
+//RS             if let Ok(raw) = jet_foundation::CheckReads::read_to_string(&path) {
+//RS                 if let Ok(snap) = ApiSnapshot::parse(&raw) {
+//RS                     out.push(snap);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     out.sort_by(|a, b| a.package.cmp(&b.package));
+//RS     out
+//RS }
+//RS 
+//RS /// The combined capability digest of every frozen API in a project, sorted by
+//RS /// package then signature. Folded into the package fingerprint (`Lock`) so a
+//RS /// public capability change (read → `&`/`^`) shifts the lock hash even when
+//RS /// the source tree hash otherwise matches. Empty when nothing is frozen.
+//RS pub fn project_capability_digest(project_root: &Path) -> String {
+//RS     let snaps = load_all_snapshots(project_root);
+//RS     let mut parts = Vec::new();
+//RS     for s in &snaps {
+//RS         parts.push(format!("{}\n{}", s.package, s.capability_digest()));
+//RS     }
+//RS     parts.join("\n--\n")
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Unit tests
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use crate::Diagnostics::Span;
+//RS     use crate::AST::{
+//RS         AccessConvention, Func, Param, Type, UnitFamilyDef, UnitFamilyMember, UnitRatio,
+//RS     };
+//RS 
+//RS     fn zero() -> Span {
+//RS         Span::new(0, 0)
+//RS     }
+//RS 
+//RS     fn param(name: &str, conv: AccessConvention, ty: Type) -> Param {
+//RS         Param {
+//RS             convention: conv,
+//RS             root: false,
+//RS             name: name.to_string(),
+//RS             name_span: zero(),
+//RS             public_label: None,
+//RS             zone: crate::AST::ParamZone::Either,
+//RS             ty,
+//RS             ty_span: zero(),
+//RS             default: None,
+//RS             variadic: false,
+//RS             variadic_bound_list: None,
+//RS             declared_view_from_names: None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn func(name: &str, is_pub: bool, params: Vec<Param>, ret: Option<Type>) -> Func {
+//RS         Func {
+//RS             span: zero(),
+//RS             is_pub,
+//RS             is_comptime: false,
+//RS             is_package_pub: false,
+//RS             external_type: None,
+//RS             name: name.to_string(),
+//RS             name_span: zero(),
+//RS             meta: None,
+//RS             type_params: vec![],
+//RS             head_pattern: None,
+//RS             params,
+//RS             return_type: ret,
+//RS             return_type_span: None,
+//RS             return_view_provenance: None,
+//RS             declared_return_view_provenance: None,
+//RS             gc_return: false,
+//RS             diverges: false,
+//RS             gc_scope: false,
+//RS             is_unsafe: false,
+//RS             unsafe_reason: None,
+//RS             unsafe_span: None,
+//RS             is_pure: false,
+//RS             is_reactive: false,
+//RS             reactive_upgrades: Vec::new(),
+//RS             is_replayable: false,
+//RS             replayable_span: None,
+//RS             is_job: false,
+//RS             job_span: None,
+//RS             every: None,
+//RS             job_metadata: None,
+//RS             inline_foreign: None,
+//RS             undo: None,
+//RS             is_sanitizer: false,
+//RS             scrub_tag: None,
+//RS             declared_effects: None,
+//RS             effect_via: None,
+//RS             state_requires: None,
+//RS             state_transition: None,
+//RS             web_marker: None,
+//RS             pre: Vec::new(),
+//RS             post: Vec::new(),
+//RS             is_must_use: false,
+//RS             must_use_span: None,
+//RS             maturity: None,
+//RS             maturity_span: None,
+//RS             kernel: None,
+//RS             is_inline: false,
+//RS             is_inline_always: false,
+//RS             inline_span: None,
+//RS             markers: Vec::new(),
+//RS             compiler_generated: false,
+//RS             body: vec![],
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sig_carries_resolved_sigil() {
+//RS         let f = func(
+//RS             "scale",
+//RS             true,
+//RS             vec![
+//RS                 param("v", AccessConvention::Write, Type::Named("Vec3".into())),
+//RS                 param("factor", AccessConvention::Read, Type::Float),
+//RS             ],
+//RS             None,
+//RS         );
+//RS         assert_eq!(fn_signature(&f), "fn scale(v: &Vec3, factor: Float)");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sig_carries_normalized_inferred_effects() {
+//RS         let f = func("load", true, vec![], Some(Type::String));
+//RS         let effects = EffectSet::from(["FS.Read".to_string(), "IO".to_string()]);
+//RS         assert_eq!(
+//RS             fn_signature_with_effects(&f, Some(&effects)),
+//RS             "fn load() String -[FS.Read, IO]>"
+//RS         );
+//RS         assert_eq!(
+//RS             fn_signature_with_effects(&f, Some(&EffectSet::new())),
+//RS             "fn load() String -[]>"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn canonical_api_types_use_prefix_roles_in_alias_and_function_type_shapes() {
+//RS         let fallible = Type::Result {
+//RS             ok: Box::new(Type::Option(Box::new(Type::Int))),
+//RS             err: Box::new(Type::Union(vec![
+//RS                 Type::Named("DbError".into()),
+//RS                 Type::Named("TimeoutError".into()),
+//RS             ])),
+//RS         };
+//RS         assert_eq!(
+//RS             canonical_api_type_name(&fallible, &HashMap::new()),
+//RS             "?Int !(DbError | TimeoutError)"
+//RS         );
+//RS 
+//RS         let callback = Type::Fn {
+//RS             params: vec![fallible.clone()],
+//RS             ret: Some(Box::new(Type::Result {
+//RS                 ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.into())),
+//RS                 err: Box::new(Type::Named("IOError".into())),
+//RS             })),
+//RS             effect_bound: Some(Vec::new()),
+//RS             param_contract: None,
+//RS             call_metadata: None,
+//RS             return_view_provenance: None,
+//RS         };
+//RS         assert_eq!(
+//RS             canonical_api_type_name(&callback, &HashMap::new()),
+//RS             "fn(?Int !(DbError | TimeoutError)) !IOError -[]>"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn inline_module_snapshot_uses_mangled_effect_identity() {
+//RS         let module = Item::CodeModule(crate::AST::CodeModule {
+//RS             name: "files".to_string(),
+//RS             name_span: zero(),
+//RS             is_pub: false,
+//RS             is_package_pub: false,
+//RS             body: Some(vec![Item::Func(func(
+//RS                 "load",
+//RS                 true,
+//RS                 vec![],
+//RS                 Some(Type::String),
+//RS             ))]),
+//RS             imports: Vec::new(),
+//RS             web_target: None,
+//RS             instance_identity: None,
+//RS             span: zero(),
+//RS         });
+//RS         let solved = std::collections::HashMap::from([(
+//RS             "main::files__load".to_string(),
+//RS             EffectSet::from(["FS.Read".to_string()]),
+//RS         )]);
+//RS         let snapshot = snapshot_from_items_with_effects(
+//RS             &[module],
+//RS             "files",
+//RS             "1.0.0",
+//RS             Some(&solved),
+//RS             Some("main"),
+//RS         );
+//RS         assert_eq!(snapshot.funcs[0].name, "files.load");
+//RS         assert_eq!(snapshot.api_version, API_SNAPSHOT_VERSION);
+//RS         assert_eq!(
+//RS             snapshot.funcs[0].signature,
+//RS             "fn files.load() String -[FS.Read]>"
+//RS         );
+//RS         let parsed = ApiSnapshot::parse(&snapshot.write()).expect("v3 snapshot round trip");
+//RS         assert_eq!(parsed.funcs[0].name, "files.load");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pre_v3_comparison_normalizes_added_metadata_and_type_glosses() {
+//RS         assert_eq!(
+//RS             signature_without_effect_row("fn load() String -[FS.Read, IO]>"),
+//RS             "fn load() String"
+//RS         );
+//RS         assert_eq!(
+//RS             signature_without_effect_row("fn load(path: String) =[FS.Read, IO]=> String"),
+//RS             "fn load(path: String) -> String"
+//RS         );
+//RS         assert_eq!(
+//RS             signature_without_effect_row("fn flush() =[]=>"),
+//RS             "fn flush()"
+//RS         );
+//RS         assert_eq!(
+//RS             signature_without_effect_row("fn legacy() -> Int"),
+//RS             "fn legacy() -> Int"
+//RS         );
+//RS         assert_eq!(legacy_api_name("files.load"), "load");
+//RS         assert_eq!(
+//RS             legacy_api_signature("fn files.load() =[FS.Read]=> String"),
+//RS             "fn load() -> String"
+//RS         );
+//RS         assert_eq!(
+//RS             legacy_api_signature("fn report(x: Int (a whole number))"),
+//RS             "fn report(x: Int)"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sig_carries_normalized_physical_dimension_identity() {
+//RS         let speed = crate::AST::Dimension::base("api::Length")
+//RS             .divide(&crate::AST::Dimension::base("api::Time"))
+//RS             .unwrap();
+//RS         let f = func(
+//RS             "pace",
+//RS             true,
+//RS             vec![param(
+//RS                 "value",
+//RS                 AccessConvention::Read,
+//RS                 Type::quantity(Type::Float, speed.clone()),
+//RS             )],
+//RS             Some(Type::quantity(Type::Float, speed)),
+//RS         );
+//RS         assert_eq!(
+//RS             fn_signature(&f),
+//RS             "fn pace(value: Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>) Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn checked_source_unit_signature_carries_dimension_identity() {
+//RS         let family = UnitFamilyDef {
+//RS             is_pub: true,
+//RS             is_package_pub: false,
+//RS             family: "Length".into(),
+//RS             family_span: zero(),
+//RS             dimension: Some(crate::AST::UnitDimensionDecl::Base(zero())),
+//RS             resolved_dimension: Some(crate::AST::Dimension::base("api::Length")),
+//RS             resolved_owner: Some("api".into()),
+//RS             base: None,
+//RS             members: vec![UnitFamilyMember {
+//RS                 name: "meter".into(),
+//RS                 name_span: zero(),
+//RS                 scale: UnitRatio::integer(1),
+//RS                 scale_provenance: crate::AST::UnitScaleProvenance::Rational,
+//RS                 offset: UnitRatio::zero(),
+//RS             }],
+//RS             span: zero(),
+//RS         };
+//RS         let api = snapshot_from_items(
+//RS             &[
+//RS                 Item::UnitFamily(family),
+//RS                 Item::Func(func(
+//RS                     "distance",
+//RS                     true,
+//RS                     vec![],
+//RS                     Some(Type::Named("Meter".into())),
+//RS                 )),
+//RS             ],
+//RS             "physics",
+//RS             "1.0.0",
+//RS         );
+//RS         assert_eq!(
+//RS             api.funcs[0].signature,
+//RS             "fn distance() Meter{family=Length; base=Float; dimension=api%3A%3ALength:1}"
+//RS         );
+//RS         assert_eq!(api.api_version, API_SNAPSHOT_VERSION - 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sig_carries_parameter_view_provenance() {
+//RS         let mut f = func(
+//RS             "first",
+//RS             true,
+//RS             vec![param(
+//RS                 "xs",
+//RS                 AccessConvention::Read,
+//RS                 Type::List(Box::new(Type::Int)),
+//RS             )],
+//RS             Some(Type::Apply {
+//RS                 name: "View".into(),
+//RS                 args: vec![Type::Int],
+//RS             }),
+//RS         );
+//RS         f.return_view_provenance = Some(std::collections::BTreeMap::from([(
+//RS             Vec::new(),
+//RS             crate::AST::ViewProvenance {
+//RS                 sources: std::collections::BTreeSet::from([crate::AST::ViewSourcePath {
+//RS                     source: crate::AST::ViewSource::Parameter(0),
+//RS                     projections: vec![crate::AST::ViewSourceProjection::Range],
+//RS                 }]),
+//RS                 mutable: false,
+//RS             },
+//RS         )]));
+//RS         assert!(fn_signature(&f).contains("view_source = parameter:0;access:read;path:range"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn returned_view_source_round_trips_and_changes_contract() {
+//RS         let snapshot = |source_index| {
+//RS             let mut f = func(
+//RS                 "pick",
+//RS                 true,
+//RS                 vec![
+//RS                     param(
+//RS                         "left",
+//RS                         AccessConvention::Read,
+//RS                         Type::List(Box::new(Type::Int)),
+//RS                     ),
+//RS                     param(
+//RS                         "right",
+//RS                         AccessConvention::Read,
+//RS                         Type::List(Box::new(Type::Int)),
+//RS                     ),
+//RS                 ],
+//RS                 Some(Type::Apply {
+//RS                     name: "View".into(),
+//RS                     args: vec![Type::Int],
+//RS                 }),
+//RS             );
+//RS             f.return_view_provenance = Some(std::collections::BTreeMap::from([(
+//RS                 Vec::new(),
+//RS                 crate::AST::ViewProvenance {
+//RS                     sources: std::collections::BTreeSet::from([crate::AST::ViewSourcePath {
+//RS                         source: crate::AST::ViewSource::Parameter(source_index),
+//RS                         projections: vec![crate::AST::ViewSourceProjection::Range],
+//RS                     }]),
+//RS                     mutable: false,
+//RS                 },
+//RS             )]));
+//RS             snapshot_from_items(&[Item::Func(f)], "views", "1.0.0")
+//RS         };
+//RS 
+//RS         let left = snapshot(0);
+//RS         let right = snapshot(1);
+//RS         assert_eq!(ApiSnapshot::parse(&left.write()).unwrap(), left);
+//RS         assert_eq!(ApiSnapshot::parse(&right.write()).unwrap(), right);
+//RS         assert_ne!(left.capability_digest(), right.capability_digest());
+//RS         assert!(left.funcs[0]
+//RS             .signature
+//RS             .contains("view_source = parameter:0"));
+//RS         assert!(right.funcs[0]
+//RS             .signature
+//RS             .contains("view_source = parameter:1"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn aggregate_view_sources_round_trip_and_change_contract() {
+//RS         let snapshot = |right_source| {
+//RS             let mut f = func(
+//RS                 "pair",
+//RS                 true,
+//RS                 vec![
+//RS                     param(
+//RS                         "left",
+//RS                         AccessConvention::Read,
+//RS                         Type::List(Box::new(Type::Int)),
+//RS                     ),
+//RS                     param(
+//RS                         "right",
+//RS                         AccessConvention::Read,
+//RS                         Type::List(Box::new(Type::Int)),
+//RS                     ),
+//RS                 ],
+//RS                 Some(Type::Named("Pair".into())),
+//RS             );
+//RS             f.return_view_provenance = Some(std::collections::BTreeMap::from([
+//RS                 (
+//RS                     vec!["left".into()],
+//RS                     crate::AST::ViewProvenance {
+//RS                         sources: std::collections::BTreeSet::from([crate::AST::ViewSourcePath {
+//RS                             source: crate::AST::ViewSource::Parameter(0),
+//RS                             projections: vec![crate::AST::ViewSourceProjection::Range],
+//RS                         }]),
+//RS                         mutable: false,
+//RS                     },
+//RS                 ),
+//RS                 (
+//RS                     vec!["right".into()],
+//RS                     crate::AST::ViewProvenance {
+//RS                         sources: std::collections::BTreeSet::from([crate::AST::ViewSourcePath {
+//RS                             source: crate::AST::ViewSource::Parameter(right_source),
+//RS                             projections: vec![crate::AST::ViewSourceProjection::Range],
+//RS                         }]),
+//RS                         mutable: false,
+//RS                     },
+//RS                 ),
+//RS             ]));
+//RS             snapshot_from_items(&[Item::Func(f)], "views", "1.0.0")
+//RS         };
+//RS 
+//RS         let distinct = snapshot(1);
+//RS         let changed = snapshot(0);
+//RS         assert_eq!(ApiSnapshot::parse(&distinct.write()).unwrap(), distinct);
+//RS         assert_ne!(distinct.capability_digest(), changed.capability_digest());
+//RS         assert!(distinct.funcs[0].signature.contains(
+//RS             "view_sources = left=parameter:0;access:read;path:range|right=parameter:1;access:read;path:range"
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_union_is_public_and_identity_bearing() {
+//RS         let snapshot = |sources: &[usize]| {
+//RS             let mut f = func(
+//RS                 "choose",
+//RS                 true,
+//RS                 vec![
+//RS                     param(
+//RS                         "left",
+//RS                         AccessConvention::Read,
+//RS                         Type::List(Box::new(Type::Int)),
+//RS                     ),
+//RS                     param(
+//RS                         "right",
+//RS                         AccessConvention::Read,
+//RS                         Type::List(Box::new(Type::Int)),
+//RS                     ),
+//RS                 ],
+//RS                 Some(Type::Apply {
+//RS                     name: "View".into(),
+//RS                     args: vec![Type::Int],
+//RS                 }),
+//RS             );
+//RS             f.return_view_provenance = Some(std::collections::BTreeMap::from([(
+//RS                 Vec::new(),
+//RS                 crate::AST::ViewProvenance {
+//RS                     sources: sources
+//RS                         .iter()
+//RS                         .map(|index| crate::AST::ViewSourcePath {
+//RS                             source: crate::AST::ViewSource::Parameter(*index),
+//RS                             projections: vec![crate::AST::ViewSourceProjection::Range],
+//RS                         })
+//RS                         .collect(),
+//RS                     mutable: false,
+//RS                 },
+//RS             )]));
+//RS             snapshot_from_items(&[Item::Func(f)], "views", "1.0.0")
+//RS         };
+//RS 
+//RS         let one = snapshot(&[0]);
+//RS         let union = snapshot(&[0, 1]);
+//RS         assert_ne!(one.capability_digest(), union.capability_digest());
+//RS         assert!(union.funcs[0].signature.contains(
+//RS             "view_source = one_of(parameter:0;path:range,parameter:1;path:range);access:read"
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn round_trip() {
+//RS         let items = vec![
+//RS             Item::Func(func(
+//RS                 "length",
+//RS                 true,
+//RS                 vec![param(
+//RS                     "v",
+//RS                     AccessConvention::Read,
+//RS                     Type::Named("Vec3".into()),
+//RS                 )],
+//RS                 Some(Type::Float),
+//RS             )),
+//RS             Item::Func(func(
+//RS                 "scale",
+//RS                 true,
+//RS                 vec![param(
+//RS                     "v",
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("Vec3".into()),
+//RS                 )],
+//RS                 None,
+//RS             )),
+//RS             // private fn — excluded
+//RS             Item::Func(func("helper", false, vec![], None)),
+//RS             // D-SHAPE-INTERNAL1: callable but not a compatibility promise.
+//RS             Item::Func(func("_unstable", true, vec![], None)),
+//RS         ];
+//RS         let snap = snapshot_from_items(&items, "mathkit", "1.0.0");
+//RS         assert_eq!(snap.funcs.len(), 2);
+//RS         let text = snap.write();
+//RS         let parsed = ApiSnapshot::parse(&text).expect("round trips");
+//RS         assert_eq!(parsed, snap);
+//RS         // Sorted by name: length before scale.
+//RS         assert_eq!(parsed.funcs[0].name, "length");
+//RS         assert_eq!(parsed.funcs[1].name, "scale");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn digest_ignores_version() {
+//RS         let mk = |ver: &str| {
+//RS             let items = vec![Item::Func(func(
+//RS                 "scale",
+//RS                 true,
+//RS                 vec![param(
+//RS                     "v",
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("Vec3".into()),
+//RS                 )],
+//RS                 None,
+//RS             ))];
+//RS             snapshot_from_items(&items, "mathkit", ver).capability_digest()
+//RS         };
+//RS         assert_eq!(mk("1.0.0"), mk("2.5.9"), "digest tracks shape, not version");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn digest_shifts_on_capability_change() {
+//RS         let read = snapshot_from_items(
+//RS             &[Item::Func(func(
+//RS                 "scale",
+//RS                 true,
+//RS                 vec![param(
+//RS                     "v",
+//RS                     AccessConvention::Read,
+//RS                     Type::Named("Vec3".into()),
+//RS                 )],
+//RS                 None,
+//RS             ))],
+//RS             "mathkit",
+//RS             "1.0.0",
+//RS         );
+//RS         let write = snapshot_from_items(
+//RS             &[Item::Func(func(
+//RS                 "scale",
+//RS                 true,
+//RS                 vec![param(
+//RS                     "v",
+//RS                     AccessConvention::Write,
+//RS                     Type::Named("Vec3".into()),
+//RS                 )],
+//RS                 None,
+//RS             ))],
+//RS             "mathkit",
+//RS             "1.0.0",
+//RS         );
+//RS         assert_ne!(read.capability_digest(), write.capability_digest());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn parse_known_text() {
+//RS         let text = "api_version = 1\npackage = mk\npublished_version = 0.1.0\nfn f(x: &Int)\n";
+//RS         let snap = ApiSnapshot::parse(text).unwrap();
+//RS         assert_eq!(snap.package, "mk");
+//RS         assert_eq!(snap.funcs.len(), 1);
+//RS         assert_eq!(snap.funcs[0].name, "f");
+//RS         assert_eq!(snap.funcs[0].signature, "fn f(x: &Int)");
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2108 crates/jet-sema/src/Sema/ApiFreeze.rs:1-1458
+

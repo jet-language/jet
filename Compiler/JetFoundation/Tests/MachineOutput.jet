@@ -1,0 +1,73 @@
+use JetFoundation.MachineOutput.[read_machine_line, read_machine_output, MachineRecord]
+use JetFoundation.Report.[ReportEnvelope, StatusEnvelope, StatusValue, REPORT_SCHEMA]
+use JetFoundation.Diagnostics.[Severity]
+use JetFoundation.Registry.[diagnostic_rows]
+// Rust: crates/jet-foundation/src/MachineOutput.rs:152
+#Test("reader_accepts_status_and_report_json_lines") {
+    status :: StatusEnvelope.new("facts", true).with_field("facts", StatusValue.array([StatusValue]{})).json()
+    report :: ReportEnvelope.new("compile", "error", "E0001", "what", "why", "fix").json()
+    assert((read_machine_line(status) ?? panic("status rejected")) == MachineRecord.Status)
+    assert((read_machine_line(report) ?? panic("report rejected")) == MachineRecord.Report)
+    assert((read_machine_output("{status}\n{report}\n") ?? panic("output rejected")).len() == 2)
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:168
+#Test("reader_rejects_parallel_schema_versions") {
+    if read_machine_line("{\"schema_version\":1,\"facts\":[]}") == {
+        .Ok(_) -> panic("expected missing schema")
+        .Err(error) -> assert(error.contains("missing `schema`"))
+    }
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:174
+#Test("reader_rejects_legacy_report_schema") {
+    if read_machine_line("{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true}") == {
+        .Ok(_) -> panic("expected legacy schema rejection")
+        .Err(error) -> assert(error.contains("expected `{REPORT_SCHEMA}`"))
+    }
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:184
+#Test("reader_accepts_the_shared_browser_relay_envelope") {
+    relay :: StatusEnvelope.new("browser.relay", true).with_field("nonce", "nonce")
+        .with_field("pid", 42).with_field("started", "1").with_field("sources", "00").json()
+    row :: StatusEnvelope.new("browser.relay.row", true).with_field("start_ns", 10)
+        .with_field("duration_ns", 5).with_field("class", "event").with_field("symbol", "load").json()
+    truncated :: StatusEnvelope.new("browser.relay.truncated", true).json()
+    assert((read_machine_output("{relay}\n{row}\n{truncated}\n") ?? panic("relay rejected")) ==
+        [MachineRecord]{MachineRecord.BrowserRelay, MachineRecord.Status, MachineRecord.Status})
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:209
+#Test("every_registered_machine_surface_uses_one_reader") {
+    surfaces :: [(String,String)]{
+        ("diagnostics", ",\"diagnostics\":[]"), ("semindex", ",\"semindex\":{}"),
+        ("compiler", ",\"compiler\":{}"), ("canvas", ",\"canvas\":{}"),
+        ("structural_merge", ",\"structural_merge\":{}"), ("budget", ",\"budget\":{}"),
+        ("perf", ",\"perf\":{}"), ("gc", ",\"gc\":{}"),
+        ("browser.relay", ",\"browser\":{\"relay\":{}}"), ("status", ",\"status_report\":{}"),
+        ("review", ",\"review\":{}"), ("fill", ",\"fill\":{}"), ("import", ",\"import\":{}"),
+        ("inspect.dossier", ",\"dossier\":{}"), ("inspect.impact", ",\"impact\":{}"), ("inspect.live", ",\"live\":{}"),
+        ("fmt", ",\"fmt\":{}"), ("eval", ",\"value\":null"), ("coverage", ",\"coverage\":{}"),
+        ("test", ",\"test\":{}"), ("inspect.build", ",\"build\":{}"), ("inspect.parts", ",\"parts\":[]"),
+        ("inspect.gates", ",\"gates\":{}"), ("inspect.unsafe", ",\"gates\":[]"), ("find", ",\"matches\":[]"),
+        ("audit.copies", ",\"copies\":[]"), ("try", ",\"name\":\"example\""),
+        ("remote.bind", ",\"builder\":\"local\""), ("remote.list", ",\"builders\":[]")
+    }
+    lines := [String]{}
+    expected := [MachineRecord]{}
+    loop (action, fields) in surfaces {
+        trimmed := fields.trim_start_matches(",") // #4303
+        payload :: StatusValue.parse("{{{trimmed}}}") ?? panic("invalid surface fields")
+        lines.push(StatusEnvelope.new(action, true).with_field("payload", payload).json())
+        expected.push(if action == "browser.relay" { MachineRecord.BrowserRelay } else { MachineRecord.Status })
+    }
+    assert((read_machine_output(lines.join("\n")) ?? panic("surface output rejected")) == expected)
+}
+// Rust: crates/jet-foundation/src/MachineOutput.rs:267
+#Test("reader_accepts_every_registered_report_row") {
+    lines := [String]{}
+    loop row in diagnostic_rows() {
+        severity :: if row.severity == { .Error -> "error" .Lint -> "warning" }
+        lines.push(ReportEnvelope.new(row.moment.as_str(), severity, row.code, row.what, row.why, row.fix).json())
+    }
+    records :: read_machine_output(lines.join("\n")) ?? panic("registered report rejected")
+    assert(records.len() == diagnostic_rows().len())
+    assert(records.iter().all(fn(record) { record == MachineRecord.Report }))
+}

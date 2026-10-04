@@ -1,0 +1,1478 @@
+// PORT-PENDING 2049 crates-jet-codegen-src-codegen-mod-slice-3601: crates/jet-codegen/src/Codegen/mod.rs:3601-5074
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         // does not link. jet-jit and jet-comptime cut the same marked region.
+//RS         let part = if *part == MATH_TASK_MEM_PRELUDE {
+//RS             std::borrow::Cow::Owned(strip_source_shared_interop_jit(part))
+//RS         } else {
+//RS             std::borrow::Cow::Borrowed(*part)
+//RS         };
+//RS         // Host crates include UrlMime.rs directly, so it includes its sibling
+//RS         // MIME kernel. AOT already embeds that kernel as the preceding part.
+//RS         out.push_str(
+//RS             part.strip_prefix("    include!(\"Mime.rs\");\n\n")
+//RS                 .unwrap_or(&part),
+//RS         );
+//RS     }
+//RS     // Typed query plans are shared semantic facts. Keep the root-level
+//RS     // definitions available to JetStd's Query carrier even when no optional
+//RS     // DataFmt fragment is selected.
+//RS     out.push_str(&flat_prelude_body(CORE_LAZY_TABLE_PLAN_PRELUDE_RAW));
+//RS     // #1451: `Prelude/CommandSuite.rs` is an unconditional kernel part in the
+//RS     // loop above, so `jet_std::jet_test_suite_run` always exists. The TIR
+//RS     // emitter spells the `suite.run()` handle op unqualified at crate root and
+//RS     // never consults `used_core`: a program that only *receives* a `TestSuite`
+//RS     // (the `fn test` override body, which `--show-default` leaves in the
+//RS     // program as ordinary user code) reaches the runner without ever calling
+//RS     // `core.testing`. Gating these root adapters on `needs_fs_runtime` emitted
+//RS     // that call without its definition — rustc E0425 on generated code, an I2
+//RS     // compiler bug. So the adapters are pinned to the kernel part that defines
+//RS     // them: the harness carries `#![allow(warnings)]`, eight unused forwarders
+//RS     // cost nothing, and a definition that is never gated cannot drift from an
+//RS     // ungated use again (same fix shape as `push_package_edition`).
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/CommandSuite.rs"));
+//RS     // NEVER add `JetTaskFailure` here. `jet-foundation/src/Outcome.rs` declares
+//RS     // it and rides in `PRELUDE_PARTS`, so it is already a flat top-level item in
+//RS     // every generated program. Importing it into that same scope is E0255.
+//RS     // Flat fragments outside `mod jet_std` name it unqualified.
+//RS     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
+//RS     // D-SERDE-ACCESS=B: the Foundation carrier's accessors are a trait in the
+//RS     // kernel's `DataTree.rs`; flat user code calls them by method syntax.
+//RS     out.push_str("\npub use crate::jet_std::JetDataTreeAccess;\n");
+//RS     // CommonTypes' exact-Int formatting adapters are always emitted.
+//RS     out.push_str(include_str!("../Prelude/Core/Fmt.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/FmtAot.rs"));
+//RS     // D-EXEC1: the C-ABI export surface the Jet-native backend links. It
+//RS     // adapts carriers only; every export calls the Prelude function above.
+//RS     out.push_str(
+//RS         "\n// JET_VETTED_UNSAFE_BEGIN: jet_c_abi\n\
+//RS          // AUDIT: D-EXEC1 keeps the raw handle, byte-slice and allocator\n\
+//RS          // adapters of the Jet-native backend's runtime ABI in this module.\n",
+//RS     );
+//RS     out.push_str(include_str!("../Prelude/Core/CAbi.rs"));
+//RS     out.push_str("\n// JET_VETTED_UNSAFE_END: jet_c_abi\n");
+//RS     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
+//RS     // TerminalPolicy::default (in the kernel closure above) and by
+//RS     // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.
+//RS     // Unconditional like the kernel closure, so both can always reach it.
+//RS     out.push_str("\nmod terminal_default {\n");
+//RS     out.push_str(include_str!("../Prelude/TerminalDefault.rs"));
+//RS     out.push_str("\n}\n");
+//RS 
+//RS     let needs_email = core_usage_matches(used_core, &["core.email"]);
+//RS     let needs_raylib = core_usage_matches(used_core, &["core.game.raylib"]);
+//RS     let needs_game = core_usage_matches(used_core, &["core.game"]) || needs_raylib;
+//RS     let needs_text = core_usage_matches(used_core, &["core.text", "core.text.fmt", "core.term"]);
+//RS     let needs_crypto = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.crypto",
+//RS             "core.crypto.expert",
+//RS             "core.crypto.random",
+//RS             "core.crypto.vault",
+//RS             "core.crypto.uuid",
+//RS         ],
+//RS     );
+//RS     let needs_process = core_usage_matches(used_core, &["core.process"]);
+//RS     let needs_math = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.math",
+//RS             "core.math.random",
+//RS             "core.time",
+//RS             "core.time.expiring",
+//RS             "core.units",
+//RS         ],
+//RS     );
+//RS     let needs_encoding = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.encoding",
+//RS             "core.encoding.json",
+//RS             "core.encoding.jsonl",
+//RS             "core.encoding.csv",
+//RS             "core.encoding.toml",
+//RS             "core.encoding.yaml",
+//RS             "core.encoding.xml",
+//RS             "core.encoding.cbor",
+//RS             "core.encoding.hex",
+//RS             "core.archive.gzip",
+//RS             "core.archive.zstd",
+//RS         ],
+//RS     ) || needs_xml
+//RS         || needs_base;
+//RS     let needs_data = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.data",
+//RS             "core.data.sketch.hll",
+//RS             "core.data.sketch.tdigest",
+//RS             "core.data.sketch.cms",
+//RS             "core.data.sketch.reservoir",
+//RS             "core.db",
+//RS             "core.encoding.csv",
+//RS         ],
+//RS     );
+//RS     let needs_data_fmt = needs_data || needs_encoding;
+//RS     let needs_arrow =
+//RS         forces.arrow || core_usage_matches(used_core, &["core.data.arrow"]) || needs_data;
+//RS     if needs_arrow {
+//RS         push_prelude_dependency_closure(out, &["arrow_file_reader"]);
+//RS     }
+//RS     let needs_compute = core_usage_matches(used_core, &["core.compute"]);
+//RS     let needs_net = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.net",
+//RS             "core.net.tls",
+//RS             "core.http",
+//RS             "core.http.client",
+//RS             "core.http.server",
+//RS             "core.net.ws",
+//RS             "core.email",
+//RS             "core.web.browser",
+//RS             "core.web",
+//RS             "core.web.devserver",
+//RS             "core.web.storage",
+//RS             "core.web.storage.local",
+//RS             "core.web.storage.session",
+//RS         ],
+//RS     );
+//RS     let needs_http = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.http",
+//RS             "core.http.client",
+//RS             "core.http.server",
+//RS             "core.web",
+//RS             "core.web.devserver",
+//RS         ],
+//RS     );
+//RS     // D-LIVEQUERY1: live results use the existing core.net.ws writer path. Keep
+//RS     // the transport adapter in the same generated program whenever a live
+//RS     // surface can create or publish a query.
+//RS     let needs_ws = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.net.ws",
+//RS             "app",
+//RS             "core.web",
+//RS             "core.db",
+//RS             "core.http",
+//RS             "core.http.client",
+//RS             "core.http.server",
+//RS             "core.web.browser",
+//RS         ],
+//RS     );
+//RS     let needs_browser = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.web.browser",
+//RS             "core.web",
+//RS             "core.web.storage",
+//RS             "core.web.storage.local",
+//RS             "core.web.storage.session",
+//RS         ],
+//RS     );
+//RS     let needs_args = core_usage_matches(used_core, &["core.args"]);
+//RS     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.compiler.lang"]);
+//RS     let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
+//RS     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app", "core.web"]);
+//RS     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.web", "core.db"]);
+//RS     let needs_services = core_usage_matches(used_core, &["core.service"]);
+//RS     let needs_jobs = core_usage_matches(used_core, &["core.jobs"]);
+//RS     push_runtime_devtools_panel_preludes(
+//RS         out,
+//RS         policy.panel_code,
+//RS         core_usage_matches(used_core, &["core.ui", "core.devtools"]),
+//RS         needs_data_fmt,
+//RS         needs_http,
+//RS         needs_process || needs_fs_runtime || needs_http || needs_services,
+//RS     );
+//RS     let needs_mod = core_usage_matches(used_core, &["core.mod"]);
+//RS     if needs_mod {
+//RS         // The generated loader must compare against the compiler that emitted
+//RS         // this program. Keep the value in the shared Prelude, not in a host.
+//RS         out.push_str(&format!(
+//RS             "\nconst __JET_COMPILER_VERSION: &str = {:?};\n",
+//RS             env!("CARGO_PKG_VERSION")
+//RS         ));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Mod.rs"));
+//RS         out.push('\n');
+//RS     }
+//RS 
+//RS     // Kernel closure: JetStd brace-chain files name these Top symbols
+//RS     // (FileReader, text fold, JSON frames, TCPStream, deadlines, TLS entropy).
+//RS     // NetHTTP is TCP/TLS only — HTTP serve/router lives in HTTPServer (gated).
+//RS     // Keep the shared Raylib parser/transcript inside the existing marker so
+//RS     // unused programs can still remove the complete unsafe bridge.
+//RS     out.push_str("// jet:raylib-begin\n");
+//RS     out.push_str(include_str!("../Prelude/Core/Raylib.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/DbPool.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/Path.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/Codec.rs"));
+//RS     out.push_str(&flat_prelude_body(ENCODING_TRAITS_PRELUDE_RAW));
+//RS     // D-SOA2D: columnar-list transparency rides with the codec traits it names,
+//RS     // so it exists exactly when a program has encoding at all.
+//RS     out.push_str(include_str!("../Prelude/Core/ColumnListCodec.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/EncodingError.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/EncodingBase.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/SHA256Raw.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/SHAFamily.rs"));
+//RS     out.push_str("fn jet_log_write_line(line: &str) { eprintln!(\"{}\", line); }\n");
+//RS     out.push_str("fn jet_log_process_exit(code: i64) { std::process::exit(code as i32); }\n");
+//RS     out.push_str(include_str!("../Prelude/Core/LogState.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/Log.rs"));
+//RS     out.push_str(include_str!(
+//RS         "../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"
+//RS     ));
+//RS     out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_crypto_entropy\n");
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
+//RS     out.push_str("// JET_VETTED_UNSAFE_END: jet_crypto_entropy\n");
+//RS     out.push_str("use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n");
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
+//RS     out.push_str(include_str!("../Prelude/Deadline.rs"));
+//RS     out.push_str(include_str!("../Prelude/WorkflowWait.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/TimeSleep.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/WorkflowSleep.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/NetPure.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/NetError.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
+//RS     // Scheduler waits always call the deadline raiser, and FakeData below
+//RS     // always uses the seeded stream. They are kernel dependencies, not
+//RS     // conditional math surface.
+//RS     out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/StringBytes.rs"));
+//RS     out.push_str(include_str!("../Prelude/Core/TimeInstant.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
+//RS     out.push_str(include_str!("../Prelude/CoreLib/Top/FakeData.rs"));
+//RS 
+//RS     if needs_email {
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));
+//RS     }
+//RS     if needs_raylib {
+//RS         // File/DB/Plugin handles already emitted in the kernel closure above;
+//RS         // raylib-only when explicitly used stays a no-op re-include guard via
+//RS         // the same source (idempotent struct defs would conflict). Skip.
+//RS     }
+//RS     if needs_game {
+//RS         push_game_debug_policy_const(out, policy);
+//RS         // adapters; each is one flat source and none calls a host.
+//RS         out.push_str(&flat_prelude_body(CORE_GAME_DEV_KERNEL_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(CORE_GAME_ASSET_PIPELINE_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(CORE_GAME_HOT_SWAP_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(CORE_GAME_WORLD_INSPECTOR_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(CORE_GAME_FRAME_PROFILER_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(CORE_GAME_OVERLAY_PRELUDE_RAW));
+//RS         push_game_devtools_control_prelude(out);
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/GameDevProtocol.rs"));
+//RS         // Asset import hashing uses the raw SHA-256 helper emitted above.
+//RS         out.push_str(&flat_prelude_body(GAME_ASSETS_IMPORT_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(GAME_ASSETS_RUNTIME_PRELUDE_RAW));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Game.rs"));
+//RS     }
+//RS     if needs_files {
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
+//RS     }
+//RS     if needs_fs_runtime && !needs_files {
+//RS         // FSIoEnvOsTesting uses the Path value and atomic-write helpers even
+//RS         // for `core.testing`-only programs (for example `testing.snap`).
+//RS         // Keep that transitive prelude dependency in the shared closure.
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
+//RS     }
+//RS     if needs_text {
+//RS         // Text/Unicode already in kernel closure.
+//RS     }
+//RS     // Process helpers are also used by FSIoEnvOsTesting (`jet_process_command` /
+//RS     // `jet_process_spec_run_inner`) — emit whenever either surface is needed (I9).
+//RS     // Process must come before FSIoEnvOsTesting so those symbols are in scope.
+//RS     if needs_process || needs_fs_runtime {
+//RS         // Process.rs and FSIoEnvOsTesting share the one dispatcher support
+//RS         // source. Emit it before either adapter for process-only closures too.
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Interrupt.rs"));
+//RS         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_process_pty\n");
+//RS         out.push_str("\nmod jet_process_pty {\n");
+//RS         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
+//RS         out.push_str("\n}\n");
+//RS         out.push_str("// JET_VETTED_UNSAFE_END: jet_process_pty\n");
+//RS         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_process_sandbox\n");
+//RS         out.push_str("\nmod jet_process_sandbox {\n");
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSandbox.rs"));
+//RS         out.push_str(include_str!(
+//RS             "../Prelude/CoreLib/Top/ProcessWindowsSandbox.rs"
+//RS         ));
+//RS         out.push_str("\n}\n");
+//RS         out.push_str("// JET_VETTED_UNSAFE_END: jet_process_sandbox\n");
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessPolicy.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSpec.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
+//RS     }
+//RS     let needs_testing_history =
+//RS         forces.testing_history || core_usage_matches(used_core, &["core.testing"]);
+//RS     if needs_testing_history {
+//RS         // D-TEST-COMPARE1=A: every generated tier reaches the same Foundation
+//RS         // verdict engine.  The Top carrier only marshals checked callables and
+//RS         // observations into this embedded source module.
+//RS         out.push_str("\nmod jet_testing_comparison_foundation {\n");
+//RS         out.push_str(include_str!("../../../jet-foundation/src/TestingComparison.rs"));
+//RS         out.push_str("\n}\n");
+//RS         // The Foundation history module is embedded once beside the Top
+//RS         // adapter. Its host source names the canonical JSON and comparison
+//RS         // modules at crate root; these aliases keep generated native and Wasm
+//RS         // programs on that same source path without adding unused global
+//RS         // facade entries to programs that do not use core.testing.
+//RS         out.push_str(
+//RS             "\n#[allow(non_snake_case)]\nmod TestingComparison { pub use crate::jet_testing_comparison_foundation::*; }\n\
+//RS              #[allow(non_snake_case)]\nmod JSON {\n",
+//RS         );
+//RS         out.push_str(include_str!("../../../jet-foundation/src/JSON.rs"));
+//RS         out.push_str(
+//RS             "\n}\n// JET_VETTED_UNSAFE_BEGIN: jet_testing_history_foundation\n\
+//RS              // AUDIT: D-TEST-HISTORY1 and the Foundation SAFETY CONTRACT keep\n\
+//RS              // weak callback metadata non-owning and reads tied to live owners.\n\
+//RS              mod jet_testing_history_foundation {\n",
+//RS         );
+//RS         out.push_str(include_str!("../../../jet-foundation/src/TestingHistory.rs"));
+//RS         out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_testing_history_foundation\n");
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/TestingComparison.rs"));
+//RS         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_testing_history_top\n");
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/TestingHistory.rs"));
+//RS         out.push_str("\n// JET_VETTED_UNSAFE_END: jet_testing_history_top\n");
+//RS     }
+//RS     if needs_fs_runtime {
+//RS         if !omit_testing_shared {
+//RS             out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
+//RS         }
+//RS         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
+//RS         // `include!` this exact source (I9 — single Prelude source of truth).
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+//RS         // D-CONFIG-ENV1 / I9: source overlay and dotenv parsing are one
+//RS         // Prelude fragment for AOT and the interpreter ambient adapter.
+//RS         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
+//RS         out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
+//RS         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
+//RS         out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
+//RS         out.push_str(include_str!("../Prelude/Core/CollectionIoSources.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/FSWriteOps.rs"));
+//RS         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
+//RS         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
+//RS         // Vetted region: OsExtra carries POSIX `unsafe` at crate root (not only
+//RS         // inside `mod jet_os_sys`); golden I1 strips this delimiter.
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/PlatformFamily.rs"));
+//RS         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_os_extra\n");
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/OsExtra.rs"));
+//RS         out.push_str("// JET_VETTED_UNSAFE_END: jet_os_extra\n");
+//RS     }
+//RS     if needs_crypto {
+//RS         // CryptoEntropy already in kernel closure (TLS identity + JetStd).
+//RS     }
+//RS     if needs_math {
+//RS         // Math and random helpers first — LinalgFns and the rest of the math
+//RS         // surface call them. MathLibPure is shared with JIT/comptime (I9).
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/MathLibPure.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/MathComplexTraits.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomFns.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
+//RS     }
+//RS     if needs_encoding {
+//RS         // Encoding templates already in kernel closure.
+//RS     }
+//RS     if needs_data {
+//RS         out.push_str(&data_plot_prelude_body());
+//RS     }
+//RS     if needs_data_fmt {
+//RS         out.push_str(&data_query_prelude_source());
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
+//RS     }
+//RS     if needs_data {
+//RS         // #1657: the one `core.data` statistics kernel. The JIT host and the
+//RS         // comptime tier `include!` this same file, so every tier runs the same
+//RS         // compensated arithmetic and reports the same `DataError` (I9).
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/DataStats.rs"));
+//RS         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_data_flow\n");
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
+//RS         out.push_str("\n// JET_VETTED_UNSAFE_END: jet_data_flow\n");
+//RS     }
+//RS     if needs_compute {
+//RS         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_compute\n");
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Compute.rs"));
+//RS         out.push_str("\n// JET_VETTED_UNSAFE_END: jet_compute\n");
+//RS     }
+//RS     if needs_net {
+//RS         // DNS + NetHTTP (TCP/TLS) already in kernel closure.
+//RS     }
+//RS     if needs_http && !needs_sync {
+//RS         // HTTP handlers install the request identity for DB scopes when Sync
+//RS         // is present. Keep HTTP-only programs source-complete with a no-op
+//RS         // guard rather than making the HTTP prelude depend on core.sync.
+//RS         out.push_str(
+//RS             "struct JetDbRequestScope;\n\
+//RS impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
+//RS         );
+//RS     }
+//RS     if needs_http {
+//RS         out.push_str(include_str!("../Prelude/Core/HttpRequestTarget.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPServer.rs"));
+//RS     } else if needs_ws || needs_browser {
+//RS         // Ws.rs shares the canonical HTTP request/header value types even for
+//RS         // browser-only programs; keep the reachability split without emitting
+//RS         // the full HTTP client/server surface.
+//RS         out.push_str(include_str!("../Prelude/Core/HttpRequestTarget.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
+//RS     }
+//RS     if needs_ws || needs_http || needs_browser {
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/WsClient.rs"));
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Ws.rs"));
+//RS     }
+//RS     if needs_browser {
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
+//RS         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
+//RS     }
+//RS     if needs_args {
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
+//RS         out.push_str(include_str!("../Prelude/Core/ArgsProjectionCore.rs"));
+//RS         out.push_str(include_str!("../Prelude/Core/ArgsProjection.rs"));
+//RS     }
+//RS     if needs_reflect {
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
+//RS     }
+//RS     if needs_auth_tokens {
+//RS         // D-AUTH2=A: JWT/PASETO verify prelude.
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
+//RS     }
+//RS     if needs_auth_session {
+//RS         // D-AUTH1=A: sessions + `app.auth` prelude.
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
+//RS     }
+//RS     if needs_sync {
+//RS         // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.
+//RS         // The module header and its crate-root re-export each need their own
+//RS         // line: the cached-runtime export pass reads the block line by line to
+//RS         // widen `mod`/`pub(crate) use` for the split rlib, so a header glued to
+//RS         // a previous fragment's last line would stay crate-private and hide the
+//RS         // whole `core.sync` surface from the program crate.
+//RS         out.push_str("\nmod jet_sync {\n");
+//RS         out.push_str(
+//RS             &include_str!("../Prelude/CoreLib/Top/Sync.rs")
+//RS                 .replace(
+//RS                     "include!(\"../SyncPublish.rs\");",
+//RS                     include_str!("../Prelude/CoreLib/SyncPublish.rs"),
+//RS                 ),
+//RS         );
+//RS         out.push_str("\n}\npub(crate) use jet_sync::*;\n");
+//RS     }
+//RS     if needs_services || needs_jobs {
+//RS         out.push_str(service_authority_prelude_for_emit());
+//RS         out.push_str(JOB_QUEUE_NATIVE_PRELUDE_RAW);
+//RS         out.push_str(include_str!("../Prelude/CoreLib/Top/Services.rs"));
+//RS     }
+//RS }
+//RS const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
+//RS const STREAM_PRELUDE_RAW: &str = include_str!("../Prelude/Stream.rs");
+//RS /// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
+//RS const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
+//RS /// One physical TUI policy kernel is embedded in foundation and AOT output.
+//RS const TUI_KERNEL_PRELUDE: &str =
+//RS     include_str!("../../../jet-foundation/src/Prelude/TuiKernel.rs");
+//RS /// D-DX-PREVIEW1=A: typed named previews/playgrounds use the canonical UiNode.
+//RS const PREVIEW_PRELUDE: &str = include_str!("../Prelude/Core/Preview.rs");
+//RS /// D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend. Emitted only when
+//RS /// a program constructs `core.ui.gtk_backend()` (`uses_gtk_backend_for`), so no
+//RS /// other program carries the gtk `extern "C"` surface or needs `-lgtk-4`.
+//RS const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
+//RS /// D-DX-PLUGIN1=D: typed panel values share the Devtools protocol and UI node.
+//RS const DEVTOOLS_PANEL_PRELUDE: &str = include_str!("../Prelude/Core/DevtoolsPanel.rs");
+//RS const CORE_STREAM_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Stream.rs");
+//RS const DATA_PLOT_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/DataPlot.rs");
+//RS const DATA_PLOT_PRELUDE_IMPORTS: &str =
+//RS     "use std::collections::{BTreeMap, BTreeSet};\nuse std::sync::Arc as JetDataPlotArc;\n";
+//RS const CORE_STREAM_DURATION_ADAPTER: &str = r#"
+//RS impl JetStreamDuration for jet_std::Duration {
+//RS     fn stream_nanoseconds(self) -> i64 {
+//RS         self.as_nanos()
+//RS     }
+//RS }
+//RS "#;
+//RS const CORE_REALTIME_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Realtime.rs");
+//RS const CORE_ATOMIC_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Atomic.rs");
+//RS const CORE_EMBEDDED_HARDWARE_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/EmbeddedHardware.rs");
+//RS const CORE_EMBEDDED_HARDWARE_HOST_BEGIN: &str =
+//RS     "// JET_EMBEDDED_HARDWARE_HOST_BEGIN:";
+//RS const CORE_FIXED_ARITHMETIC_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/FixedArithmetic.rs");
+//RS const CORE_POWER_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Power.rs");
+//RS const CORE_DIVISION_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Division.rs");
+//RS const PORTABLE_CORE_PRELUDE_RAW: &str = include_str!("../Prelude/PortableCore.rs");
+//RS const TARGET_ADAPTERS_PRELUDE_RAW: &str = include_str!("../Prelude/TargetAdapters.rs");
+//RS const PORTABLE_ALLOC_PRELUDE_RAW: &str = include_str!("../Prelude/PortableAlloc.rs");
+//RS const CORE_LAZY_TABLE_PLAN_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/LazyTablePlan.rs");
+//RS const CORE_PARALLEL_PLAN_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/ParallelPlan.rs");
+//RS const CORE_GAME_ASSET_PIPELINE_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/GameAssetPipeline.rs");
+//RS const CORE_GAME_HOT_SWAP_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/GameHotSwap.rs");
+//RS const CORE_GAME_WORLD_INSPECTOR_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/GameWorldInspector.rs");
+//RS const CORE_GAME_FRAME_PROFILER_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/GameFrameProfiler.rs");
+//RS const CORE_GAME_OVERLAY_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/GameOverlay.rs");
+//RS const CORE_GAME_DEV_KERNEL_PRELUDE_RAW: &str =
+//RS     include_str!("../../../jet-foundation/src/Game.rs");
+//RS const CORE_WEB_PENDING_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/WebPending.rs");
+//RS const DEVTOOLS_PANEL_CATALOG_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/DevtoolsPanelCatalog.rs");
+//RS const DEVTOOLS_DATABASE_PANEL_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/DevtoolsDatabasePanel.rs");
+//RS const DEVTOOLS_JOBS_PANEL_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/DevtoolsJobsPanel.rs");
+//RS const DEVTOOLS_REQUEST_PANEL_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/DevtoolsRequestPanel.rs");
+//RS const DEVTOOLS_TELEMETRY_PANEL_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/DevtoolsTelemetryPanel.rs");
+//RS const DEVTOOLS_TOPOLOGY_PANEL_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/Core/DevtoolsTopologyPanel.rs");
+//RS /// c-devserver (owner-directed 2026-07-01): `core.web.devserver` — the
+//RS /// configurable `jet dev` server value (`for_app`/`.html`/`.port`/`.serve`).
+//RS const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
+//RS /// D-WEBAPP1=D: `core.web.app` full-stack application builder.
+//RS const APP_PRELUDE: &str = include_str!("../Prelude/App.rs");
+//RS const APP_MIDDLEWARE_PRELUDE: &str =
+//RS     include_str!("../../../jet-foundation/src/AppMiddleware.rs");
+//RS fn push_app_middleware_prelude(out: &mut String) {
+//RS     out.push_str("mod jet_app_middleware {\n");
+//RS     out.push_str(APP_MIDDLEWARE_PRELUDE);
+//RS     out.push_str("\n}\n");
+//RS }
+//RS const LIVE_LIFECYCLE_PRELUDE: &str = include_str!("../../../jet-foundation/src/LiveLifecycle.rs");
+//RS const LIVEQUERY_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/LiveQuery.rs");
+//RS const GAME_ASSETS_IMPORT_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/CoreLib/Top/GameAssetsImport.rs");
+//RS const GAME_ASSETS_RUNTIME_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/CoreLib/Top/GameAssetsRuntime.rs");
+//RS const WEB_ROUTER_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebRouter.rs");
+//RS const OPENAPI_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/OpenAPI.rs");
+//RS const WEB_QUERY_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebQuery.rs");
+//RS const WEB_FORMS_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebForms.rs");
+//RS const WEB_TABLE_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebTable.rs");
+//RS const WEB_VIRTUAL_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebVirtual.rs");
+//RS const WEB_STORE_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebStore.rs");
+//RS const WEBSERVERFN_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/CoreLib/Top/WebServerFn.rs");
+//RS const ENCODING_TRAITS_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs");
+//RS /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
+//RS const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
+//RS /// D-MEM-SENTRY1: the one sentry kernel is shared verbatim with foundation.
+//RS const MEM_SENTRY_PRELUDE: &str = include_str!("../../../jet-foundation/src/MemSentry.rs");
+//RS const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
+//RS 
+//RS fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<String>) {
+//RS     // App/DevServer call into HTTPServer helpers. Emit them only when the
+//RS     // program uses web/HTTP surfaces — bare `app.live` / `app.auth` must not
+//RS     // drag the full HTTP server templates (R10).
+//RS     let needs_app_runtime = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "core.web",
+//RS             "core.http",
+//RS             "core.http.server",
+//RS             "core.http.client",
+//RS             "core.web.devserver",
+//RS         ],
+//RS     );
+//RS     let needs_live = core_usage_matches(
+//RS         used_core,
+//RS         &[
+//RS             "app",
+//RS             "core.web",
+//RS             "core.db",
+//RS             "core.sync",
+//RS             "core.net.ws",
+//RS             "core.http",
+//RS             "core.http.client",
+//RS             "core.http.server",
+//RS             "core.web.browser",
+//RS         ],
+//RS     );
+//RS     let needs_web_suite = core_usage_matches(used_core, &["core.web"]);
+//RS     // WebServerFn can arrive through the cached Core closure even when this
+//RS     // program's direct Core-use labels do not request the web suite. Keep its
+//RS     // shared middleware vocabulary available in every generated program.
+//RS     push_app_middleware_prelude(out);
+//RS     if needs_app_runtime {
+//RS         out.push_str(DEVSERVER_PRELUDE);
+//RS         out.push_str(APP_PRELUDE);
+//RS     }
+//RS     if needs_live {
+//RS         out.push_str(LIVEQUERY_PRELUDE);
+//RS     }
+//RS     if needs_web_suite {
+//RS         out.push_str(&flat_prelude_body(CORE_WEB_PENDING_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(WEB_ROUTER_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(OPENAPI_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(WEB_QUERY_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(WEB_FORMS_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+//RS         out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
+//RS     }
+//RS }
+//RS 
+//RS fn push_mem_prelude(out: &mut String) {
+//RS     push_prelude_dependency_closure(out, &["fixed_allocator"]);
+//RS     out.push_str("mod jet_uninit_semantics {\n");
+//RS     out.push_str(UNINIT_PRELUDE);
+//RS     out.push_str("\n}\n");
+//RS     out.push_str("mod jet_mem {\n    mod jet_sentry {\n");
+//RS     out.push_str(MEM_SENTRY_PRELUDE);
+//RS     out.push_str("\n    }\n");
+//RS     out.push_str(MEM_PRELUDE);
+//RS     out.push_str("\n}\n");
+//RS }
+//RS 
+//RS /// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
+//RS const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc_core.rs");
+//RS const GC_HOST_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc_host.rs");
+//RS const GC_PORTABLE_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc_portable.rs");
+//RS 
+//RS fn push_gc_prelude(out: &mut String) {
+//RS     push_gc_prelude_for_target(out, false);
+//RS }
+//RS 
+//RS fn push_gc_prelude_for_target(out: &mut String, portable: bool) {
+//RS     out.push_str("mod jet_gc {\nmod __gc_platform {\n");
+//RS     out.push_str(if portable { GC_PORTABLE_PRELUDE } else { GC_HOST_PRELUDE });
+//RS     out.push_str("\n}\nuse __gc_platform::*;\n");
+//RS     out.push_str(GC_RUNTIME_PRELUDE);
+//RS     out.push_str("\n}\n");
+//RS }
+//RS /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): the `layout NAME { … }`
+//RS /// constraint-solver runtime (`jet_layout`). Pure safe Rust (no `unsafe`), so —
+//RS /// unlike `MEM_PRELUDE` — it never needs stripping; included everywhere
+//RS /// `MEM_PRELUDE`/private collector runtime are (not just the UI-specific sites), since a
+//RS /// `layout {}` block isn't limited to UI code.
+//RS const LAYOUT_PRELUDE: &str = include_str!("../Prelude/Layout.rs");
+//RS 
+//RS /// Tower #126: emitted AOT programs that use tasks/networking/process/fs-runtime ship AND select the
+//RS /// native readiness backend (epoll on Linux, kqueue on the BSD/Apple family), not
+//RS /// just the portable poll. Other Core users retain the safe portable scheduler
+//RS /// compatibility surface without inheriting unrelated native FFI (I1).
+//RS ///
+//RS /// The prelude gates its native syscall paths behind `feature = "jet_native_io"`
+//RS /// for the in-crate JIT copy (`jet_codegen::scheduler`, whose Cargo manifest turns
+//RS /// that feature on by default). Emitted user programs are built by a bare `rustc`
+//RS /// with no Cargo features, so that predicate would always be false and the program
+//RS /// would silently fall back to portable poll. Rewrite the predicate to a
+//RS /// vacuously-true `all()` at emit time: native then selects purely on `target_os`,
+//RS /// so a Linux build compiles in and uses epoll.
+//RS ///
+//RS /// I1: the raw epoll/kqueue syscalls stay inside the `jet:scheduler-native`
+//RS /// vetted region — the only `unsafe` in the emitted scheduler. `tests/golden.rs`
+//RS /// ignores exactly that region in its I1 unsafe scan, matching the vetted-internal
+//RS /// pattern used by `jet_os_unix`/`jet_term_unix`.
+//RS fn strip_scheduler_region(mut source: String, name: &str) -> String {
+//RS     let begin = format!("// jet:scheduler-native-{name}-begin");
+//RS     let end = format!("// jet:scheduler-native-{name}-end");
+//RS     let Some(start) = source.find(&begin) else {
+//RS         return source;
+//RS     };
+//RS     let Some(relative_end) = source[start..].find(&end) else {
+//RS         return source;
+//RS     };
+//RS     let end_offset = start + relative_end + end.len();
+//RS     source.replace_range(start..end_offset, "");
+//RS     source
+//RS }
+//RS 
+//RS const SERVICE_AUTHORITY_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/CoreLib/Top/ServiceAuthority.rs");
+//RS const JOB_QUEUE_NATIVE_PRELUDE_RAW: &str =
+//RS     include_str!("../Prelude/CoreLib/Top/JobQueueNative.rs");
+//RS 
+//RS /// Every fragment concatenated into the generated program's ONE flat Rust
+//RS /// module that brings its own top-level imports. `FLAT_PRELUDE_IMPORTS` merges
+//RS /// them; each fragment is emitted through `flat_prelude_body`.
+//RS const FLAT_PRELUDE_SOURCES: [&str; 21] = [
+//RS     CORE_ATOMIC_PRELUDE_RAW,
+//RS     ENCODING_TRAITS_PRELUDE_RAW,
+//RS     SCHEDULER_PRELUDE_RAW,
+//RS     STREAM_PRELUDE_RAW,
+//RS     CORE_EMBEDDED_HARDWARE_PRELUDE_RAW,
+//RS     CORE_LAZY_TABLE_PLAN_PRELUDE_RAW,
+//RS     DATA_PLOT_PRELUDE_IMPORTS,
+//RS     CORE_PARALLEL_PLAN_PRELUDE_RAW,
+//RS     CORE_GAME_FRAME_PROFILER_PRELUDE_RAW,
+//RS     SERVICE_AUTHORITY_PRELUDE_RAW,
+//RS     JOB_QUEUE_NATIVE_PRELUDE_RAW,
+//RS     GAME_ASSETS_IMPORT_PRELUDE_RAW,
+//RS     GAME_ASSETS_RUNTIME_PRELUDE_RAW,
+//RS     WEB_ROUTER_PRELUDE_RAW,
+//RS     OPENAPI_PRELUDE_RAW,
+//RS     WEB_QUERY_PRELUDE_RAW,
+//RS     WEB_FORMS_PRELUDE_RAW,
+//RS     WEB_TABLE_PRELUDE_RAW,
+//RS     WEB_VIRTUAL_PRELUDE_RAW,
+//RS     WEB_STORE_PRELUDE_RAW,
+//RS     WEBSERVERFN_PRELUDE_RAW,
+//RS ];
+//RS 
+//RS /// A fragment's leading top-level `use` items, split from the rest of its
+//RS /// source. Only the leading block, and only plain `use`: a fragment's later
+//RS /// `pub use jet_devserver_impl::…` re-export is part of its API and stays put.
+//RS fn split_leading_top_level_uses(source: &str) -> (Vec<&str>, String) {
+//RS     let mut imports = Vec::new();
+//RS     let mut body = String::with_capacity(source.len());
+//RS     let mut rest = source;
+//RS     while !rest.is_empty() {
+//RS         let line_end = rest.find('\n').map_or(rest.len(), |index| index + 1);
+//RS         let line = &rest[..line_end];
+//RS         let trimmed = line.trim();
+//RS         // Header comments and inner attributes precede the import block.
+//RS         if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
+//RS             body.push_str(line);
+//RS             rest = &rest[line_end..];
+//RS             continue;
+//RS         }
+//RS         if !line.starts_with("use ") {
+//RS             break;
+//RS         }
+//RS         let mut end = line_end;
+//RS         while !rest[..end].contains(';') && end < rest.len() {
+//RS             end += rest[end..]
+//RS                 .find('\n')
+//RS                 .map_or(rest.len() - end, |index| index + 1);
+//RS         }
+//RS         imports.push(rest[..end].trim());
+//RS         rest = &rest[end..];
+//RS     }
+//RS     body.push_str(rest);
+//RS     (imports, body)
+//RS }
+//RS fn data_plot_prelude_body() -> String {
+//RS     DATA_PLOT_PRELUDE_RAW
+//RS         .replace(
+//RS             "use std::collections::{BTreeMap, BTreeSet};\nuse std::sync::Arc as JetDataPlotArc;\n",
+//RS             "",
+//RS         )
+//RS }
+//RS 
+//RS /// One flat fragment's source as the assembler emits it: its own imports removed,
+//RS /// because `FLAT_PRELUDE_IMPORTS` declares them for the whole module instead.
+//RS /// DataQuery.rs include!s SqlQuery.rs relative to the Prelude tree. AOT pastes
+//RS /// that source into build/.work.*, where the nested include cannot resolve.
+//RS /// Inline the kernel so rustc never sees a Prelude-relative path.
+//RS fn data_query_prelude_source() -> String {
+//RS     include_str!("../Prelude/CoreLib/Top/DataQuery.rs").replace(
+//RS         "    include!(\"../../Core/SqlQuery.rs\");\n",
+//RS         include_str!("../Prelude/Core/SqlQuery.rs"),
+//RS     )
+//RS }
+//RS 
+//RS fn flat_prelude_body(source: &str) -> String {
+//RS     split_leading_top_level_uses(source).1
+//RS }
+//RS 
+//RS // Reached only from `Codegen::MIRRust`; kept while its printer body is restored.
+//RS #[allow(dead_code)]
+//RS fn portable_embedded_hardware_source() -> &'static str {
+//RS     CORE_EMBEDDED_HARDWARE_PRELUDE_RAW
+//RS         .split_once(CORE_EMBEDDED_HARDWARE_HOST_BEGIN)
+//RS         .map(|(portable, _)| portable)
+//RS         .unwrap_or_else(|| panic!("embedded hardware host bridge marker is missing"))
+//RS }
+//RS 
+//RS // Reached only from `Codegen::MIRRust`; kept while its printer body is restored.
+//RS #[allow(dead_code)]
+//RS fn push_portable_prelude_imports(
+//RS     out: &mut String,
+//RS     include_atomic: bool,
+//RS     include_hardware: bool,
+//RS     include_alloc: bool,
+//RS ) {
+//RS     let mut sources = vec![PORTABLE_CORE_PRELUDE_RAW, TARGET_ADAPTERS_PRELUDE_RAW];
+//RS     if include_atomic {
+//RS         sources.push(CORE_ATOMIC_PRELUDE_RAW);
+//RS     }
+//RS     if include_hardware {
+//RS         sources.push(portable_embedded_hardware_source());
+//RS     }
+//RS     if include_alloc {
+//RS         sources.push(PORTABLE_ALLOC_PRELUDE_RAW);
+//RS     }
+//RS     out.push_str(&merge_flat_prelude_imports(&sources));
+//RS }
+//RS 
+//RS /// One binding a fragment's leading top-level `use` brings into the flat scope:
+//RS /// `use path::{name as binding}`. `binding == name` without `as`.
+//RS struct FlatPreludeImport<'a> {
+//RS     path: &'a str,
+//RS     name: &'a str,
+//RS     binding: &'a str,
+//RS }
+//RS 
+//RS impl FlatPreludeImport<'_> {
+//RS     /// Two spellings of one item: `core`/`alloc` paths are `std` re-exports, so
+//RS     /// a `no_std`-capable fragment and a hosted one may import the same item
+//RS     /// under either root without binding one name to two items.
+//RS     fn identity(&self) -> (String, &str) {
+//RS         let path = self
+//RS             .path
+//RS             .strip_prefix("core::")
+//RS             .or_else(|| self.path.strip_prefix("alloc::"))
+//RS             .map_or_else(|| self.path.to_string(), |rest| format!("std::{rest}"));
+//RS         (path, self.name)
+//RS     }
+//RS }
+//RS 
+//RS /// The bindings a fragment's leading top-level `use` items bring in. One
+//RS /// parser backs the hosted and the portable import merge (I8).
+//RS fn flat_prelude_import_bindings(source: &str) -> Vec<FlatPreludeImport<'_>> {
+//RS     let mut bindings = Vec::new();
+//RS     for statement in split_leading_top_level_uses(source).0 {
+//RS         let item = statement
+//RS             .trim_start_matches("use ")
+//RS             .trim_end_matches(';')
+//RS             .trim();
+//RS         let (path, names) = match item.split_once("::{") {
+//RS             Some((path, names)) => (path.trim(), names.trim_end_matches('}')),
+//RS             None => item.rsplit_once("::").unwrap_or(("", item)),
+//RS         };
+//RS         for name in names.split(',') {
+//RS             let name = name.trim();
+//RS             if name.is_empty() {
+//RS                 continue;
+//RS             }
+//RS             let (name, binding) = match name.split_once(" as ") {
+//RS                 Some((name, binding)) => (name.trim(), binding.trim()),
+//RS                 None => (name, name),
+//RS             };
+//RS             bindings.push(FlatPreludeImport { path, name, binding });
+//RS         }
+//RS     }
+//RS     bindings
+//RS }
+//RS 
+//RS /// Merge the leading imports of every flat fragment into one import block for
+//RS /// the crate root. Keyed by the *binding* each import creates, because that is
+//RS /// what rustc rejects twice (E0252): two fragments may import one item under
+//RS /// one name through different spellings, but never two items under one name.
+//RS ///
+//RS /// `jet_foundation::<Module>` imports go through `FOUNDATION_PLACEMENTS`: the
+//RS /// module must be one the program embeds, and an unaliased import of a
+//RS /// root-flat module's item is already satisfied by flattening (at the root it
+//RS /// would be a self-import, E0255), so it is omitted; every other spelling
+//RS /// resolves through the `jet_foundation` facade.
+//RS fn merge_flat_prelude_imports(sources: &[&str]) -> String {
+//RS     let mut bindings: BTreeMap<&str, FlatPreludeImport<'_>> = BTreeMap::new();
+//RS     for source in sources {
+//RS         for import in flat_prelude_import_bindings(source) {
+//RS             if let Some(module) = import
+//RS                 .path
+//RS                 .strip_prefix("jet_foundation::")
+//RS                 .map(|rest| rest.split("::").next().unwrap_or(rest))
+//RS             {
+//RS                 match foundation_placement(module) {
+//RS                     Some(FoundationPlacement::Root) if import.binding == import.name => continue,
+//RS                     Some(_) => {}
+//RS                     None => panic!(
+//RS                         "flat Prelude fragment imports `jet_foundation::{module}`, which the \
+//RS                          generated program does not embed; add its placement to \
+//RS                          FOUNDATION_PLACEMENTS"
+//RS                     ),
+//RS                 }
+//RS             }
+//RS             match bindings.entry(import.binding) {
+//RS                 std::collections::btree_map::Entry::Vacant(slot) => {
+//RS                     slot.insert(import);
+//RS                 }
+//RS                 std::collections::btree_map::Entry::Occupied(slot) => {
+//RS                     let kept = slot.get();
+//RS                     assert!(
+//RS                         kept.identity() == import.identity(),
+//RS                         "flat Prelude fragments bind `{}` to two items: `{}::{}` and `{}::{}`",
+//RS                         import.binding,
+//RS                         kept.path,
+//RS                         kept.name,
+//RS                         import.path,
+//RS                         import.name
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut groups: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+//RS     for import in bindings.values() {
+//RS         let spelling = if import.binding == import.name {
+//RS             import.name.to_string()
+//RS         } else {
+//RS             format!("{} as {}", import.name, import.binding)
+//RS         };
+//RS         groups.entry(import.path).or_default().push(spelling);
+//RS     }
+//RS     let mut rendered = String::new();
+//RS     for (path, names) in groups {
+//RS         if let [only] = names.as_slice() {
+//RS             rendered.push_str(&format!("use {path}::{only};\n"));
+//RS         } else {
+//RS             rendered.push_str(&format!("use {path}::{{{}}};\n", names.join(", ")));
+//RS         }
+//RS     }
+//RS     rendered.push('\n');
+//RS     rendered
+//RS }
+//RS 
+//RS 
+//RS /// The generated program is ONE flat Rust module assembled from many Prelude
+//RS /// fragments, but each fragment is also a real Rust file compiled inside a
+//RS /// module of its own crate — `Prelude/Scheduler.rs` as `jet_codegen::scheduler`,
+//RS /// `Prelude/CoreLib/Top/ServiceAuthority.rs` inside `jet-comptime`'s
+//RS /// `Comptime/ServicesLite.rs` — so a fragment must keep its own imports there.
+//RS ///
+//RS /// Concatenated, those per-fragment imports land in one scope, and two fragments
+//RS /// importing one name make rustc reject the generated file: Scheduler.rs and
+//RS /// ServiceAuthority.rs both imported `std::time::Duration`, so every program
+//RS /// using `core.service` failed to build with E0252 — an internal compiler
+//RS /// error (I2), never a user diagnostic.
+//RS ///
+//RS /// Neither per-fragment workaround closes that class. Qualifying paths inline
+//RS /// cannot work for trait imports, because method resolution needs the trait in
+//RS /// scope (Scheduler.rs calls `TcpStream::write`). Wrapping these fragments in a
+//RS /// private module the way `jet_gc`/`jet_sync` are wrapped cannot work either,
+//RS /// because generated code calls their private items flat — `TIR/emit/core_calls.rs`
+//RS /// emits 24 private `jet_services_*` calls and `Context.rs` three private types,
+//RS /// and a glob re-export carries only `pub` ones.
+//RS ///
+//RS /// So the assembler owns the flat module's import set instead (I8). It is
+//RS /// derived, not restated: add an import to any flat fragment and it is merged
+//RS /// here automatically, so no second collision can be introduced by hand.
+//RS /// Emitted unconditionally with the scheduler, which every embedded runtime
+//RS /// carries — the harness carries `#![allow(warnings)]`, so an import a program
+//RS /// never uses costs nothing, and no user name can shadow one because every
+//RS /// emitted user type goes through `mangle_path` (`__jet_` prefix).
+//RS static FLAT_PRELUDE_IMPORTS: std::sync::LazyLock<String> =
+//RS     std::sync::LazyLock::new(|| merge_flat_prelude_imports(&FLAT_PRELUDE_SOURCES));
+//RS 
+//RS /// `Prelude/CoreLib/Top/ServiceAuthority.rs` as the assembler emits it.
+//RS static SERVICE_AUTHORITY_PRELUDE: std::sync::LazyLock<String> =
+//RS     std::sync::LazyLock::new(|| flat_prelude_body(SERVICE_AUTHORITY_PRELUDE_RAW));
+//RS 
+//RS fn service_authority_prelude_for_emit() -> &'static str {
+//RS     SERVICE_AUTHORITY_PRELUDE.as_str()
+//RS }
+//RS 
+//RS /// The flat import set, then `Prelude/Scheduler.rs` + `Prelude/Stream.rs` bodies.
+//RS fn assemble_scheduler_prelude(scheduler: String) -> String {
+//RS     let stream = flat_prelude_body(STREAM_PRELUDE_RAW);
+//RS     let mut source =
+//RS         String::with_capacity(FLAT_PRELUDE_IMPORTS.len() + scheduler.len() + stream.len());
+//RS     source.push_str(FLAT_PRELUDE_IMPORTS.as_str());
+//RS     source.push_str(&scheduler);
+//RS     source.push_str(&stream);
+//RS     source
+//RS }
+//RS 
+//RS static SCHEDULER_PRELUDE_NATIVE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+//RS     assemble_scheduler_prelude(
+//RS         flat_prelude_body(SCHEDULER_PRELUDE_RAW).replace("feature = \"jet_native_io\"", "all()"),
+//RS     )
+//RS });
+//RS 
+//RS static SCHEDULER_PRELUDE_PORTABLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+//RS     assemble_scheduler_prelude(["notify", "epoll", "kqueue", "iocp"].into_iter().fold(
+//RS         flat_prelude_body(SCHEDULER_PRELUDE_RAW),
+//RS         strip_scheduler_region,
+//RS     ))
+//RS });
+//RS 
+//RS fn scheduler_prelude_for_emit(native_io: bool) -> &'static str {
+//RS     if native_io {
+//RS         SCHEDULER_PRELUDE_NATIVE.as_str()
+//RS     } else {
+//RS         SCHEDULER_PRELUDE_PORTABLE.as_str()
+//RS     }
+//RS }
+//RS 
+//RS fn uses_native_scheduler_for(used_core: &std::collections::HashSet<String>) -> bool {
+//RS     used_core.iter().any(|usage| {
+//RS         [
+//RS             "core.tasks",
+//RS             "core.net",
+//RS             "core.http",
+//RS             "core.process",
+//RS             "core.files",
+//RS             "core.watcher",
+//RS             "core.term",
+//RS             "core.sys",
+//RS             "core.sys",
+//RS             "core.args",
+//RS             "core.testing",
+//RS             "core.perf",
+//RS             "core.mem.scope",
+//RS         ]
+//RS         .iter()
+//RS         .any(|module| {
+//RS             usage.strip_prefix(module).is_some_and(|suffix| {
+//RS                 suffix.is_empty() || suffix.starts_with("::") || suffix.starts_with('.')
+//RS             })
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use crate::Sema::CompileMode;
+//RS 
+//RS     #[test]
+//RS     fn aot_ffi_host_installs_bridge_reporter() {
+//RS         let link = FfiLink {
+//RS             crate_name: "jet_ffi_fixture".into(),
+//RS             cache_identity: "fixture-identity".into(),
+//RS             provenance_path: "fixture.provenance".into(),
+//RS             rlib_path: "fixture.rlib".into(),
+//RS             cdylib_path: "fixture.so".into(),
+//RS             target_deps_dir: "deps".into(),
+//RS             host_deps_dir: "deps".into(),
+//RS             helper_bin_path: None,
+//RS             secrets_helper_bin_path: None,
+//RS             handle_facts: vec![],
+//RS             link_closure: crate::AST::FfiLinkClosure::default(),
+//RS         };
+//RS         let mut source = String::new();
+//RS         push_ffi_reporter(&mut source, Some(&link));
+//RS         assert!(source.contains("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)"));
+//RS         // a1dec295b ("feat(failure): centralize entry exit handling") deleted this
+//RS         // hook's `eprintln!` copy of the panic message. The single owner is the FFI
+//RS         // shim's `ffi_panic` (jet-pkg-model/src/FFI.rs), and that crate's own test
+//RS         // forbids a second `eprintln!` of the text (I8: one error channel). So the
+//RS         // generated hook must exist, stay vetted-unsafe bracketed, consume its
+//RS         // arguments, and NOT re-carry the message.
+//RS         assert!(source.contains("// JET_VETTED_UNSAFE_BEGIN: ffi_reporter"));
+//RS         assert!(source.contains("// JET_VETTED_UNSAFE_END: ffi_reporter"));
+//RS         assert!(source.contains(concat!(
+//RS             "extern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {\n",
+//RS             "    let _ = (message, len);\n",
+//RS             "}\n"
+//RS         )));
+//RS         assert!(!source.contains("panic: a foreign function panicked"));
+//RS 
+//RS         let mut cached = String::new();
+//RS         push_cached_runtime_with_policy(
+//RS             &mut cached,
+//RS             Some(&link),
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         let reporter = cached
+//RS             .find("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)")
+//RS             .unwrap();
+//RS         let marker = cached.find(CACHED_RUNTIME_BEGIN).unwrap();
+//RS         assert!(reporter < marker);
+//RS         assert!(!cached[marker..].contains("jet_ffi_fixture::jet_ffi_set_reporter"));
+//RS     }
+//RS     use std::collections::{HashMap, HashSet};
+//RS     use std::path::PathBuf;
+//RS 
+//RS     fn core_fingerprint(used_core: &HashSet<String>, test_harness: bool) -> String {
+//RS         let mut bundle = checked_generic_bundle("fn run() {}", "core-fingerprint");
+//RS         bundle.used_core = used_core.clone();
+//RS         corelib_emission_fingerprint(&bundle, test_harness)
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn relevant_stdlib_digest_is_exact_and_core_closure_sensitive() {
+//RS         let mut runtime_source = String::new();
+//RS         push_cached_runtime_with_policy(
+//RS             &mut runtime_source,
+//RS             None,
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         assert_eq!(
+//RS             cached_runtime_fingerprint(),
+//RS             crate::SHA256::sha256_hex(runtime_source.as_bytes()),
+//RS             "native cache identity must hash the emitted fixed runtime"
+//RS         );
+//RS         assert!(
+//RS             !runtime_source.contains("__JET_PACKAGE_EDITION"),
+//RS             "package-specific edition data must not poison the fixed runtime object"
+//RS         );
+//RS 
+//RS         let files = HashSet::from(["core.files::read".to_string()]);
+//RS         let net = HashSet::from(["core.net::tcp_connect".to_string()]);
+//RS         assert_ne!(
+//RS             core_fingerprint(&files, false),
+//RS             core_fingerprint(&net, false),
+//RS             "native cache identity must include the relevant Core closure"
+//RS         );
+//RS         assert_eq!(
+//RS             core_fingerprint(&files, false),
+//RS             core_fingerprint(&files, false),
+//RS             "the same relevant Core closure must reuse one stable digest"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn core_digest_covers_the_complete_emitted_core_block() {
+//RS         let files = HashSet::from(["core.files::read".to_string()]);
+//RS         let mut bundle = checked_generic_bundle("fn run() {}", "core-fingerprint-block");
+//RS         bundle.used_core = files.clone();
+//RS         let body = core_runtime_body(&bundle, false);
+//RS         let mut emitted = String::new();
+//RS         if !body.is_empty() {
+//RS             emitted.push_str(CACHED_CORE_BEGIN);
+//RS             emitted.push_str(&body);
+//RS             emitted.push_str(CACHED_CORE_END);
+//RS         }
+//RS         assert!(emitted.contains(scheduler_prelude_for_emit(true)));
+//RS         assert!(body.contains("__JET_PACKAGE_EDITION"));
+//RS         assert!(body.contains("fn jet_deadline_exceeded"));
+//RS         assert!(body.contains("fn jet_seeded_rng_int"));
+//RS         assert!(emitted.contains(body.as_str()));
+//RS         assert_eq!(
+//RS             corelib_emission_fingerprint(&bundle, false),
+//RS             corelib_emission_identity(&body, &files),
+//RS             "the relevant digest must hash the exact Core body that gets emitted"
+//RS         );
+//RS 
+//RS         let testing = HashSet::from(["core.testing".to_string()]);
+//RS         assert_ne!(
+//RS             core_fingerprint(&testing, false),
+//RS             core_fingerprint(&testing, true),
+//RS             "test-harness Core emission must have its own digest"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn r10_corelib_emits_only_reachable_top_modules() {
+//RS         // R10 / #1133: a files-only program must not drag HTTP/Browser/Game
+//RS         // templates into generated source.
+//RS         let files_only = HashSet::from(["core.files::read".to_string()]);
+//RS         let mut files_out = String::new();
+//RS         push_corelib_prelude_with_policy(
+//RS             &mut files_out,
+//RS             &files_only,
+//RS             false,
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         assert!(
+//RS             files_out.contains("struct JetPath"),
+//RS             "files usage must emit PathFiles"
+//RS         );
+//RS         assert!(
+//RS             !files_out.contains("JetHTTPServer")
+//RS                 && !files_out.contains("struct JetBrowser")
+//RS                 && !files_out.contains("fn jet_game_"),
+//RS             "files-only Core must not emit HTTP server/Browser/Game templates"
+//RS         );
+//RS         assert!(
+//RS             files_out.contains("struct JetTCPStream"),
+//RS             "JetStd kernel closure always needs JetTCPStream"
+//RS         );
+//RS 
+//RS         let net_only = HashSet::from(["core.net::tcp_connect".to_string()]);
+//RS         let mut net_out = String::new();
+//RS         push_corelib_prelude_with_policy(
+//RS             &mut net_out,
+//RS             &net_only,
+//RS             false,
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         assert!(
+//RS             net_out.contains("struct JetTCPStream") && net_out.contains("fn jet_net_tcp_connect"),
+//RS             "net usage must emit NetHTTP"
+//RS         );
+//RS         assert!(
+//RS             !net_out.contains("JetHTTPServer") && !net_out.contains("struct JetBrowser"),
+//RS             "pure core.net must not emit HTTP server or Browser templates"
+//RS         );
+//RS 
+//RS         let http = HashSet::from(["core.http.client::get".to_string()]);
+//RS         let mut http_out = String::new();
+//RS         push_corelib_prelude_with_policy(
+//RS             &mut http_out,
+//RS             &http,
+//RS             false,
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         assert!(
+//RS             http_out.contains("JetHTTPServer") || http_out.contains("fn jet_http_"),
+//RS             "http usage must emit HTTP templates"
+//RS         );
+//RS 
+//RS         let files_fp = core_fingerprint(&files_only, false);
+//RS         let net_fp = core_fingerprint(&net_only, false);
+//RS         assert_ne!(
+//RS             files_fp, net_fp,
+//RS             "R10 cache identity must differ when Top-module reachability differs"
+//RS         );
+//RS         assert_eq!(
+//RS             files_fp,
+//RS             core_fingerprint(&files_only, false),
+//RS             "R10 fingerprint must be stable for the same used_core set"
+//RS         );
+//RS 
+//RS         let compute_only = HashSet::from(["core.compute::zeros".to_string()]);
+//RS         let mut compute_out = String::new();
+//RS         push_corelib_prelude_with_policy(
+//RS             &mut compute_out,
+//RS             &compute_only,
+//RS             false,
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         assert!(
+//RS             compute_out.contains("fn jet_compute_zeros")
+//RS                 && compute_out.contains("struct JetTensor"),
+//RS             "core.compute usage must emit Compute.rs"
+//RS         );
+//RS         assert!(
+//RS             !compute_out.contains("JetHTTPServer") && !compute_out.contains("struct JetBrowser"),
+//RS             "compute-only Core must not emit HTTP/Browser templates"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn file_handle_owners_are_in_the_common_closure_without_filesystem_runtime() {
+//RS         let used_core = HashSet::from(["core.encoding.base64::is_base64".to_string()]);
+//RS         let owner_source = include_str!("../Prelude/Core/FileHandleOwners.rs");
+//RS         let common_source = include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs");
+//RS         let filesystem_source = include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs");
+//RS         let policy = ReleaseDevtoolsPolicy::development();
+//RS 
+//RS         let assert_common_closure = |emitted: &str| {
+//RS             let owners = emitted
+//RS                 .find(owner_source)
+//RS                 .expect("common file owner carriers must be emitted");
+//RS             let common = emitted
+//RS                 .find(common_source)
+//RS                 .expect("JetStd CommonTypes must be emitted");
+//RS             assert!(
+//RS                 owners < common,
+//RS                 "root owner definitions must precede the JetStd re-export"
+//RS             );
+//RS             assert!(
+//RS                 !emitted.contains(filesystem_source),
+//RS                 "a non-filesystem closure must not pull in FSRuntimeOps"
+//RS             );
+//RS             for owner in [
+//RS                 "pub struct JetTempDirOwner",
+//RS                 "pub struct JetTempFileOwner",
+//RS                 "pub struct JetFileLockOwner",
+//RS             ] {
+//RS                 assert_eq!(
+//RS                     emitted.matches(owner).count(),
+//RS                     1,
+//RS                     "the common closure must emit `{owner}` exactly once"
+//RS                 );
+//RS             }
+//RS         };
+//RS 
+//RS         let mut ordinary = String::new();
+//RS         push_corelib_prelude_with_policy(&mut ordinary, &used_core, false, &policy);
+//RS         assert_common_closure(&ordinary);
+//RS 
+//RS         let mut cached = String::new();
+//RS         push_full_corelib_prelude_with_policy(
+//RS             &mut cached,
+//RS             Syntax::OSTarget::Linux,
+//RS             false,
+//RS             "2026",
+//RS             &BTreeSet::new(),
+//RS             false,
+//RS             false,
+//RS             &policy,
+//RS         );
+//RS         assert_common_closure(&cached);
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn simd_core_marker_selects_shared_lane_closure_without_selecting_plain_programs() {
+//RS         let mut plain = String::new();
+//RS         push_corelib_prelude_with_policy(
+//RS             &mut plain,
+//RS             &HashSet::new(),
+//RS             false,
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         assert!(
+//RS             plain.is_empty(),
+//RS             "a program with no Core reachability must not emit the SIMD closure"
+//RS         );
+//RS 
+//RS         let simd = HashSet::from(["core.math::__mathtypes__".to_string()]);
+//RS         let mut simd_out = String::new();
+//RS         push_corelib_prelude_with_policy(
+//RS             &mut simd_out,
+//RS             &simd,
+//RS             false,
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         assert!(
+//RS             simd_out.contains("fn jet_scalar_loop_barrier"),
+//RS             "SIMD reachability must emit the shared scalar-loop barrier"
+//RS         );
+//RS         assert!(
+//RS             simd_out.contains("jet_lane_type!(F32x8"),
+//RS             "SIMD reachability must emit the lane type closure"
+//RS         );
+//RS     }
+//RS 
+//RS     /// #1451: the `suite.run()` / `suite.result` handle ops are emitted
+//RS     /// unqualified at crate root and are not gated on `used_core` — a
+//RS     /// `fn test(suite: TestSuite)` body reaches them with no `core.testing`
+//RS     /// call anywhere. Every root adapter those ops can name must therefore be
+//RS     /// emitted beside the `Prelude/CommandSuite.rs` kernel part that defines
+//RS     /// its callee, for any Core-reaching program. Re-gating them reintroduces
+//RS     /// rustc E0425 on generated code (I2).
+//RS     #[test]
+//RS     fn command_suite_root_adapters_are_never_gated() {
+//RS         // Deliberately a `used_core` set with no testing, args, process or
+//RS         // files surface: that is what `--show-default` compiles for a file
+//RS         // whose only suite contact is an unused `fn test(suite: TestSuite)`.
+//RS         let no_testing = HashSet::from(["core.compute::zeros".to_string()]);
+//RS         let mut out = String::new();
+//RS         push_corelib_prelude_with_policy(
+//RS             &mut out,
+//RS             &no_testing,
+//RS             false,
+//RS             &ReleaseDevtoolsPolicy::development(),
+//RS         );
+//RS         // The whole root fragment, not a symbol list: the `jet_std` kernel
+//RS         // defines same-named `pub fn`s, so a name check would pass even with
+//RS         // the root adapters gated away.
+//RS         assert!(
+//RS             out.contains(include_str!("../Prelude/CoreLib/Top/CommandSuite.rs")),
+//RS             "the crate-root suite adapters must ship with the kernel part that \
+//RS              defines their callees; the handle-op call site names them with no \
+//RS              `used_core` guard"
+//RS         );
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS     fn checked_generic_bundle(src: &str, root: &str) -> crate::AST::ProgramBundle {
+//RS         checked_generic_bundle_with_facts(src, root).0
+//RS     }
+//RS 
+//RS     fn checked_generic_bundle_with_facts(
+//RS         src: &str,
+//RS         root: &str,
+//RS     ) -> (crate::AST::ProgramBundle, crate::Sema::SemIndexEffectFacts) {
+//RS         let (tokens, lex) = crate::Lexer::lex(src);
+//RS         assert!(lex.is_empty(), "{lex:?}");
+//RS         let mut program = crate::Parser::parse(&tokens).expect("parse");
+//RS         let mut bundle = crate::AST::ProgramBundle {
+//RS             entry: 0,
+//RS             project_root: PathBuf::from(root),
+//RS             modules: vec![crate::AST::LoadedModule {
+//RS                 path: PathBuf::from(root).join("main.jet"),
+//RS                 display: "main.jet".into(),
+//RS                 source: src.into(),
+//RS                 alias: "main".into(),
+//RS                 imports: std::mem::take(&mut program.imports),
+//RS                 items: std::mem::take(&mut program.items),
+//RS                 script_body: std::mem::take(&mut program.script_body),
+//RS                 block_spans: std::mem::take(&mut program.block_spans),
+//RS                 web_target_ceiling: program.web_target_ceiling,
+//RS                 pub_file: program.pub_file,
+//RS                 no_prelude: program.no_prelude,
+//RS                 default_target: program.default_target,
+//RS                 html_path: program.html_path,
+//RS                 policy_declarations: program.policy_declarations.clone(),
+//RS                 user_policy_declarations: program.user_policy_declarations.clone(),
+//RS                 rule_facts: std::mem::take(&mut program.rule_facts),
+//RS             }],
+//RS             devtools_registry: crate::AST::DevtoolsRegistry::default(),
+//RS             parse_teaching: Vec::new(),
+//RS             used_core: HashSet::new(),
+//RS             ffi_callback_fns: HashSet::new(),
+//RS             cffi: crate::AST::CFfi::default(),
+//RS             comptime_inputs: Vec::new(),
+//RS             name_ledger: crate::AST::NameLedger::default(),
+//RS             layer_ceiling: None,
+//RS             inferred_layer: crate::Syntax::RuntimeLayer::Core,
+//RS             web_partitions: HashMap::new(),
+//RS             web_partition_enforced: false,
+//RS             web_partition_report: None,
+//RS             dep_roots: HashMap::new(),
+//RS             package_guarantees: Default::default(),
+//RS             program_allocator: Default::default(),
+//RS             active_os: crate::Syntax::OSTarget::host(),
+//RS             build_facts: Default::default(),
+//RS             edition: "2027".to_string(),
+//RS         };
+//RS         let (diagnostics, facts) =
+//RS             crate::Sema::check_bundle_with_effect_facts(&mut bundle, CompileMode::Run);
+//RS         assert!(
+//RS             !diagnostics
+//RS                 .iter()
+//RS                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
+//RS             "{diagnostics:#?}"
+//RS         );
+//RS         (bundle, facts)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS /// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
+//RS /// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
+//RS /// active target OS is Linux. `used_core` is collected before `@if
+//RS /// $build.os` folds, so a Linux-only backend used under a `.Linux` arm still
+//RS /// shows up on a macOS/Windows build; the `active_os` gate is what actually
+//RS /// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is
+//RS /// Linux-only). The `.Linux` dispatch arm's construction is likewise folded out
+//RS /// of `main` on those targets, so nothing references it.
+//RS fn uses_gtk_backend_for(
+//RS     used_core: &std::collections::HashSet<String>,
+//RS     active_os: Syntax::OSTarget,
+//RS ) -> bool {
+//RS     active_os == Syntax::OSTarget::Linux && used_core.iter().any(|u| u == "core.ui::gtk_backend")
+//RS }
+//RS 
+//RS /// `Prelude/CoreLib/Top/EncodingCodecs.rs` reads the package edition as
+//RS /// `__JET_PACKAGE_EDITION`, and the CoreLib kernel is emitted whenever a program
+//RS /// mentions any default `Int`. Every harness therefore needs the constant, so one
+//RS /// helper emits it: three hand-written copies had already drifted, leaving the
+//RS /// fuzz harness with the three uses and no definition (rustc E0425 on generated
+//RS /// code, an I2 violation). Unconditional on purpose — the harness carries
+//RS /// `#![allow(warnings)]`, so an unused const costs nothing, and a definition that
+//RS /// is never gated cannot drift from the use guard again.
+//RS fn push_package_edition_value(out: &mut String, edition: &str) {
+//RS     let edition_year = edition.parse::<u16>().unwrap_or(2027);
+//RS     out.push_str(&format!(
+//RS         "const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"
+//RS     ));
+//RS }
+//RS 
+//RS fn push_package_edition(out: &mut String, bundle: &ProgramBundle) {
+//RS     push_package_edition_value(out, &bundle.edition);
+//RS }
+//RS 
+// END-PORT-PENDING 2049 crates/jet-codegen/src/Codegen/mod.rs:3601-5074
+

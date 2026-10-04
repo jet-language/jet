@@ -1,487 +1,289 @@
-// PORT-PENDING 0062 crates-jet-foundation-src-exactunitconversion-module-group: crates/jet-foundation/src/Game.rs:1-483
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Dependency-free game development swap facts shared by hosts and generated code.
-//RS //
-//RS // The host owns filesystem/build/world facts and supplies them here. This
-//RS // module validates the declared operation, records one typed outcome, and
-//RS // never infers game meaning from a path or payload.
-//RS 
-//RS /// One canonical frame-count plan shared by every game host.
-//RS ///
-//RS /// A live backend has no bound (`None`); a headless backend starts with the
-//RS /// historical three-frame default.  Hosts only execute the plan: they do not
-//RS /// choose a count, validate a request, or advance the cursor independently.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetGameFrameBudget {
-//RS     remaining: Option<i64>,
-//RS     next_index: i64,
-//RS     frame_in_flight: bool,
-//RS }
-//RS 
-//RS impl Default for JetGameFrameBudget {
-//RS     fn default() -> Self {
-//RS         Self::default_headless()
-//RS     }
-//RS }
-//RS 
-//RS impl JetGameFrameBudget {
-//RS     pub const DEFAULT_HEADLESS_FRAMES: i64 = 3;
-//RS     pub const FRAME_BUDGET_ERROR: &'static str = "`game.run` frame budget must be positive";
-//RS 
-//RS     pub const fn live() -> Self {
-//RS         Self {
-//RS             remaining: None,
-//RS             next_index: 0,
-//RS             frame_in_flight: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn default_headless() -> Self {
-//RS         Self {
-//RS             remaining: Some(Self::DEFAULT_HEADLESS_FRAMES),
-//RS             next_index: 0,
-//RS             frame_in_flight: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn validate(frames: i64) -> Result<(), &'static str> {
-//RS         if frames > 0 {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(Self::FRAME_BUDGET_ERROR)
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_frame_count(frames: i64) -> Result<Self, &'static str> {
-//RS         Self::validate(frames)?;
-//RS         Ok(Self {
-//RS             remaining: Some(frames),
-//RS             next_index: 0,
-//RS             frame_in_flight: false,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn set_requested(&mut self, frames: Option<i64>) -> Result<(), &'static str> {
-//RS         if let Some(frames) = frames {
-//RS             *self = Self::with_frame_count(frames)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn should_continue(&self) -> bool {
-//RS         !self.frame_in_flight && self.remaining.map_or(true, |remaining| remaining > 0)
-//RS     }
-//RS 
-//RS     pub fn next_frame(&mut self) -> Option<i64> {
-//RS         if !self.should_continue() {
-//RS             return None;
-//RS         }
-//RS         self.frame_in_flight = true;
-//RS         let index = self.next_index;
-//RS         self.next_index = self.next_index.saturating_add(1);
-//RS         Some(index)
-//RS     }
-//RS 
-//RS     pub fn present(&mut self) {
-//RS         self.frame_in_flight = false;
-//RS         if let Some(remaining) = self.remaining.as_mut() {
-//RS             *remaining = remaining.saturating_sub(1);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Canonical wire hash for deterministic frame transcripts.
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetGameTranscriptHasher {
-//RS     state: u64,
-//RS }
-//RS 
-//RS impl JetGameTranscriptHasher {
-//RS     pub fn new() -> Self {
-//RS         let mut hasher = Self {
-//RS             state: 0xcbf29ce484222325,
-//RS         };
-//RS         hasher.push_bytes(b"jet.game.transcript.v1\0");
-//RS         hasher
-//RS     }
-//RS 
-//RS     fn push_bytes(&mut self, bytes: &[u8]) {
-//RS         for byte in bytes {
-//RS             self.state ^= u64::from(*byte);
-//RS             self.state = self.state.wrapping_mul(0x100000001b3);
-//RS         }
-//RS     }
-//RS 
-//RS     fn push_u64(&mut self, value: u64) {
-//RS         self.push_bytes(&value.to_le_bytes());
-//RS     }
-//RS 
-//RS     pub fn push_frame(&mut self, index: i64, input: &[String]) {
-//RS         self.push_bytes(b"frame\0");
-//RS         self.push_u64(index as u64);
-//RS         self.push_u64(input.len() as u64);
-//RS         for action in input {
-//RS             self.push_u64(action.len() as u64);
-//RS             self.push_bytes(action.as_bytes());
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn finish(self) -> String {
-//RS         format!("{:016x}", self.state)
-//RS     }
-//RS }
-//RS 
-//RS /// Canonical text replay format shared by native, JIT, and host adapters.
-//RS /// The first non-empty line may be `jet.game.replay.v1`; every other line is
-//RS /// `<frame-index>\t<action>[,<action>...]`. Empty actions use `none`.
-//RS pub const JET_GAME_REPLAY_MAX_BYTES: usize = 2 * 1024 * 1024;
-//RS pub const JET_GAME_REPLAY_MAX_FRAMES: usize = 65_536;
-//RS pub const JET_GAME_REPLAY_MAX_ACTIONS_PER_FRAME: usize = 256;
-//RS pub const JET_GAME_REPLAY_MAX_ACTION_BYTES: usize = 256;
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetGameReplayFrame {
-//RS     pub index: i64,
-//RS     pub actions: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetGameReplay {
-//RS     frames: Vec<JetGameReplayFrame>,
-//RS }
-//RS 
-//RS impl JetGameReplay {
-//RS     pub fn from_path(path: &str) -> Result<Self, String> {
-//RS         if path.trim().is_empty() {
-//RS             return Err("game replay path must not be empty".to_string());
-//RS         }
-//RS         let bytes = std::fs::read(path)
-//RS             .map_err(|error| format!("could not read game replay `{path}`: {error}"))?;
-//RS         if bytes.len() > JET_GAME_REPLAY_MAX_BYTES {
-//RS             return Err("game replay exceeds the retained byte limit".to_string());
-//RS         }
-//RS         let source = String::from_utf8(bytes)
-//RS             .map_err(|_| "game replay must be UTF-8 text".to_string())?;
-//RS         let mut frames = Vec::new();
-//RS         let mut previous_index = None;
-//RS         for (line_number, raw_line) in source.lines().enumerate() {
-//RS             let line = raw_line.trim();
-//RS             if line.is_empty() || (frames.is_empty() && line == "jet.game.replay.v1") {
-//RS                 continue;
-//RS             }
-//RS             let (raw_index, raw_actions) = line.split_once('\t').ok_or_else(|| {
-//RS                 format!("game replay line {} requires a tab separator", line_number + 1)
-//RS             })?;
-//RS             let index = raw_index.parse::<i64>().map_err(|_| {
-//RS                 format!("game replay line {} has an invalid frame index", line_number + 1)
-//RS             })?;
-//RS             if index < 0 || previous_index.is_some_and(|previous| index <= previous) {
-//RS                 return Err(format!(
-//RS                     "game replay line {} frame indexes must be non-negative and increasing",
-//RS                     line_number + 1
-//RS                 ));
-//RS             }
-//RS             if frames.len() >= JET_GAME_REPLAY_MAX_FRAMES {
-//RS                 return Err("game replay exceeds the retained frame limit".to_string());
-//RS             }
-//RS             let actions = if raw_actions == "none" || raw_actions.is_empty() {
-//RS                 Vec::new()
-//RS             } else {
-//RS                 let mut actions = Vec::new();
-//RS                 for action in raw_actions.split(',') {
-//RS                     if actions.len() >= JET_GAME_REPLAY_MAX_ACTIONS_PER_FRAME {
-//RS                         return Err(format!(
-//RS                             "game replay line {} exceeds the action limit",
-//RS                             line_number + 1
-//RS                         ));
-//RS                     }
-//RS                     if action.is_empty()
-//RS                         || action.len() > JET_GAME_REPLAY_MAX_ACTION_BYTES
-//RS                         || action.chars().any(char::is_control)
-//RS                     {
-//RS                         return Err(format!(
-//RS                             "game replay line {} contains an invalid action",
-//RS                             line_number + 1
-//RS                         ));
-//RS                     }
-//RS                     actions.push(action.to_string());
-//RS                 }
-//RS                 actions
-//RS             };
-//RS             frames.push(JetGameReplayFrame { index, actions });
-//RS             previous_index = Some(index);
-//RS         }
-//RS         Ok(Self { frames })
-//RS     }
-//RS 
-//RS     pub fn actions_at(&self, index: i64) -> Option<&[String]> {
-//RS         self.frames
-//RS             .binary_search_by_key(&index, |frame| frame.index)
-//RS             .ok()
-//RS             .map(|position| self.frames[position].actions.as_slice())
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
-//RS pub enum JetGameChangeKind {
-//RS     Asset,
-//RS     Script,
-//RS     World,
-//RS }
-//RS 
-//RS impl JetGameChangeKind {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Asset => "asset",
-//RS             Self::Script => "script",
-//RS             Self::World => "world",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
-//RS pub enum JetGameMigrationDecision {
-//RS     Preserve,
-//RS     Migrate,
-//RS     Reset,
-//RS     Reject,
-//RS }
-//RS 
-//RS impl JetGameMigrationDecision {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Preserve => "preserve",
-//RS             Self::Migrate => "migrate",
-//RS             Self::Reset => "reset",
-//RS             Self::Reject => "reject",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
-//RS pub enum JetGameSwapStatus {
-//RS     Applied,
-//RS     Rejected,
-//RS }
-//RS 
-//RS impl JetGameSwapStatus {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Applied => "applied",
-//RS             Self::Rejected => "rejected",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn is_applied(self) -> bool {
-//RS         matches!(self, Self::Applied)
-//RS     }
-//RS }
-//RS 
-//RS /// Checked facts for exactly one game change.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetGameChangeFact {
-//RS     pub path: String,
-//RS     pub kind: JetGameChangeKind,
-//RS     pub old_schema_id: Option<String>,
-//RS     pub new_schema_id: Option<String>,
-//RS     pub migration: JetGameMigrationDecision,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS impl JetGameChangeFact {
-//RS     pub fn new(
-//RS         path: impl Into<String>,
-//RS         kind: JetGameChangeKind,
-//RS         old_schema_id: Option<String>,
-//RS         new_schema_id: Option<String>,
-//RS         migration: JetGameMigrationDecision,
-//RS         reason: impl Into<String>,
-//RS     ) -> Result<Self, String> {
-//RS         let fact = Self {
-//RS             path: path.into(),
-//RS             kind,
-//RS             old_schema_id,
-//RS             new_schema_id,
-//RS             migration,
-//RS             reason: reason.into(),
-//RS         };
-//RS         fact.validate()?;
-//RS         Ok(fact)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         if self.path.trim().is_empty() {
-//RS             return Err("game change fact path is empty".to_string());
-//RS         }
-//RS         if self.reason.trim().is_empty() {
-//RS             return Err(format!(
-//RS                 "game change fact `{}` has no checked reason",
-//RS                 self.path
-//RS             ));
-//RS         }
-//RS         for (label, value) in [
-//RS             ("old schema id", self.old_schema_id.as_deref()),
-//RS             ("new schema id", self.new_schema_id.as_deref()),
-//RS         ] {
-//RS             if value.is_some_and(|value| value.trim().is_empty()) {
-//RS                 return Err(format!("game change fact `{}` is empty", label));
-//RS             }
-//RS         }
-//RS         if matches!(self.migration, JetGameMigrationDecision::Migrate)
-//RS             && (self.old_schema_id.is_none() || self.new_schema_id.is_none())
-//RS         {
-//RS             return Err(format!(
-//RS                 "game change fact `{}` cannot migrate without old and new schema ids",
-//RS                 self.path
-//RS             ));
-//RS         }
-//RS         if matches!(self.migration, JetGameMigrationDecision::Reset) && self.new_schema_id.is_none()
-//RS         {
-//RS             return Err(format!(
-//RS                 "game change fact `{}` cannot reset without a new schema id",
-//RS                 self.path
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS     /// Replace the checked migration verdict without re-deriving path or
-//RS     /// schema identity. Used when the surrounding transaction rejects.
-//RS     pub fn with_migration(
-//RS         self,
-//RS         migration: JetGameMigrationDecision,
-//RS         reason: impl Into<String>,
-//RS     ) -> Result<Self, String> {
-//RS         Self::new(
-//RS             self.path,
-//RS             self.kind,
-//RS             self.old_schema_id,
-//RS             self.new_schema_id,
-//RS             migration,
-//RS             reason,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Result returned after the shared kernel accepts or rejects a checked fact.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetGameSwapOutcome {
-//RS     pub sequence: u64,
-//RS     pub fact: JetGameChangeFact,
-//RS     pub status: JetGameSwapStatus,
-//RS }
-//RS 
-//RS impl JetGameSwapOutcome {
-//RS     pub const fn is_applied(&self) -> bool {
-//RS         self.status.is_applied()
-//RS     }
-//RS 
-//RS     pub const fn kind(&self) -> JetGameChangeKind {
-//RS         self.fact.kind
-//RS     }
-//RS }
-//RS 
-//RS /// One canonical stateful operation kernel for game asset/script/world swaps.
-//RS #[derive(Clone, Debug, Default)]
-//RS pub struct JetGameSwapKernel {
-//RS     next_sequence: u64,
-//RS     last_outcome: Option<JetGameSwapOutcome>,
-//RS }
-//RS 
-//RS impl JetGameSwapKernel {
-//RS     pub fn new() -> Self {
-//RS         Self::default()
-//RS     }
-//RS 
-//RS     pub fn apply_asset_swap(
-//RS         &mut self,
-//RS         fact: JetGameChangeFact,
-//RS     ) -> Result<JetGameSwapOutcome, String> {
-//RS         self.apply(JetGameChangeKind::Asset, fact)
-//RS     }
-//RS 
-//RS     pub fn apply_script_reload(
-//RS         &mut self,
-//RS         fact: JetGameChangeFact,
-//RS     ) -> Result<JetGameSwapOutcome, String> {
-//RS         self.apply(JetGameChangeKind::Script, fact)
-//RS     }
-//RS 
-//RS     pub fn apply_world_reload(
-//RS         &mut self,
-//RS         fact: JetGameChangeFact,
-//RS     ) -> Result<JetGameSwapOutcome, String> {
-//RS         self.apply(JetGameChangeKind::World, fact)
-//RS     }
-//RS 
-//RS     pub fn last_outcome(&self) -> Option<&JetGameSwapOutcome> {
-//RS         self.last_outcome.as_ref()
-//RS     }
-//RS 
-//RS     fn apply(
-//RS         &mut self,
-//RS         expected_kind: JetGameChangeKind,
-//RS         fact: JetGameChangeFact,
-//RS     ) -> Result<JetGameSwapOutcome, String> {
-//RS         fact.validate()?;
-//RS         if fact.kind != expected_kind {
-//RS             return Err(format!(
-//RS                 "game swap operation `{}` received `{}` fact",
-//RS                 expected_kind.as_str(),
-//RS                 fact.kind.as_str()
-//RS             ));
-//RS         }
-//RS         self.next_sequence = self.next_sequence.saturating_add(1);
-//RS         let status = if matches!(fact.migration, JetGameMigrationDecision::Reject) {
-//RS             JetGameSwapStatus::Rejected
-//RS         } else {
-//RS             JetGameSwapStatus::Applied
-//RS         };
-//RS         let outcome = JetGameSwapOutcome {
-//RS             sequence: self.next_sequence,
-//RS             fact,
-//RS             status,
-//RS         };
-//RS         self.last_outcome = Some(outcome.clone());
-//RS         Ok(outcome)
-//RS     }
-//RS }
-//RS 
-//RS /// Host-facing session wrapper.  Generated Prelude code wraps the same
-//RS /// dependency-free kernel instead of implementing a second decision path.
-//RS #[derive(Clone, Debug, Default)]
-//RS pub struct JetGameDevSession {
-//RS     pub swap_kernel: JetGameSwapKernel,
-//RS }
-//RS 
-//RS impl JetGameDevSession {
-//RS     pub fn new() -> Self {
-//RS         Self::default()
-//RS     }
-//RS 
-//RS     pub fn apply_asset_swap(
-//RS         &mut self,
-//RS         fact: JetGameChangeFact,
-//RS     ) -> Result<JetGameSwapOutcome, String> {
-//RS         self.swap_kernel.apply_asset_swap(fact)
-//RS     }
-//RS 
-//RS     pub fn apply_script_reload(
-//RS         &mut self,
-//RS         fact: JetGameChangeFact,
-//RS     ) -> Result<JetGameSwapOutcome, String> {
-//RS         self.swap_kernel.apply_script_reload(fact)
-//RS     }
-//RS 
-//RS     pub fn apply_world_reload(
-//RS         &mut self,
-//RS         fact: JetGameChangeFact,
-//RS     ) -> Result<JetGameSwapOutcome, String> {
-//RS         self.swap_kernel.apply_world_reload(fact)
-//RS     }
-//RS 
-//RS     pub fn last_outcome(&self) -> Option<&JetGameSwapOutcome> {
-//RS         self.swap_kernel.last_outcome()
-//RS     }
-//RS }
-// END-PORT-PENDING 0062 crates/jet-foundation/src/Game.rs:1-483
+// Dependency-free game development swap facts shared by hosts and generated code.
+// Hosts supply filesystem/build/world facts; this module never infers game meaning.
+use core.files as game_files
 
+// Rust: crates/jet-foundation/src/Game.rs:13
+pub struct JetGameFrameBudget {
+    remaining: I64?
+    next_index: I64
+    frame_in_flight: Bool
+    // Rust: crates/jet-foundation/src/Game.rs:20
+    pub fn default() -> JetGameFrameBudget Never! { JetGameFrameBudget.default_headless() }
+    // Rust: crates/jet-foundation/src/Game.rs:26
+    pub DEFAULT_HEADLESS_FRAMES :: I64{3}
+    // Rust: crates/jet-foundation/src/Game.rs:27
+    pub FRAME_BUDGET_ERROR :: "`game.run` frame budget must be positive"
+    // Rust: crates/jet-foundation/src/Game.rs:29
+    pub fn live() -> JetGameFrameBudget Never! {
+        JetGameFrameBudget{remaining: None, next_index: I64{0}, frame_in_flight: false}
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:37
+    pub fn default_headless() -> JetGameFrameBudget Never! {
+        JetGameFrameBudget{remaining: Val(JetGameFrameBudget.DEFAULT_HEADLESS_FRAMES), next_index: I64{0}, frame_in_flight: false}
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:45
+    pub fn validate(frames: I64) Err! {
+        if frames <= I64{0} -> return Err(JetGameFrameBudget.FRAME_BUDGET_ERROR)
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:53
+    pub fn with_frame_count(frames: I64) -> JetGameFrameBudget Err! {
+        JetGameFrameBudget.validate(frames)?
+        JetGameFrameBudget{remaining: Val(frames), next_index: I64{0}, frame_in_flight: false}
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:62
+    pub fn set_requested(&self, frames: I64?) Err! {
+        if frames == .Val(count) -> self = JetGameFrameBudget.with_frame_count(count)?
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:69
+    pub fn should_continue(self) -> Bool Never! {
+        !self.frame_in_flight && (if self.remaining == { .Val(count) -> count > I64{0}, .None -> true })
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:73
+    pub fn next_frame(&self) -> I64? Never! {
+        if !self.should_continue() -> return None
+        self.frame_in_flight = true
+        index :: self.next_index
+        self.next_index = self.next_index.saturating_add(I64{1})
+        Val(index)
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:83
+    pub fn present(&self) Never! {
+        self.frame_in_flight = false
+        if self.remaining == .Val(count) -> self.remaining = Val(count.saturating_sub(I64{1}))
+    }
+}
+// Rust: crates/jet-foundation/src/Game.rs:93
+pub struct JetGameTranscriptHasher {
+    state: U64
+    // Rust: crates/jet-foundation/src/Game.rs:98
+    pub fn new() -> JetGameTranscriptHasher Never! {
+        hasher := JetGameTranscriptHasher{state: U64{0xcbf29ce484222325}}
+        &hasher.push_bytes("jet.game.transcript.v1".bytes())
+        &hasher.push_bytes([U8]{U8{0}})
+        ^hasher
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:106
+    fn push_bytes(&self, bytes: View<U8>) Never! {
+        loop byte in bytes {
+            self.state = (self.state ~| U64{byte}).wrapping_mul(U64{0x100000001b3})
+        }
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:113
+    fn push_u64(&self, value: U64) Never! {
+        // Fixed little-endian wire bytes, independent of selected target endian.
+        loop shift in 0..<8 {
+            byte :: U8{(value >> (shift * 8)) & U64{255}}
+            self.state = (self.state ~| U64{byte}).wrapping_mul(U64{0x100000001b3})
+        }
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:117
+    pub fn push_frame(&self, index: I64, input: View<String>) Never! {
+        &self.push_bytes("frame".bytes())
+        &self.push_bytes([U8]{U8{0}})
+        &self.push_u64(index.to_bits())
+        &self.push_u64(U64{input.len()})
+        loop action in input {
+            &self.push_u64(U64{action.bytes().len()})
+            &self.push_bytes(action.bytes())
+        }
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:127
+    pub fn finish(^self) -> String Never! {
+        out := [U8].with_capacity(16)
+        hex :: "0123456789abcdef".bytes()
+        loop index in 0..<16 {
+            &out.push(hex[Int{(self.state >> ((15 - index) * 4)) & U64{15}}])
+        }
+        String.from_bytes(^out) ?? panic("hexadecimal transcript hash is UTF-8")
+    }
+}
+// Rust: crates/jet-foundation/src/Game.rs:135
+pub JET_GAME_REPLAY_MAX_BYTES :: 2 * 1024 * 1024
+// Rust: crates/jet-foundation/src/Game.rs:136
+pub JET_GAME_REPLAY_MAX_FRAMES :: 65_536
+// Rust: crates/jet-foundation/src/Game.rs:137
+pub JET_GAME_REPLAY_MAX_ACTIONS_PER_FRAME :: 256
+// Rust: crates/jet-foundation/src/Game.rs:138
+pub JET_GAME_REPLAY_MAX_ACTION_BYTES :: 256
+// Rust: crates/jet-foundation/src/Game.rs:141
+pub struct JetGameReplayFrame { pub index: I64, pub actions: [String] }
+// Rust: crates/jet-foundation/src/Game.rs:147
+pub struct JetGameReplay {
+    frames: [JetGameReplayFrame]
+    // Rust: crates/jet-foundation/src/Game.rs:152
+    pub fn from_path(path: String) -[FS.Read]> JetGameReplay Err! {
+        trimmed := path.trim() // #4303
+        if trimmed.is_empty() -> return Err("game replay path must not be empty")
+        bytes :: if game_files.read_bytes(OSPath.from_text(path)) == {
+            .Ok(value) -> value
+            .Err(error) -> return Err("could not read game replay `{path}`: {error}")
+        }
+        if bytes.len() > JET_GAME_REPLAY_MAX_BYTES -> return Err("game replay exceeds the retained byte limit")
+        source :: String.from_bytes(^bytes) ?? return Err("game replay must be UTF-8 text")
+        frames := [JetGameReplayFrame]{}
+        previous_index := I64?{None}
+        loop (line_number, raw_line) in source.lines() {
+            line := raw_line.trim() // #4303
+            if line.is_empty() || (frames.is_empty() && line == "jet.game.replay.v1") -> next
+            fields :: line.split_once("\t") ?? return Err("game replay line {line_number + 1} requires a tab separator")
+            index :: fields.0.parse<I64>() ?? return Err("game replay line {line_number + 1} has an invalid frame index")
+            if index < I64{0} || (if previous_index == { .Val(previous) -> index <= previous, .None -> false }) {
+                return Err("game replay line {line_number + 1} frame indexes must be non-negative and increasing")
+            }
+            if frames.len() >= JET_GAME_REPLAY_MAX_FRAMES -> return Err("game replay exceeds the retained frame limit")
+            actions := [String]{}
+            raw_actions :: fields.1
+            if raw_actions != "none" && !raw_actions.is_empty() {
+                loop action in raw_actions.split(",") {
+                    if actions.len() >= JET_GAME_REPLAY_MAX_ACTIONS_PER_FRAME -> return Err("game replay line {line_number + 1} exceeds the action limit")
+                    invalid := action.is_empty() || action.bytes().len() > JET_GAME_REPLAY_MAX_ACTION_BYTES
+                    // Rust char::is_control covers C0, DEL and Unicode C1, not only ASCII controls.
+                    loop scalar in action.chars() {
+                        if scalar.is_control() { invalid = true; break }
+                    }
+                    if invalid -> return Err("game replay line {line_number + 1} contains an invalid action")
+                    &actions.push(action.to_string())
+                }
+            }
+            &frames.push(JetGameReplayFrame{index: index, actions: ^actions})
+            previous_index = Val(index)
+        }
+        JetGameReplay{frames: ^frames}
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:215
+    pub fn actions_at(self, index: I64) -> View<String>? Never! from self {
+        low := 0
+        high := self.frames.len()
+        loop low < high {
+            middle :: low + (high - low) / 2
+            if self.frames[middle].index < index -> low = middle + 1
+            else -> high = middle
+        }
+        if low < self.frames.len() && self.frames[low].index == index {
+            return Val(self.frames[low].actions.view(0..<self.frames[low].actions.len()))
+        }
+        None
+    }
+}
+// Rust: crates/jet-foundation/src/Game.rs:224
+pub enum JetGameChangeKind {
+    Asset, Script, World
+    // Rust: crates/jet-foundation/src/Game.rs:231
+    pub fn as_str(self) -> String Never! {
+        if self == { .Asset -> "asset", .Script -> "script", .World -> "world" }
+    }
+}
+// Rust: crates/jet-foundation/src/Game.rs:241
+pub enum JetGameMigrationDecision {
+    Preserve, Migrate, Reset, Reject
+    // Rust: crates/jet-foundation/src/Game.rs:249
+    pub fn as_str(self) -> String Never! {
+        if self == { .Preserve -> "preserve", .Migrate -> "migrate", .Reset -> "reset", .Reject -> "reject" }
+    }
+}
+// Rust: crates/jet-foundation/src/Game.rs:260
+pub enum JetGameSwapStatus {
+    Applied, Rejected
+    // Rust: crates/jet-foundation/src/Game.rs:266
+    pub fn as_str(self) -> String Never! { if self == { .Applied -> "applied", .Rejected -> "rejected" } }
+    // Rust: crates/jet-foundation/src/Game.rs:273
+    pub fn is_applied(self) -> Bool Never! { self == JetGameSwapStatus.Applied }
+}
+// Rust: crates/jet-foundation/src/Game.rs:280
+pub struct JetGameChangeFact {
+    pub path: String
+    pub kind: JetGameChangeKind
+    pub old_schema_id: String?
+    pub new_schema_id: String?
+    pub migration: JetGameMigrationDecision
+    pub reason: String
+    // Rust: crates/jet-foundation/src/Game.rs:290
+    pub fn new(path: ^String, kind: JetGameChangeKind, old_schema_id: ^String?, new_schema_id: ^String?, migration: JetGameMigrationDecision, reason: ^String) -> JetGameChangeFact Err! {
+        fact :: JetGameChangeFact{path: ^path, kind: kind, old_schema_id: ^old_schema_id, new_schema_id: ^new_schema_id, migration: migration, reason: ^reason}
+        fact.validate()?
+        ^fact
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:310
+    pub fn validate(self) Err! {
+        path := self.path.trim() // #4303
+        if path.is_empty() -> return Err("game change fact path is empty")
+        reason := self.reason.trim() // #4303
+        if reason.is_empty() -> return Err("game change fact `{self.path}` has no checked reason")
+        if self.old_schema_id == .Val(value) {
+            trimmed := value.trim() // #4303
+            if trimmed.is_empty() -> return Err("game change fact `old schema id` is empty")
+        }
+        if self.new_schema_id == .Val(value) {
+            trimmed := value.trim() // #4303
+            if trimmed.is_empty() -> return Err("game change fact `new schema id` is empty")
+        }
+        if self.migration == JetGameMigrationDecision.Migrate && (self.old_schema_id == None || self.new_schema_id == None) {
+            return Err("game change fact `{self.path}` cannot migrate without old and new schema ids")
+        }
+        if self.migration == JetGameMigrationDecision.Reset && self.new_schema_id == None {
+            return Err("game change fact `{self.path}` cannot reset without a new schema id")
+        }
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:347
+    // Replace the checked verdict without re-deriving path or schema identity.
+    pub fn with_migration(^self, migration: JetGameMigrationDecision, reason: ^String) -> JetGameChangeFact Err! {
+        JetGameChangeFact.new(^self.path, self.kind, ^self.old_schema_id, ^self.new_schema_id, migration, ^reason)
+    }
+}
+// Rust: crates/jet-foundation/src/Game.rs:365
+pub struct JetGameSwapOutcome {
+    pub sequence: U64
+    pub fact: JetGameChangeFact
+    pub status: JetGameSwapStatus
+    // Rust: crates/jet-foundation/src/Game.rs:372
+    pub fn is_applied(self) -> Bool Never! { self.status.is_applied() }
+    // Rust: crates/jet-foundation/src/Game.rs:376
+    pub fn kind(self) -> JetGameChangeKind Never! { self.fact.kind }
+}
+// Rust: crates/jet-foundation/src/Game.rs:383
+pub struct JetGameSwapKernel {
+    next_sequence: U64
+    last_outcome: JetGameSwapOutcome?
+    // Rust: crates/jet-foundation/src/Game.rs:389
+    pub fn new() -> JetGameSwapKernel Never! { JetGameSwapKernel.default() }
+    // Rust: crates/jet-foundation/src/Game.rs:382
+    pub fn default() -> JetGameSwapKernel Never! { JetGameSwapKernel{next_sequence: U64{0}, last_outcome: None} }
+    // Rust: crates/jet-foundation/src/Game.rs:393
+    pub fn apply_asset_swap(&self, fact: ^JetGameChangeFact) -> JetGameSwapOutcome Err! { &self.apply(JetGameChangeKind.Asset, ^fact) }
+    // Rust: crates/jet-foundation/src/Game.rs:400
+    pub fn apply_script_reload(&self, fact: ^JetGameChangeFact) -> JetGameSwapOutcome Err! { &self.apply(JetGameChangeKind.Script, ^fact) }
+    // Rust: crates/jet-foundation/src/Game.rs:407
+    pub fn apply_world_reload(&self, fact: ^JetGameChangeFact) -> JetGameSwapOutcome Err! { &self.apply(JetGameChangeKind.World, ^fact) }
+    // Rust: crates/jet-foundation/src/Game.rs:414
+    pub fn last_outcome(self) -> (@JetGameSwapOutcome)? Never! from self {
+        if self.last_outcome == .Val(outcome) -> return Val(@outcome)
+        None
+    }
+    // Rust: crates/jet-foundation/src/Game.rs:418
+    fn apply(&self, expected_kind: JetGameChangeKind, fact: ^JetGameChangeFact) -> JetGameSwapOutcome Err! {
+        fact.validate()?
+        if fact.kind != expected_kind -> return Err("game swap operation `{expected_kind.as_str()}` received `{fact.kind.as_str()}` fact")
+        self.next_sequence = self.next_sequence.saturating_add(U64{1})
+        status :: if fact.migration == JetGameMigrationDecision.Reject -> JetGameSwapStatus.Rejected else -> JetGameSwapStatus.Applied
+        outcome :: JetGameSwapOutcome{sequence: self.next_sequence, fact: ^fact, status: status}
+        self.last_outcome = Val(~outcome)
+        ^outcome
+    }
+}
+// Rust: crates/jet-foundation/src/Game.rs:450
+// Generated code wraps this kernel rather than implementing a second decision path.
+pub struct JetGameDevSession {
+    pub swap_kernel: JetGameSwapKernel
+    // Rust: crates/jet-foundation/src/Game.rs:455
+    pub fn new() -> JetGameDevSession Never! { JetGameDevSession.default() }
+    // Rust: crates/jet-foundation/src/Game.rs:449
+    pub fn default() -> JetGameDevSession Never! { JetGameDevSession{swap_kernel: JetGameSwapKernel.default()} }
+    // Rust: crates/jet-foundation/src/Game.rs:459
+    pub fn apply_asset_swap(&self, fact: ^JetGameChangeFact) -> JetGameSwapOutcome Err! { &self.swap_kernel.apply_asset_swap(^fact) }
+    // Rust: crates/jet-foundation/src/Game.rs:466
+    pub fn apply_script_reload(&self, fact: ^JetGameChangeFact) -> JetGameSwapOutcome Err! { &self.swap_kernel.apply_script_reload(^fact) }
+    // Rust: crates/jet-foundation/src/Game.rs:473
+    pub fn apply_world_reload(&self, fact: ^JetGameChangeFact) -> JetGameSwapOutcome Err! { &self.swap_kernel.apply_world_reload(^fact) }
+    // Rust: crates/jet-foundation/src/Game.rs:480
+    pub fn last_outcome(self) -> (@JetGameSwapOutcome)? Never! from self { self.swap_kernel.last_outcome() }
+}

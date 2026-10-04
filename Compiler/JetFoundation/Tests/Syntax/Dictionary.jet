@@ -1,0 +1,23 @@
+use JetFoundation.Syntax as syntax
+use JetFoundation.Registry as registry
+use JetFoundation.Syntax.Dictionary.[lookup, rows, source_decisions]
+
+// Rust: crates/jet-foundation/src/Syntax/dictionary.rs:942
+#Test("dictionary_covers_highlights_and_keywords_without_foreign_words") {
+    loop token in syntax.JET_HIGHLIGHT_TOKENS {
+        assert(lookup(token.text) != None, "missing highlight token `" + token.text + "`")
+    }
+    loop token in syntax.JET_KEYWORD_LIST {
+        assert(lookup(token) != None, "missing keyword `" + token + "`")
+    }
+    constants :: source_decisions()
+    loop row in rows() {
+        found := false
+        loop (token, _) in constants { if token == row.token { found = true; break } }
+        assert(found || registry.row(row.token) != None, "dictionary token `" + row.token + "` is not a Syntax constant or registry marker")
+        assert_ne(row.decision, "Syntax.rs", "missing decision ID for `" + row.token + "`")
+        examples := !row.meanings.is_empty()
+        loop meaning in row.meanings { if meaning.example.is_empty() -> examples = false }
+        assert(examples, "missing example for `" + row.token + "`")
+    }
+}

@@ -1,0 +1,45 @@
+use JetFoundation.Game.[JetGameFrameBudget, JetGameTranscriptHasher, JetGameChangeFact, JetGameChangeKind, JetGameMigrationDecision, JetGameDevSession]
+
+// Rust: crates/jet-foundation/src/Game.rs:29-88
+// No inline Rust tests; controls cover the shared frame cursor and checked swap kernel.
+#Test("headless frame plan advances only through presentation") {
+    budget := JetGameFrameBudget.default()
+    assert(&budget.next_frame() == Val(I64{0}))
+    assert(&budget.next_frame() == None)
+    &budget.present()
+    assert(&budget.next_frame() == Val(I64{1}))
+    &budget.present()
+    assert(&budget.next_frame() == Val(I64{2}))
+    &budget.present()
+    assert(!budget.should_continue())
+    assert(JetGameFrameBudget.with_frame_count(I64{0}).is_err())
+    _ :: &budget.set_requested(Val(I64{1})) ?? panic("valid frame count rejected")
+    assert(&budget.next_frame() == Val(I64{0}))
+    live := JetGameFrameBudget.live()
+    assert(live.should_continue())
+}
+// Rust: crates/jet-foundation/src/Game.rs:117-129
+#Test("transcript hashes preserve action boundaries") {
+    left := JetGameTranscriptHasher.new()
+    right := JetGameTranscriptHasher.new()
+    first :: [String]{"ab", "c"}
+    second :: [String]{"a", "bc"}
+    &left.push_frame(I64{0}, first.view(0..<first.len()))
+    &right.push_frame(I64{0}, second.view(0..<second.len()))
+    assert(left.finish() != right.finish())
+}
+// Rust: crates/jet-foundation/src/Game.rs:290-443
+#Test("checked swaps retain rejected outcomes and validate before mutation") {
+    session := JetGameDevSession.new()
+    assert(JetGameChangeFact.new("", JetGameChangeKind.Asset, None, None, JetGameMigrationDecision.Preserve, "checked").is_err())
+    assert(JetGameChangeFact.new("x", JetGameChangeKind.Script, None, None, JetGameMigrationDecision.Migrate, "checked").is_err())
+    fact :: JetGameChangeFact.new("x", JetGameChangeKind.Asset, None, None, JetGameMigrationDecision.Reject, "unsupported") ?? panic("valid rejection fact")
+    outcome :: &session.apply_asset_swap(^fact) ?? panic("checked rejection must yield outcome")
+    assert(!outcome.is_applied() && outcome.sequence == U64{1})
+    mismatch :: JetGameChangeFact.new("x", JetGameChangeKind.World, None, None, JetGameMigrationDecision.Preserve, "checked") ?? panic("valid world fact")
+    assert((&session.apply_asset_swap(^mismatch)).is_err())
+    fact2 :: JetGameChangeFact.new("x", JetGameChangeKind.Asset, None, None, JetGameMigrationDecision.Preserve, "checked") ?? panic("valid asset fact")
+    applied :: &session.apply_asset_swap(^fact2) ?? panic("valid swap rejected")
+    assert(applied.is_applied() && applied.sequence == U64{2})
+    assert((session.last_outcome() ?? panic("missing last outcome")).sequence == U64{2})
+}

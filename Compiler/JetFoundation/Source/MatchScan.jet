@@ -1,284 +1,111 @@
-// PORT-PENDING 0066 crates-jet-foundation-src-hex-module-group: crates/jet-foundation/src/MatchScan.rs:1-280
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! AST adapters for D-PARSESTR1 / D-BINPAT1 match scans.
-//RS //!
-//RS //! Binary matching semantics live in the Foundation-owned Prelude fragment
-//RS //! `Prelude/MatchScan.rs`. AOT embeds that fragment; Foundation's AST adapter,
-//RS //! the Cranelift JIT host, and the canonical TIR evaluator marshal into it.
-//RS //! String matching remains separate: AST tiers use this text adapter, while AOT
-//RS //! keeps its existing generated text path.
-//RS 
-//RS use crate::AST::{BinEndian, BinMatchPart, BinSpec, StrMatchPart, Type};
-//RS 
-//RS mod bin_kernel {
-//RS     include!("Prelude/MatchScan.rs");
-//RS }
-//RS 
-//RS 
-//RS pub use bin_kernel::{
-//RS     jet_bin_match_scan, jet_binary_pattern_match, jet_text_match_scan, jet_text_pattern_match,
-//RS     JetBinMatchPart, JetBinMatchValue, JetPatternCapture, JetTextHoleKind, JetTextMatchPart,
-//RS };
-//RS mod inline_range_semantics {
-//RS     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
-//RS }
-//RS 
-//RS /// One value bound by a binary pattern hole: a fixed-width integer, or the
-//RS /// `..rest` tail as raw bytes.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum BinBind {
-//RS     Int(i64),
-//RS     Rest(Vec<u8>),
-//RS }
-//RS 
-//RS /// Shared string-match scan used by pattern arms and `Cursor.take_pattern`.
-//RS /// `consume_prefix` allows unmatched trailing text (cursor mode); otherwise the
-//RS /// pattern must cover the whole subject.
-//RS pub fn str_match_scan(
-//RS     subject: &str,
-//RS     parts: &[StrMatchPart],
-//RS     consume_prefix: bool,
-//RS ) -> Option<Vec<(String, Type, String)>> {
-//RS     let mut i = 0usize;
-//RS     let mut binds = Vec::new();
-//RS     for (pi, part) in parts.iter().enumerate() {
-//RS         match part {
-//RS             StrMatchPart::Lit(lit) => {
-//RS                 if !subject[i..].starts_with(lit.as_str()) {
-//RS                     return None;
-//RS                 }
-//RS                 i += lit.len();
-//RS             }
-//RS             StrMatchPart::Hole { name, ty, .. } => {
-//RS                 let end = match parts.get(pi + 1) {
-//RS                     Some(StrMatchPart::Lit(next)) => {
-//RS                         subject[i..].find(next.as_str()).map(|o| i + o)?
-//RS                     }
-//RS                     // A trailing hole takes the rest of the subject in both
-//RS                     // modes; in consume mode the caller stops at `i`.
-//RS                     _ => subject.len(),
-//RS                 };
-//RS                 let raw = &subject[i..end];
-//RS                 if !str_hole_admits(ty, raw) {
-//RS                     return None;
-//RS                 }
-//RS                 binds.push((
-//RS                     name.clone(),
-//RS                     ty.clone().unwrap_or(Type::String),
-//RS                     raw.to_string(),
-//RS                 ));
-//RS                 i = end;
-//RS             }
-//RS         }
-//RS     }
-//RS     if !consume_prefix && i != subject.len() {
-//RS         return None;
-//RS     }
-//RS     Some(binds)
-//RS }
-//RS 
-//RS fn str_hole_admits(ty: &Option<Type>, raw: &str) -> bool {
-//RS     match ty {
-//RS         Some(Type::Int) => crate::Numeric::CtBigInt::from_str(raw).is_ok(),
-//RS         Some(Type::IntN { .. }) => raw.parse::<i64>().is_ok(),
-//RS         Some(Type::InlineRange { lo, hi, .. }) => raw
-//RS             .parse::<i64>()
-//RS             .ok()
-//RS             .and_then(|value| {
-//RS                 inline_range_semantics::jet_inline_range_from_int(value, *lo, *hi).ok()
-//RS             })
-//RS             .is_some(),
-//RS         Some(Type::Float) | Some(Type::Float32) => raw.parse::<f64>().is_ok(),
-//RS         Some(Type::Bool) => matches!(raw, "true" | "false" | "True" | "False" | "0" | "1"),
-//RS         _ => true,
-//RS     }
-//RS }
-//RS 
-//RS /// Byte length of `subject` consumed by a successful `str_match_scan` in
-//RS /// consume mode — how far `Cursor.take_pattern` advances.
-//RS pub fn str_match_consumed(subject: &str, parts: &[StrMatchPart]) -> Option<usize> {
-//RS     let mut i = 0usize;
-//RS     for (pi, part) in parts.iter().enumerate() {
-//RS         match part {
-//RS             StrMatchPart::Lit(lit) => {
-//RS                 if !subject[i..].starts_with(lit.as_str()) {
-//RS                     return None;
-//RS                 }
-//RS                 i += lit.len();
-//RS             }
-//RS             StrMatchPart::Hole { ty, .. } => {
-//RS                 let end = match parts.get(pi + 1) {
-//RS                     Some(StrMatchPart::Lit(next)) => {
-//RS                         subject[i..].find(next.as_str()).map(|o| i + o)?
-//RS                     }
-//RS                     _ => subject.len(),
-//RS                 };
-//RS                 if !str_hole_admits(ty, &subject[i..end]) {
-//RS                     return None;
-//RS                 }
-//RS                 i = end;
-//RS             }
-//RS         }
-//RS     }
-//RS     Some(i)
-//RS }
-//RS 
-//RS /// Fixed-width holes use the smallest standard integer carrier that holds the
-//RS /// declared width. This matches sema and codegen (`U24` is carried as `U32`).
-//RS fn bin_bits_type(width: u8) -> Type {
-//RS     let bits = if width <= 8 {
-//RS         8
-//RS     } else if width <= 16 {
-//RS         16
-//RS     } else if width <= 32 {
-//RS         32
-//RS     } else {
-//RS         64
-//RS     };
-//RS     Type::IntN {
-//RS         signed: false,
-//RS         bits,
-//RS     }
-//RS }
-//RS 
-//RS /// Byte-mode sibling of `str_match_scan`. Returns the bit position reached
-//RS /// plus the bound holes.
-//RS pub fn bin_match_scan(
-//RS     subject: &[u8],
-//RS     parts: &[BinMatchPart],
-//RS     consume_prefix: bool,
-//RS ) -> Option<(usize, Vec<(String, Type, BinBind)>)> {
-//RS     let kernel_parts = parts
-//RS         .iter()
-//RS         .map(|part| match part {
-//RS             BinMatchPart::Lit(bytes) => bin_kernel::JetBinMatchPart::Lit(bytes.as_slice()),
-//RS             BinMatchPart::Hole { spec, .. } => match spec {
-//RS                 BinSpec::Bits { width, endian } => bin_kernel::JetBinMatchPart::Bits {
-//RS                     width: *width as usize,
-//RS                     little: matches!(endian, BinEndian::Little),
-//RS                 },
-//RS                 BinSpec::Rest => bin_kernel::JetBinMatchPart::Rest,
-//RS             },
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let (bit_pos, values) = bin_kernel::jet_bin_match_scan(subject, &kernel_parts, consume_prefix)?;
-//RS     let mut values = values.into_iter();
-//RS     let mut binds = Vec::new();
-//RS     for part in parts {
-//RS         let BinMatchPart::Hole { name, spec, .. } = part else {
-//RS             continue;
-//RS         };
-//RS         let value = values.next()?;
-//RS         let (ty, bind) = match (spec, value) {
-//RS             (BinSpec::Bits { width, .. }, bin_kernel::JetBinMatchValue::Int(value)) => {
-//RS                 (bin_bits_type(*width), BinBind::Int(value as i64))
-//RS             }
-//RS             (BinSpec::Rest, bin_kernel::JetBinMatchValue::Rest(bytes)) => (
-//RS                 Type::List(Box::new(Type::IntN {
-//RS                     signed: false,
-//RS                     bits: 8,
-//RS                 })),
-//RS                 BinBind::Rest(bytes),
-//RS             ),
-//RS             _ => return None,
-//RS         };
-//RS         binds.push((name.clone(), ty, bind));
-//RS     }
-//RS     Some((bit_pos, binds))
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod match_scan_tests {
-//RS     use super::*;
-//RS 
-//RS     use crate::Diagnostics::Span;
-//RS 
-//RS     fn hole(name: &str, ty: Type) -> StrMatchPart {
-//RS         StrMatchPart::Hole {
-//RS             name: name.to_string(),
-//RS             ty: Some(ty),
-//RS             span: Span::new(0, 0),
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn str_scan_binds_and_reports_consumption() {
-//RS         let parts = vec![
-//RS             StrMatchPart::Lit("inc-".to_string()),
-//RS             hole("id", Type::Int),
-//RS             StrMatchPart::Lit(" sev ".to_string()),
-//RS             hole("sev", Type::Int),
-//RS             StrMatchPart::Lit(": ".to_string()),
-//RS         ];
-//RS         let subject = "inc-42 sev 3: disk full";
-//RS         let binds = str_match_scan(subject, &parts, true).expect("consume-mode match");
-//RS         assert_eq!(binds[0].2, "42");
-//RS         assert_eq!(binds[1].2, "3");
-//RS         assert_eq!(str_match_consumed(subject, &parts), Some(14));
-//RS         // Full-match mode rejects the unconsumed tail.
-//RS         assert!(str_match_scan(subject, &parts, false).is_none());
-//RS         // A non-numeric hole fails the Int check.
-//RS         assert!(str_match_scan("inc-x sev 3: y", &parts, true).is_none());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn bin_scan_reads_widths_and_rest() {
-//RS         let parts = vec![
-//RS             BinMatchPart::Hole {
-//RS                 name: "tag".to_string(),
-//RS                 spec: BinSpec::Bits {
-//RS                     width: 16,
-//RS                     endian: BinEndian::Little,
-//RS                 },
-//RS                 span: Span::new(0, 0),
-//RS             },
-//RS             BinMatchPart::Hole {
-//RS                 name: "body".to_string(),
-//RS                 spec: BinSpec::Rest,
-//RS                 span: Span::new(0, 0),
-//RS             },
-//RS         ];
-//RS         let (bits, binds) = bin_match_scan(&[1, 0, 9, 9], &parts, false).expect("match");
-//RS         assert_eq!(bits, 32);
-//RS         assert_eq!(binds[0].2, BinBind::Int(1));
-//RS         assert_eq!(binds[1].2, BinBind::Rest(vec![9, 9]));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn bin_scan_reads_new_byte_widths_both_endians_and_rejects_short_input() {
-//RS         // Slice-typed rows on purpose: the widths differ, so a fixed-size array
-//RS         // element type would pin every row to the first row's length.
-//RS         let cases: [(u8, &[u8], i64, i64); 4] = [
-//RS             (24, &[1, 2, 3], 66051, 197121),
-//RS             (40, &[1, 2, 3, 4, 5], 4328719365, 21542142465),
-//RS             (48, &[1, 2, 3, 4, 5, 6], 1108152157446, 6618611909121),
-//RS             (
-//RS                 56,
-//RS                 &[1, 2, 3, 4, 5, 6, 7],
-//RS                 283686952306183,
-//RS                 1976943448883713,
-//RS             ),
-//RS         ];
-//RS 
-//RS         for (width, bytes, big_endian, little_endian) in cases {
-//RS             for (endian, expected) in [
-//RS                 (BinEndian::Big, big_endian),
-//RS                 (BinEndian::Little, little_endian),
-//RS             ] {
-//RS                 let parts = vec![BinMatchPart::Hole {
-//RS                     name: "value".to_string(),
-//RS                     spec: BinSpec::Bits { width, endian },
-//RS                     span: Span::new(0, 0),
-//RS                 }];
-//RS                 let (bits, binds) = bin_match_scan(bytes, &parts, false).expect("full-width match");
-//RS                 assert_eq!(bits, width as usize);
-//RS                 assert_eq!(binds[0].1, bin_bits_type(width));
-//RS                 assert_eq!(binds[0].2, BinBind::Int(expected));
-//RS                 assert!(bin_match_scan(&[], &parts, false).is_none());
-//RS                 assert!(bin_match_scan(&bytes[..bytes.len() - 1], &parts, false).is_none());
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0066 crates/jet-foundation/src/MatchScan.rs:1-280
-
+// AST adapters for shared binary matching and the separate text matcher.
+use JetFoundation.AST.[BinEndian, BinMatchPart, BinSpec, StrMatchPart, Type]
+use JetFoundation.Numeric.[CtBigInt]
+use JetFoundation.Prelude.MatchScan as bin_kernel
+use JetCodegen.Prelude.Core.InlineRange as inline_range_semantics
+// Rust: crates/jet-foundation/src/MatchScan.rs:16
+// Shared kernel remains canonical; callers import it directly, not reexports.
+// Rust: crates/jet-foundation/src/MatchScan.rs:27
+pub enum BinBind { Int(value: Int) Rest(bytes: [U8]) }
+// Rust: crates/jet-foundation/src/MatchScan.rs:35
+pub fn str_match_scan(subject: String, parts: [StrMatchPart], consume_prefix: Bool) -> [(String,Type,String)]? Never! {
+    i := 0
+    binds := [(String,Type,String)]{}
+    loop (pi, part) in parts {
+        if part == {
+            .Lit(lit) -> {
+                tail := subject.slice(i..<subject.len()) // #4303: byte offsets, borrowed text.
+                if !tail.starts_with(lit) -> return None
+                i += lit.len()
+            }
+            .Hole(name, ty, _) -> {
+                end := subject.len()
+                if parts.get(pi + 1) == .Val(.Lit(next)) {
+                    tail := subject.slice(i..<subject.len()) // #4303
+                    end = i + (tail.find(next) ?? return None)
+                }
+                raw := subject.slice(i..<end) // #4303
+                if !str_hole_admits(ty, raw) -> return None
+                binds.push((name, ty ?? Type.String, raw.to_string()))
+                i = end
+            }
+        }
+    }
+    if !consume_prefix && i != subject.len() -> return None
+    Val(^binds)
+}
+// Rust: crates/jet-foundation/src/MatchScan.rs:78
+fn str_hole_admits(ty: Type?, raw: String) -> Bool Never! {
+    if ty == {
+        .Val(.Int) -> CtBigInt.from_str(raw).is_ok()
+        .Val(.IntN(_, _)) -> raw.parse<Int>().is_ok()
+        .Val(.InlineRange(lo, hi, _)) -> {
+            if raw.parse<Int>() == {
+                .Ok(value) -> inline_range_semantics.jet_inline_range_from_int(value, lo, hi).is_ok()
+                .Err(_) -> false
+            }
+        }
+        .Val(.Float) | .Val(.Float32) -> raw.parse<F64>().is_ok()
+        .Val(.Bool) -> raw == "true" || raw == "false" || raw == "True" || raw == "False" || raw == "0" || raw == "1"
+        else -> true
+    }
+}
+// Rust: crates/jet-foundation/src/MatchScan.rs:97
+pub fn str_match_consumed(subject: String, parts: [StrMatchPart]) -> Int? Never! {
+    i := 0
+    loop (pi, part) in parts {
+        if part == {
+            .Lit(lit) -> {
+                tail := subject.slice(i..<subject.len()) // #4303
+                if !tail.starts_with(lit) -> return None
+                i += lit.len()
+            }
+            .Hole(_, ty, _) -> {
+                end := subject.len()
+                if parts.get(pi + 1) == .Val(.Lit(next)) {
+                    tail := subject.slice(i..<subject.len()) // #4303
+                    end = i + (tail.find(next) ?? return None)
+                }
+                raw := subject.slice(i..<end) // #4303
+                if !str_hole_admits(ty, raw) -> return None
+                i = end
+            }
+        }
+    }
+    Val(i)
+}
+// Rust: crates/jet-foundation/src/MatchScan.rs:126
+fn bin_bits_type(width: U8) -> Type Never! {
+    bits :: if width <= 8 { 8 } else if width <= 16 { 16 } else if width <= 32 { 32 } else { 64 }
+    Type.IntN(signed: false, bits: bits)
+}
+// Rust: crates/jet-foundation/src/MatchScan.rs:144
+pub fn bin_match_scan(subject: View<U8>, parts: [BinMatchPart], consume_prefix: Bool) -> (Int,[(String,Type,BinBind)])? Never! {
+    kernel_parts := [bin_kernel.JetBinMatchPart]{}
+    loop part in parts {
+        if part == {
+            .Lit(bytes) -> kernel_parts.push(.Lit(bytes.view()))
+            .Hole(_, spec, _) -> {
+                if spec == {
+                    .Bits(width, endian) -> kernel_parts.push(.Bits(width: width as Int, little: endian == BinEndian.Little))
+                    .Rest -> kernel_parts.push(.Rest)
+                }
+            }
+        }
+    }
+    (bit_pos, values) :: bin_kernel.jet_bin_match_scan(subject, kernel_parts.view(), consume_prefix) ?? return None
+    values_iter := values.into_iter()
+    binds := [(String,Type,BinBind)]{}
+    loop part in parts {
+        if part == .Hole(name, spec, _) {
+            value :: values_iter.next() ?? return None
+            (ty, bind) :: if (spec, value) == {
+                (.Bits(width, _), .Int(value)) -> (bin_bits_type(width), BinBind.Int(value as Int))
+                (.Rest, .Rest(bytes)) -> (Type.List(Type.IntN(signed: false, bits: 8)), BinBind.Rest(^bytes))
+                else -> return None
+            }
+            binds.push((name, ty, ^bind))
+        }
+    }
+    Val((bit_pos, ^binds))
+}

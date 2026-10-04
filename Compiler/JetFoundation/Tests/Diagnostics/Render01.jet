@@ -1,0 +1,41 @@
+use JetFoundation.Diagnostics.Render01.[Theme, ColorChoice]
+// GATE #4494: real child processes and environment access; no in-process env mutation.
+use std.env
+use std.process.Command
+
+// Rust: crates/jet-foundation/src/Terminal.rs:107
+#Test("roles_are_semantic_and_plain_mode_is_byte_stable") {
+    plain :: Theme.new(false)
+    color :: Theme.new(true)
+    prefix :: (String.from_bytes([U8]{27}) ?? panic("invalid ASCII escape byte")) + "["
+    loop role in [Theme.accent, Theme.dim, Theme.success, Theme.warn, Theme.error, Theme.invert, Theme.border] {
+        assert_eq(role(plain, "x"), "x")
+        assert(role(color, "x").starts_with(prefix))
+    }
+}
+// Rust: crates/jet-foundation/src/Terminal.rs:125
+#Test("color_precedence_is_proved_in_isolated_children") {
+    CHILD :: "JET_THEME_POLICY_CHILD"
+    if case :: env.var(CHILD).ok() {
+        (choice, tty, expected) :: if case == {
+            "always-over-no" -> (ColorChoice.Always, false, true)
+            "never-over-force" -> (ColorChoice.Never, true, false)
+            "empty-no-over-force" -> (ColorChoice.Auto, true, false)
+            "force-off-tty" -> (ColorChoice.Auto, false, true)
+            "auto-tty" -> (ColorChoice.Auto, true, true)
+            else -> panic("unknown child case")
+        }
+        assert_eq(choice.resolve(tty), expected)
+    } else {
+        loop case in ["always-over-no", "never-over-force", "empty-no-over-force", "force-off-tty", "auto-tty"] {
+            child := Command.new(env.current_exe().unwrap())
+            &child.args(["--exact", "Terminal::tests::color_precedence_is_proved_in_isolated_children"])
+            &child.env(CHILD, case)
+            &child.env_remove("NO_COLOR")
+            &child.env_remove("FORCE_COLOR")
+            if case == "always-over-no" || case == "empty-no-over-force" -> &child.env("NO_COLOR", "")
+            if case == "never-over-force" || case == "empty-no-over-force" || case == "force-off-tty" -> &child.env("FORCE_COLOR", "1")
+            assert(child.status().unwrap().success(), "policy child failed: " + case)
+        }
+    }
+}

@@ -498,7 +498,7 @@ fn sema_failure_union_prepare(graph: &SemaRegistrationGraph, checked_types: [TTy
             requests := [SemaComptimeRequest]{}
             references := [SemaNameReferenceFact]{}
             unused := [Diagnostic]{}
-            result :: sema_function_check(probe_func, registered.symbol.id, TFuncKind.TopLevel, registered.raw_protocol_return, &environment, &scopes, &unused, &calls, &requests, &references)
+            result :: sema_function_check(&probe_func, registered.symbol.id, TFuncKind.TopLevel, registered.raw_protocol_return, &environment, &scopes, &unused, &calls, &requests, &references, "")
             facts :: result.failure ?? next
             &rows.push(SemaFailureUnionRow{key: facts.function_key, name: declaration.name, module_index: module_index, members: facts.union_members, general: facts.union_general, edges: facts.union_edges, cases: facts.union_cases, declaration: declaration})
         }

@@ -1,0 +1,15 @@
+use JetFoundation.JitBackend.[RunOutcome]
+use JetFoundation.Diagnostics.[Diagnostic]
+// Rust: crates/jet-foundation/src/JitBackend.rs:18
+// The source declares only the seam, not an implementation or inline tests.
+#Test("execution seam retains exact outcome fields") {
+    outcome :: RunOutcome.Ran(stdout: "out\n", stderr: "err\n", exit_code: I32{7})
+    if outcome == {
+        .Ran(stdout, stderr, code) -> assert(stdout == "out\n" && stderr == "err\n" && code == I32{7})
+        .Problems(_) -> panic("run fields lost")
+    }
+    if RunOutcome.Problems([Diagnostic]{}) == {
+        .Problems(rows) -> assert(rows.is_empty())
+        .Ran(_, _, _) -> panic("diagnostics variant lost")
+    }
+}

@@ -1,0 +1,1804 @@
+// PORT-PENDING 2019 crates-jet-driver-src-driver-mod-slice-1: crates/jet-driver/src/Driver/mod.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Pipeline composition — the compiler's execution stages assembled in one place.
+//RS //!
+//RS //! `lib.rs` public functions are thin facades over these. `LSP/Check.rs` calls
+//RS //! `check_file` directly for document checking.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Severity};
+//RS use jet_foundation::Report::StatusValue;
+//RS use jet_pkg_model::Authority::AuthorityResolver;
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::path::Path;
+//RS 
+//RS /// Driver-owned adapter for the machine-wide immutable artifact store.
+//RS /// Comptime receives only the object-safe seam and never depends on
+//RS /// `jet-store` directly.
+//RS pub struct BuildArtifactStoreHandle {
+//RS     store: jet_store::Store,
+//RS }
+//RS 
+//RS impl BuildArtifactStoreHandle {
+//RS     pub fn open() -> Result<Self, String> {
+//RS         jet_store::Store::from_env()
+//RS             .map(|store| Self { store })
+//RS             .map_err(|error| error.to_string())
+//RS     }
+//RS 
+//RS     pub fn at(root: impl Into<std::path::PathBuf>) -> Result<Self, String> {
+//RS         jet_store::Store::new(root.into())
+//RS             .map(|store| Self { store })
+//RS             .map_err(|error| error.to_string())
+//RS     }
+//RS }
+//RS 
+//RS impl crate::Comptime::Build::BuildArtifactStore for BuildArtifactStoreHandle {
+//RS     fn put_blob(&self, bytes: &[u8]) -> std::io::Result<crate::Comptime::Build::ContentDigest> {
+//RS         let object = self.store.publish_blob(bytes).map_err(store_io_error)?;
+//RS         crate::Comptime::Build::ContentDigest::parse(&format!(
+//RS             "sha256:{}",
+//RS             object.digest().to_hex()
+//RS         ))
+//RS         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()))
+//RS     }
+//RS 
+//RS     fn get_blob(
+//RS         &self,
+//RS         digest: &crate::Comptime::Build::ContentDigest,
+//RS     ) -> std::io::Result<Option<Vec<u8>>> {
+//RS         let hex = digest.as_str().strip_prefix("sha256:").ok_or_else(|| {
+//RS             std::io::Error::new(
+//RS                 std::io::ErrorKind::InvalidInput,
+//RS                 "artifact digest has no sha256 prefix",
+//RS             )
+//RS         })?;
+//RS         let digest = jet_store::Digest::from_hex(hex).map_err(store_io_error)?;
+//RS         self.store.blob_by_digest(&digest).map_err(store_io_error)
+//RS     }
+//RS 
+//RS     fn put_record(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+//RS         let action = self.store.action(key);
+//RS         self.store
+//RS             .publish_action(action, bytes)
+//RS             .map_err(store_io_error)
+//RS     }
+//RS 
+//RS     fn get_record(&self, key: &str) -> std::io::Result<Option<Vec<u8>>> {
+//RS         let action = self.store.action(key);
+//RS         self.store.get_action(&action).map_err(store_io_error)
+//RS     }
+//RS }
+//RS 
+//RS fn store_io_error(error: jet_store::StoreError) -> std::io::Error {
+//RS     std::io::Error::new(std::io::ErrorKind::Other, error.to_string())
+//RS }
+//RS 
+//RS /// One of the four user-facing truth states printed by `jet inspect
+//RS /// guarantees` (D-MEM-GUARANTEE1). The labels are deliberately stable: they
+//RS /// are a report vocabulary, not engine-specific implementation detail.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum GuaranteeStatus {
+//RS     Proven,
+//RS     Watched,
+//RS     Fenced,
+//RS     Trusted,
+//RS }
+//RS 
+//RS impl GuaranteeStatus {
+//RS     pub const fn label(self) -> &'static str {
+//RS         match self {
+//RS             Self::Proven => "proven",
+//RS             Self::Watched => "watched",
+//RS             Self::Fenced => "fenced",
+//RS             Self::Trusted => "TRUSTED",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct GuaranteeComponent {
+//RS     pub name: String,
+//RS     pub status: GuaranteeStatus,
+//RS     pub evidence: String,
+//RS }
+//RS 
+//RS /// The normalized package-only team controls projected by
+//RS /// `jet inspect guarantees`. `None` means the key was absent; `Some(empty)`
+//RS /// preserves an explicit deny/empty allow-list.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct GuaranteePolicyReport {
+//RS     pub effects: BTreeMap<String, BTreeSet<String>>,
+//RS     pub unsafe_paths: Option<Vec<String>>,
+//RS     pub expert: Option<bool>,
+//RS     pub deps: Option<Vec<String>>,
+//RS     /// D-TEAMPOLICY1=A: diagnostics-as-errors classes. `None` preserves an
+//RS     /// absent rule; `Some(empty)` preserves an explicit empty deny list.
+//RS     pub lints_deny: Option<Vec<String>>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct GuaranteeReport {
+//RS     pub profile: String,
+//RS     pub package: bool,
+//RS     pub no_os: bool,
+//RS     pub policy: GuaranteePolicyReport,
+//RS     pub components: Vec<GuaranteeComponent>,
+//RS     pub notes: Vec<String>,
+//RS }
+//RS 
+//RS /// Compute the inspectable guarantee projection from package facts, loaded
+//RS /// dependency names, and the shared unsafe-gate ledger. No execution engine
+//RS /// participates: the CLI only renders this already-typed policy result.
+//RS pub fn guarantee_report(
+//RS     package: Option<&crate::Package::PackageFacts>,
+//RS     loaded_dependencies: impl IntoIterator<Item = String>,
+//RS     unsafe_gates: usize,
+//RS     profile: &str,
+//RS     no_os: bool,
+//RS ) -> GuaranteeReport {
+//RS     let mut dependencies = BTreeSet::new();
+//RS     if let Some(package) = package {
+//RS         dependencies.extend(package.deps.keys().cloned());
+//RS     }
+//RS     dependencies.extend(loaded_dependencies);
+//RS 
+//RS     let package_guarantees = package.map(crate::Loader::package_guarantees_for_manifest);
+//RS     let profile_hardened = profile == crate::Syntax::BUILD_PROFILE_HARDENED;
+//RS     let manifest_hardened = package_guarantees
+//RS         .as_ref()
+//RS         .is_some_and(|facts| facts.harden);
+//RS     let harden = profile_hardened || manifest_hardened;
+//RS     let contained: BTreeSet<String> = if harden {
+//RS         dependencies.iter().cloned().collect()
+//RS     } else {
+//RS         package_guarantees
+//RS             .as_ref()
+//RS             .map(|facts| {
+//RS                 dependencies
+//RS                     .iter()
+//RS                     .filter(|dependency| facts.contain.contains(*dependency))
+//RS                     .cloned()
+//RS                     .collect()
+//RS             })
+//RS             .unwrap_or_default()
+//RS     };
+//RS     let sentries_active = !no_os && (profile != "release" || harden);
+//RS 
+//RS     let mut components = vec![GuaranteeComponent {
+//RS         name: "your code".to_string(),
+//RS         status: GuaranteeStatus::Proven,
+//RS         evidence: "compile-time prover".to_string(),
+//RS     }];
+//RS     let gate_status = if unsafe_gates == 0 {
+//RS         GuaranteeStatus::Proven
+//RS     } else if sentries_active {
+//RS         GuaranteeStatus::Watched
+//RS     } else {
+//RS         GuaranteeStatus::Trusted
+//RS     };
+//RS     let gate_evidence = if unsafe_gates == 0 {
+//RS         "no audited gates".to_string()
+//RS     } else if sentries_active {
+//RS         "runtime sentries active".to_string()
+//RS     } else if no_os {
+//RS         "runtime sentries unavailable".to_string()
+//RS     } else {
+//RS         "release sentries disabled".to_string()
+//RS     };
+//RS     components.push(GuaranteeComponent {
+//RS         name: format!("#Unsafe gates ({unsafe_gates})"),
+//RS         status: gate_status,
+//RS         evidence: gate_evidence,
+//RS     });
+//RS 
+//RS     if dependencies.is_empty() {
+//RS         components.push(GuaranteeComponent {
+//RS             name: "externs".to_string(),
+//RS             status: if package.is_some() {
+//RS                 GuaranteeStatus::Proven
+//RS             } else {
+//RS                 GuaranteeStatus::Trusted
+//RS             },
+//RS             evidence: if package.is_some() {
+//RS                 "no foreign dependencies declared".to_string()
+//RS             } else {
+//RS                 "outside package guarantee".to_string()
+//RS             },
+//RS         });
+//RS     } else {
+//RS         for dependency in dependencies {
+//RS             let fenced = !no_os && contained.contains(&dependency);
+//RS             components.push(GuaranteeComponent {
+//RS                 name: dependency,
+//RS                 status: if fenced {
+//RS                     GuaranteeStatus::Fenced
+//RS                 } else {
+//RS                     GuaranteeStatus::Trusted
+//RS                 },
+//RS                 evidence: if fenced {
+//RS                     "tracked handles inside dependency fence".to_string()
+//RS                 } else {
+//RS                     "outside package guarantee".to_string()
+//RS                 },
+//RS             });
+//RS         }
+//RS     }
+//RS     if let Some(package) = package {
+//RS         append_authority_grants(&mut components, package);
+//RS     }
+//RS 
+//RS     let mut notes = Vec::new();
+//RS     if package.is_none() {
+//RS         notes.push(if profile_hardened {
+//RS             "single-file: hardened watches #Unsafe gates; no foreign dependencies are declared"
+//RS                 .to_string()
+//RS         } else {
+//RS             "single-file: no package.jet; contain/harden unavailable; externs remain TRUSTED"
+//RS                 .to_string()
+//RS         });
+//RS     } else if harden && no_os {
+//RS         notes.push(if profile_hardened {
+//RS             "hardened profile requested, but no-OS targets have no runtime fence".to_string()
+//RS         } else {
+//RS             "harden: true requested, but no-OS targets have no runtime fence".to_string()
+//RS         });
+//RS     } else if profile_hardened {
+//RS         notes.push("hardened profile; every foreign dependency is fenced".to_string());
+//RS     } else if harden {
+//RS         notes.push("harden: true; every foreign dependency is fenced".to_string());
+//RS     } else if package_guarantees
+//RS         .as_ref()
+//RS         .is_some_and(|facts| !facts.contain.is_empty())
+//RS     {
+//RS         notes.push(
+//RS             "uncontained dependencies remain TRUSTED; add them to contain or set harden: true"
+//RS                 .to_string(),
+//RS         );
+//RS     }
+//RS     if profile == "release" && unsafe_gates > 0 && !harden {
+//RS         notes.push(
+//RS             "release sentries: off; set harden: true to watch every #Unsafe gate".to_string(),
+//RS         );
+//RS     }
+//RS     if no_os {
+//RS         notes.push("no-OS: prover + audit only".to_string());
+//RS     }
+//RS 
+//RS     let policy = package_guarantees
+//RS         .as_ref()
+//RS         .map(|facts| GuaranteePolicyReport {
+//RS             effects: facts.effects.clone(),
+//RS             unsafe_paths: facts.unsafe_paths.clone(),
+//RS             expert: facts.expert,
+//RS             deps: facts.deps.clone(),
+//RS             lints_deny: facts.lints_deny.clone(),
+//RS         })
+//RS         .unwrap_or_else(|| GuaranteePolicyReport {
+//RS             effects: BTreeMap::new(),
+//RS             unsafe_paths: None,
+//RS             expert: None,
+//RS             deps: None,
+//RS             lints_deny: None,
+//RS         });
+//RS 
+//RS     GuaranteeReport {
+//RS         profile: profile.to_string(),
+//RS         package: package.is_some(),
+//RS         no_os,
+//RS         policy,
+//RS         components,
+//RS         notes,
+//RS     }
+//RS }
+//RS 
+//RS fn append_authority_grants(
+//RS     components: &mut Vec<GuaranteeComponent>,
+//RS     package: &crate::Package::PackageFacts,
+//RS ) {
+//RS     fn effect_names(effects: &[String]) -> String {
+//RS         let effects = effects.iter().cloned().collect::<BTreeSet<_>>();
+//RS         if effects.is_empty() {
+//RS             "none".to_string()
+//RS         } else {
+//RS             effects.into_iter().collect::<Vec<_>>().join(",")
+//RS         }
+//RS     }
+//RS 
+//RS     if let Some(effects) = package.authority.holds.allow.as_deref() {
+//RS         components.push(GuaranteeComponent {
+//RS             name: "authority.holds.allow".to_string(),
+//RS             status: GuaranteeStatus::Proven,
+//RS             evidence: format!("granted effects: {}", effect_names(effects)),
+//RS         });
+//RS     }
+//RS     if let Some(effects) = package.authority.holds.deny.as_deref() {
+//RS         components.push(GuaranteeComponent {
+//RS             name: "authority.holds.deny".to_string(),
+//RS             status: GuaranteeStatus::Fenced,
+//RS             evidence: format!("denied effects: {}", effect_names(effects)),
+//RS         });
+//RS     }
+//RS 
+//RS     let mut grants = package.authority.grants.iter().collect::<Vec<_>>();
+//RS     grants.sort_by(|left, right| left.0.cmp(&right.0));
+//RS     for (dependency, effects) in grants {
+//RS         components.push(GuaranteeComponent {
+//RS             name: format!("authority.grants.{dependency}"),
+//RS             status: GuaranteeStatus::Proven,
+//RS             evidence: format!("granted effects: {}", effect_names(effects)),
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn apply_package_lint_policy(
+//RS     bundle: &crate::AST::ProgramBundle,
+//RS     diagnostics: Vec<Diagnostic>,
+//RS ) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+//RS     let deny = bundle
+//RS         .package_guarantees
+//RS         .lints_deny
+//RS         .as_deref()
+//RS         .unwrap_or_default();
+//RS     Ok(jet_foundation::LintPolicy::apply(deny, diagnostics))
+//RS }
+//RS 
+//RS /// D-TEAMPOLICY1=A: apply typed package ceilings in the existing package
+//RS /// diagnostic gate. Effect checks stay in sema's solved effect graph; the
+//RS /// dependency check uses Loader's resolved graph and never re-parses source.
+//RS fn package_team_policy_diagnostics(
+//RS     bundle: &crate::AST::ProgramBundle,
+//RS     manifest: &crate::Package::PackageFacts,
+//RS     facts: &crate::Sema::SemIndexEffectFacts,
+//RS ) -> Vec<Diagnostic> {
+//RS     let mut diagnostics = crate::Sema::package_effect_policy_diagnostics(
+//RS         bundle,
+//RS         &facts.solved,
+//RS         &manifest.policy.effects,
+//RS     );
+//RS     if let Some(allowed) = &manifest.policy.deps {
+//RS         // `dep_roots` only has source-backed roots. Package facts also carry
+//RS         // source-less native/system and foreign dependencies. A set gives one
+//RS         // deterministic diagnostic per dependency when the two views overlap.
+//RS         let mut dependencies = bundle.package_guarantees.dependency_names.clone();
+//RS         dependencies.extend(manifest.deps.keys().cloned());
+//RS         dependencies.extend(bundle.dep_roots.keys().cloned());
+//RS         for dependency in dependencies {
+//RS             if allowed.contains(&dependency) {
+//RS                 continue;
+//RS             }
+//RS             diagnostics.push(Diagnostic::from_row(
+//RS                 "E2960",
+//RS                 &[
+//RS                     ("rule", "policy.deps"),
+//RS                     ("subject", &dependency),
+//RS                     ("path", "package.jet"),
+//RS                 ],
+//RS                 None,
+//RS             ));
+//RS         }
+//RS     }
+//RS     diagnostics
+//RS }
+//RS 
+//RS /// D-EFFBUDGET1 / D-NOPANIC1=D: apply the manifest's one whole-graph effect
+//RS /// budget to the same solved rows the sema checker already produced. This is a
+//RS /// diagnostic gate only; no execution tier receives a second policy path.
+//RS fn apply_package_effect_budget(
+//RS     bundle: &crate::AST::ProgramBundle,
+//RS     facts: &crate::Sema::SemIndexEffectFacts,
+//RS     diagnostics: Vec<Diagnostic>,
+//RS ) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+//RS     let Some(manifest) = crate::Loader::package_facts_for_bundle(bundle)? else {
+//RS         return Ok(diagnostics);
+//RS     };
+//RS     let entries =
+//RS         crate::EffectBudget::compute_package_effects(bundle, &facts.solved, &facts.summaries);
+//RS     Ok(diagnostics
+//RS         .into_iter()
+//RS         .chain(package_team_policy_diagnostics(bundle, &manifest, facts))
+//RS         .chain(crate::EffectBudget::enforce(&entries, &manifest))
+//RS         .collect())
+//RS }
+//RS 
+//RS fn classify_diagnostics(
+//RS     bundle: &crate::AST::ProgramBundle,
+//RS     diagnostics: Vec<Diagnostic>,
+//RS     suppress_build_e0102: bool,
+//RS ) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+//RS     let mut errors = Vec::new();
+//RS     let mut lints = Vec::new();
+//RS     for diagnostic in apply_package_lint_policy(bundle, diagnostics)? {
+//RS         match diagnostic.severity {
+//RS             // Generated declarations do not exist during the pre-build
+//RS             // reflection pass. Defer unknown-name errors to the fresh
+//RS             // selected-program sema pass after generation.
+//RS             Severity::Error if suppress_build_e0102 && diagnostic.code == "E0102" => {}
+//RS             Severity::Error => errors.push(diagnostic),
+//RS             Severity::Lint => lints.push(diagnostic),
+//RS         }
+//RS     }
+//RS     if errors.is_empty() {
+//RS         Ok(lints)
+//RS     } else {
+//RS         Err(errors)
+//RS     }
+//RS }
+//RS 
+//RS /// One diagnostic gate shared by `jet build`, `jet run`, `jet dev`, and check.
+//RS ///
+//RS /// Surfaces what parser recovery (`parse_teaching`) and sema (+ optional
+//RS /// extension hooks) already produced. Does not re-check anything (I3).
+//RS /// Returns lints on success; errors on failure.
+//RS pub fn gate_diagnostics(
+//RS     bundle: &crate::AST::ProgramBundle,
+//RS     parse_teaching: Vec<Diagnostic>,
+//RS     sema: Vec<Diagnostic>,
+//RS     extension: Vec<Diagnostic>,
+//RS ) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+//RS     classify_diagnostics(
+//RS         bundle,
+//RS         parse_teaching
+//RS             .into_iter()
+//RS             .chain(sema)
+//RS             .chain(extension)
+//RS             .collect(),
+//RS         false,
+//RS     )
+//RS }
+//RS 
+//RS /// Main pipeline: load from file path → sema → ffi → codegen.
+//RS ///
+//RS /// D-OSTARGET1=A (ratified 2026-07-01, c134): `cross_target` is the raw
+//RS /// `--target=<triple>` string (or `None`) — reused as-is from the existing
+//RS /// E2-M15 cross-compile flag, resolved to a native OS bucket in
+//RS /// `compile_bundle_path_opts_dbg` (host OS when `None` or unrecognized).
+//RS pub fn compile_bundle_path_opts(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     web_target: bool,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_full(
+//RS         file,
+//RS         mode,
+//RS         no_os,
+//RS         gates,
+//RS         web_target,
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         cross_target,
+//RS         None,
+//RS         "dev",
+//RS         &BTreeMap::new(),
+//RS         false,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Profile-aware native front-end entry used by the CLI. Existing callers
+//RS /// keep the `dev` default; the selected profile is a build fact, not an engine
+//RS /// branch.
+//RS pub fn compile_bundle_path_opts_with_profile(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     web_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_with_profile_and_settings(
+//RS         file,
+//RS         mode,
+//RS         no_os,
+//RS         gates,
+//RS         web_target,
+//RS         cross_target,
+//RS         profile,
+//RS         &BTreeMap::new(),
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_opts_with_profile_and_settings(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     web_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_with_profile_and_settings_and_entry(
+//RS         file,
+//RS         mode,
+//RS         no_os,
+//RS         gates,
+//RS         web_target,
+//RS         cross_target,
+//RS         profile,
+//RS         setting_overrides,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_opts_with_profile_and_settings_and_entry(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     web_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     entry_fn: Option<&str>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_full(
+//RS         file,
+//RS         mode,
+//RS         no_os,
+//RS         gates,
+//RS         web_target,
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         cross_target,
+//RS         None,
+//RS         profile,
+//RS         setting_overrides,
+//RS         false,
+//RS         entry_fn,
+//RS     )
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub enum TargetMachineCompileError {
+//RS     Diagnostics(Vec<Diagnostic>),
+//RS     Machine(Vec<crate::TargetMachine::TargetMachineError>),
+//RS }
+//RS 
+//RS /// D-TARGET-* production hook: validate a selected typed target machine from
+//RS /// sema facts before codegen. CLI/UI wording remains future work; this returns
+//RS /// machine errors as data.
+//RS pub fn compile_bundle_path_with_target_machine(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS ) -> Result<crate::CompileOutput, TargetMachineCompileError> {
+//RS     compile_bundle_path_with_target_machine_and_profile_and_settings(
+//RS         file,
+//RS         mode,
+//RS         machine,
+//RS         crate::Policy::GateSet::default(),
+//RS         "dev",
+//RS         false,
+//RS         &BTreeMap::new(),
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_with_target_machine_and_profile_and_settings(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS     gates: crate::Policy::GateSet,
+//RS     profile: &str,
+//RS     locked: bool,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<crate::CompileOutput, TargetMachineCompileError> {
+//RS     compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure(
+//RS         file,
+//RS         mode,
+//RS         machine,
+//RS         gates,
+//RS         profile,
+//RS         locked,
+//RS         setting_overrides,
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS     gates: crate::Policy::GateSet,
+//RS     profile: &str,
+//RS     locked: bool,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     source_closure: &[(std::path::PathBuf, String)],
+//RS ) -> Result<crate::CompileOutput, TargetMachineCompileError> {
+//RS     crate::run_compiler_work(|| {
+//RS         compile_bundle_path_with_target_machine_on_compiler_stack_with_runtime(
+//RS             file,
+//RS             mode,
+//RS             machine,
+//RS             gates,
+//RS             profile,
+//RS             locked,
+//RS             setting_overrides,
+//RS             source_closure,
+//RS             None,
+//RS         )
+//RS         .map(|(output, _)| output)
+//RS     })
+//RS }
+//RS /// Compile a selected target machine with an optional invocation-local
+//RS /// authority merged into the checked bundle before MIR lowering and codegen.
+//RS pub fn compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure_and_runtime(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS     gates: crate::Policy::GateSet,
+//RS     profile: &str,
+//RS     locked: bool,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     source_closure: &[(std::path::PathBuf, String)],
+//RS     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+//RS ) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), TargetMachineCompileError> {
+//RS     crate::run_compiler_work(|| {
+//RS         compile_bundle_path_with_target_machine_on_compiler_stack_with_runtime(
+//RS             file,
+//RS             mode,
+//RS             machine,
+//RS             gates,
+//RS             profile,
+//RS             locked,
+//RS             setting_overrides,
+//RS             source_closure,
+//RS             application_authority,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn compile_bundle_path_with_target_machine_on_compiler_stack_with_runtime(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS     gates: crate::Policy::GateSet,
+//RS     profile: &str,
+//RS     locked: bool,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     source_closure: &[(std::path::PathBuf, String)],
+//RS     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+//RS ) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), TargetMachineCompileError> {
+//RS     let usage = target_machine_usage_for_file(
+//RS         file,
+//RS         mode,
+//RS         machine,
+//RS         profile,
+//RS         locked,
+//RS         setting_overrides,
+//RS         source_closure,
+//RS     )
+//RS     .map_err(TargetMachineCompileError::Diagnostics)?;
+//RS     let dossier = target_dossier_for_usage(machine, &usage, "none");
+//RS     compile_bundle_path_opts_on_compiler_stack_with_runtime(
+//RS         file,
+//RS         mode,
+//RS         machine.no_os,
+//RS         gates,
+//RS         machine.is_web_target(),
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         Some(machine.triple.as_str()),
+//RS         None,
+//RS         profile,
+//RS         setting_overrides,
+//RS         locked,
+//RS         None,
+//RS         None,
+//RS         Some(dossier),
+//RS         Some(source_closure),
+//RS         application_authority,
+//RS     )
+//RS     .map_err(TargetMachineCompileError::Diagnostics)
+//RS }
+//RS 
+//RS /// Artifacts from a typed no-OS machine build (checked program object,
+//RS /// startup/provider adapters, linker, map, audit, size, ELF).
+//RS pub struct TargetFirmwareArtifacts {
+//RS     pub out_dir: std::path::PathBuf,
+//RS     pub linker_script: std::path::PathBuf,
+//RS     pub startup: std::path::PathBuf,
+//RS     pub startup_object: std::path::PathBuf,
+//RS     pub provider: std::path::PathBuf,
+//RS     pub provider_object: std::path::PathBuf,
+//RS     pub program_object: std::path::PathBuf,
+//RS     pub map: std::path::PathBuf,
+//RS     pub elf: std::path::PathBuf,
+//RS     pub audit_json: std::path::PathBuf,
+//RS     pub size_budget: crate::TargetMachine::SizeBudgetReport,
+//RS     pub audit: String,
+//RS }
+//RS pub fn build_target_machine_firmware(
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS     usage: &crate::TargetMachine::TargetMachineUse,
+//RS     program_object: &std::path::Path,
+//RS     out_dir: &std::path::Path,
+//RS ) -> Result<TargetFirmwareArtifacts, TargetMachineCompileError> {
+//RS     use crate::TargetMachine::{ExecutionTier, TargetMachineError};
+//RS     use std::fs;
+//RS     use std::process::Command;
+//RS 
+//RS     let program_bytes = fs::read(program_object).map_err(|error| {
+//RS         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+//RS             detail: format!(
+//RS                 "read checked program object `{}`: {error}",
+//RS                 program_object.display()
+//RS             ),
+//RS         }])
+//RS     })?;
+//RS     if program_bytes.is_empty() {
+//RS         return Err(TargetMachineCompileError::Machine(vec![
+//RS             TargetMachineError::FirmwareBuildFailed {
+//RS                 detail: format!(
+//RS                     "checked program object `{}` is empty",
+//RS                     program_object.display()
+//RS                 ),
+//RS             },
+//RS         ]));
+//RS     }
+//RS 
+//RS     if let Err(err) = machine.supports_execution_tier(ExecutionTier::Aot) {
+//RS         return Err(TargetMachineCompileError::Machine(vec![err]));
+//RS     }
+//RS     // Explicit honesty: Dev/JIT are rejected for no-OS before any artifact work.
+//RS     if let Err(err) = machine.supports_execution_tier(ExecutionTier::Dev) {
+//RS         // expected for no-os; record in audit via execution field
+//RS         let _ = err;
+//RS     }
+//RS     let mut errors = machine.validate(usage);
+//RS     if !machine.no_os {
+//RS         errors.push(TargetMachineError::HostedHasNoLinkerScript);
+//RS     }
+//RS     if !errors.is_empty() {
+//RS         return Err(TargetMachineCompileError::Machine(errors));
+//RS     }
+//RS 
+//RS     let linker = machine
+//RS         .generate_linker_script()
+//RS         .map_err(|e| TargetMachineCompileError::Machine(vec![e]))?;
+//RS     let startup = machine
+//RS         .generate_startup_source()
+//RS         .map_err(|e| TargetMachineCompileError::Machine(vec![e]))?;
+//RS     let provider = machine
+//RS         .generate_provider_source()
+//RS         .map_err(|e| TargetMachineCompileError::Machine(vec![e]))?;
+//RS 
+//RS     fs::create_dir_all(out_dir).map_err(|e| {
+//RS         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+//RS             detail: format!("create out dir: {e}"),
+//RS         }])
+//RS     })?;
+//RS 
+//RS     let linker_path = out_dir.join("memory.ld");
+//RS     let startup_path = out_dir.join(&startup.filename);
+//RS     let startup_obj_path = out_dir.join("startup.o");
+//RS     let provider_path = out_dir.join(&provider.filename);
+//RS     let provider_obj_path = out_dir.join("target_providers.o");
+//RS     let map_path = out_dir.join("firmware.map");
+//RS     let elf_path = out_dir.join("firmware.elf");
+//RS     let audit_path = out_dir.join(format!("{}.target.json", sanitize_name(&machine.name)));
+//RS 
+//RS     fs::write(&linker_path, &linker).map_err(|e| {
+//RS         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+//RS             detail: format!("write linker: {e}"),
+//RS         }])
+//RS     })?;
+//RS     fs::write(&startup_path, &startup.contents).map_err(|e| {
+//RS         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+//RS             detail: format!("write startup: {e}"),
+//RS         }])
+//RS     })?;
+//RS     fs::write(&provider_path, &provider.contents).map_err(|e| {
+//RS         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+//RS             detail: format!("write target providers: {e}"),
+//RS         }])
+//RS     })?;
+//RS 
+//RS     let clang = resolve_target_clang().map_err(TargetMachineCompileError::Machine)?;
+//RS     let lld = resolve_tool("ld.lld").map_err(TargetMachineCompileError::Machine)?;
+//RS     let compile_source = |source: &std::path::Path,
+//RS                           object: &std::path::Path|
+//RS      -> Result<(), TargetMachineCompileError> {
+//RS         let output = Command::new(&clang)
+//RS             .arg(format!("--target={}", machine.triple))
+//RS             .arg("-nostdlib")
+//RS             .arg("-ffreestanding")
+//RS             .arg("-fno-builtin")
+//RS             .arg("-c")
+//RS             .arg(source)
+//RS             .arg("-o")
+//RS             .arg(object)
+//RS             .output()
+//RS             .map_err(|error| {
+//RS                 TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+//RS                     detail: format!("spawn clang for `{}`: {error}", source.display()),
+//RS                 }])
+//RS             })?;
+//RS         if !output.status.success() {
+//RS             return Err(TargetMachineCompileError::Machine(vec![
+//RS                 TargetMachineError::FirmwareBuildFailed {
+//RS                     detail: format!(
+//RS                         "clang failed for `{}`: {}",
+//RS                         source.display(),
+//RS                         String::from_utf8_lossy(&output.stderr).trim()
+//RS                     ),
+//RS                 },
+//RS             ]));
+//RS         }
+//RS         Ok(())
+//RS     };
+//RS     compile_source(&startup_path, &startup_obj_path)?;
+//RS     compile_source(&provider_path, &provider_obj_path)?;
+//RS 
+//RS     let mut link_cmd = Command::new(&lld);
+//RS     link_cmd
+//RS         .arg(format!("-T{}", linker_path.display()))
+//RS         .arg(format!("-Map={}", map_path.display()))
+//RS         .arg("--gc-sections")
+//RS         .arg("-o")
+//RS         .arg(&elf_path)
+//RS         // The checked program is an input, not an optional witness. Startup
+//RS         // reaches its canonical `__jet_program_entry` symbol.
+//RS         .arg(program_object)
+//RS         .arg(&startup_obj_path)
+//RS         .arg(&provider_obj_path);
+//RS     if machine.triple.contains("aarch64") {
+//RS         link_cmd.arg("-m").arg("aarch64elf");
+//RS     } else if machine.triple.contains("thumb") || machine.triple.starts_with("arm") {
+//RS         link_cmd.arg("-m").arg("armelf");
+//RS     }
+//RS     let link_out = link_cmd.output().map_err(|e| {
+//RS         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+//RS             detail: format!("spawn ld.lld: {e}"),
+//RS         }])
+//RS     })?;
+//RS     if !link_out.status.success() {
+//RS         return Err(TargetMachineCompileError::Machine(vec![
+//RS             TargetMachineError::FirmwareBuildFailed {
+//RS                 detail: format!(
+//RS                     "ld.lld failed: {}",
+//RS                     String::from_utf8_lossy(&link_out.stderr).trim()
+//RS                 ),
+//RS             },
+//RS         ]));
+//RS     }
+//RS 
+//RS     let artifact_bytes = fs::metadata(&elf_path).map(|m| m.len()).unwrap_or(0);
+//RS     let size_budget = machine.size_budget(usage, artifact_bytes);
+//RS     if !size_budget.ok() {
+//RS         return Err(TargetMachineCompileError::Machine(vec![
+//RS             TargetMachineError::SizeBudgetExceeded {
+//RS                 report: size_budget,
+//RS             },
+//RS         ]));
+//RS     }
+//RS     let machine_audit = machine.audit_json_with_budget(usage, Some(&size_budget));
+//RS     let digest = |path: &std::path::Path| -> String {
+//RS         fs::read(path)
+//RS             .map(|bytes| format!("sha256:{}", crate::SHA256::sha256_hex(&bytes)))
+//RS             .unwrap_or_else(|_| "unreadable".to_string())
+//RS     };
+//RS     let audit = format!(
+//RS         "{{\"machine\":{},\"firmware\":{{\"program_object\":{{\"path\":\"{}\",\"sha256\":\"{}\"}},\"startup_source\":{{\"path\":\"{}\",\"sha256\":\"{}\"}},\"provider_source\":{{\"path\":\"{}\",\"sha256\":\"{}\"}},\"linker_script\":{{\"path\":\"{}\",\"sha256\":\"{}\"}},\"startup_object\":\"{}\",\"provider_object\":\"{}\",\"elf\":{{\"path\":\"{}\",\"sha256\":\"{}\"}}}}}}",
+//RS         machine_audit,
+//RS         graph_json_escape(&program_object.display().to_string()),
+//RS         digest(program_object),
+//RS         graph_json_escape(&startup_path.display().to_string()),
+//RS         digest(&startup_path),
+//RS         graph_json_escape(&provider_path.display().to_string()),
+//RS         digest(&provider_path),
+//RS         graph_json_escape(&linker_path.display().to_string()),
+//RS         digest(&linker_path),
+//RS         graph_json_escape(&startup_obj_path.display().to_string()),
+//RS         graph_json_escape(&provider_obj_path.display().to_string()),
+//RS         graph_json_escape(&elf_path.display().to_string()),
+//RS         digest(&elf_path),
+//RS     );
+//RS     fs::write(&audit_path, &audit).map_err(|e| {
+//RS         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+//RS             detail: format!("write audit: {e}"),
+//RS         }])
+//RS     })?;
+//RS 
+//RS     Ok(TargetFirmwareArtifacts {
+//RS         out_dir: out_dir.to_path_buf(),
+//RS         linker_script: linker_path,
+//RS         startup: startup_path,
+//RS         startup_object: startup_obj_path,
+//RS         provider: provider_path,
+//RS         provider_object: provider_obj_path,
+//RS         program_object: program_object.to_path_buf(),
+//RS         map: map_path,
+//RS         elf: elf_path,
+//RS         audit_json: audit_path,
+//RS         size_budget,
+//RS         audit,
+//RS     })
+//RS }
+//RS 
+//RS /// Run a supported proof board under QEMU and return its serial output.
+//RS /// Callers must assert the checked program's expected output, not just timeout.
+//RS pub fn qemu_target_machine_smoke(
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS     elf: &std::path::Path,
+//RS ) -> Result<String, Vec<crate::TargetMachine::TargetMachineError>> {
+//RS     use crate::TargetMachine::TargetMachineError;
+//RS     use std::process::Command;
+//RS 
+//RS     let (tool, model, cpu) = match machine.name.as_str() {
+//RS         "board.sensor_v1" => ("qemu-system-arm", "mps2-an386", "cortex-m4"),
+//RS         "board.virt_aarch64" => ("qemu-system-aarch64", "virt", "cortex-a57"),
+//RS         _ => {
+//RS             return Err(vec![TargetMachineError::FirmwareBuildFailed {
+//RS                 detail: format!("no QEMU model declared for `{}`", machine.name),
+//RS             }]);
+//RS         }
+//RS     };
+//RS     let qemu = resolve_tool(tool)?;
+//RS     // Bound the smoke without requiring startup or the checked program to
+//RS     // print a fixture marker. A timeout is the expected result for firmware
+//RS     // that halts after returning from `__jet_program_entry`.
+//RS     let output = Command::new("timeout")
+//RS         .arg("3")
+//RS         .arg(&qemu)
+//RS         .arg("-machine")
+//RS         .arg(model)
+//RS         .arg("-cpu")
+//RS         .arg(cpu)
+//RS         .arg("-nographic")
+//RS         .arg("-kernel")
+//RS         .arg(elf)
+//RS         .output()
+//RS         .map_err(|e| {
+//RS             vec![TargetMachineError::FirmwareBuildFailed {
+//RS                 detail: format!("spawn qemu: {e}"),
+//RS             }]
+//RS         })?;
+//RS     let serial = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     match output.status.code() {
+//RS         Some(0) | Some(124) => Ok(serial),
+//RS         status => Err(vec![TargetMachineError::FirmwareBuildFailed {
+//RS             detail: format!("qemu smoke failed (status={status:?}); serial={serial:?}"),
+//RS         }]),
+//RS     }
+//RS }
+//RS 
+//RS /// D-CONF-WORD1=A: the machine axis. `--target` answers what machine this
+//RS /// build is for, whether the name is a rustc triple or a declared board.
+//RS pub fn target_machine_by_name(name: &str) -> Option<crate::TargetMachine::TargetMachine> {
+//RS     match name {
+//RS         "board.sensor_v1" | "firmware" | "sensor" => {
+//RS             Some(crate::TargetMachine::TargetMachine::board_sensor_v1())
+//RS         }
+//RS         "board.virt_aarch64" | "virt" => {
+//RS             Some(crate::TargetMachine::TargetMachine::board_virt_aarch64())
+//RS         }
+//RS         "wasm.browser" => Some(crate::TargetMachine::TargetMachine::wasm_browser()),
+//RS         "wasm.wasi" => Some(crate::TargetMachine::TargetMachine::wasm_wasi()),
+//RS         "wasm.no-os" => Some(crate::TargetMachine::TargetMachine::wasm_no_os()),
+//RS         "hosted" => Some(crate::TargetMachine::TargetMachine::hosted(
+//RS             "x86_64-unknown-linux-gnu",
+//RS         )),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// The typed profile names `--target` accepts beside a rustc triple.
+//RS pub const TARGET_MACHINE_NAMES: &[&str] = &[
+//RS     "board.sensor_v1",
+//RS     "board.virt_aarch64",
+//RS     "wasm.browser",
+//RS     "wasm.wasi",
+//RS     "wasm.no-os",
+//RS     "hosted",
+//RS ];
+//RS 
+//RS /// D-TARGET-AUDIT1: machine audit JSON for a named board machine.
+//RS pub fn target_machine_dossier_json(machine_name: &str) -> Result<String, String> {
+//RS     let Some(machine) = target_machine_by_name(machine_name) else {
+//RS         return Err(format!(
+//RS             "unknown target machine `{machine_name}` (try {})",
+//RS             TARGET_MACHINE_NAMES.join(", ")
+//RS         ));
+//RS     };
+//RS     let usage = crate::TargetMachine::TargetMachineUse::default();
+//RS     Ok(machine.audit_json(&usage))
+//RS }
+//RS 
+//RS /// Typed target audit for command status envelopes.
+//RS pub fn target_machine_dossier_value(machine_name: &str) -> Result<StatusValue, String> {
+//RS     let Some(machine) = target_machine_by_name(machine_name) else {
+//RS         return Err(format!(
+//RS             "unknown target machine `{machine_name}` (try {})",
+//RS             TARGET_MACHINE_NAMES.join(", ")
+//RS         ));
+//RS     };
+//RS     let usage = crate::TargetMachine::TargetMachineUse::default();
+//RS     Ok(machine.audit_value(&usage))
+//RS }
+//RS 
+//RS fn sanitize_name(name: &str) -> String {
+//RS     name.chars()
+//RS         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn resolve_target_clang(
+//RS ) -> Result<std::path::PathBuf, Vec<crate::TargetMachine::TargetMachineError>> {
+//RS     if let Ok(path) = std::env::var("JET_TARGET_CLANG") {
+//RS         let p = std::path::PathBuf::from(path);
+//RS         if p.is_file() {
+//RS             return Ok(p);
+//RS         }
+//RS     }
+//RS     // Prefer unwrapped clang: `clang -print-prog-name=clang` often resolves past the nix wrapper.
+//RS     if let Ok(out) = std::process::Command::new("clang")
+//RS         .arg("-print-prog-name=clang")
+//RS         .output()
+//RS     {
+//RS         if out.status.success() {
+//RS             let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+//RS             let p = std::path::PathBuf::from(&path);
+//RS             if p.is_file() {
+//RS                 return Ok(p);
+//RS             }
+//RS         }
+//RS     }
+//RS     resolve_tool("clang")
+//RS }
+//RS 
+//RS fn resolve_tool(
+//RS     name: &str,
+//RS ) -> Result<std::path::PathBuf, Vec<crate::TargetMachine::TargetMachineError>> {
+//RS     if let Ok(path) = which_tool(name) {
+//RS         return Ok(path);
+//RS     }
+//RS     Err(vec![
+//RS         crate::TargetMachine::TargetMachineError::FirmwareToolchainMissing {
+//RS             tool: name.to_string(),
+//RS         },
+//RS     ])
+//RS }
+//RS 
+//RS fn which_tool(name: &str) -> Result<std::path::PathBuf, ()> {
+//RS     let output = std::process::Command::new("sh")
+//RS         .arg("-c")
+//RS         .arg(format!("command -v {name}"))
+//RS         .output()
+//RS         .map_err(|_| ())?;
+//RS     if !output.status.success() {
+//RS         return Err(());
+//RS     }
+//RS     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+//RS     if path.is_empty() {
+//RS         return Err(());
+//RS     }
+//RS     Ok(std::path::PathBuf::from(path))
+//RS }
+//RS 
+//RS /// Like `compile_bundle_path_opts`, but for `jet build --target=sandbox`
+//RS /// (D-PLUGIN1=B / D-DEP-WASM1=A, c81): also emits the guest `.wit` + wasm32
+//RS /// Rust artifacts (`Codegen::emit_plugin`).
+//RS pub fn compile_bundle_path_opts_plugin(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_plugin_with_gates(
+//RS         file,
+//RS         mode,
+//RS         crate::Policy::GateSet::default(),
+//RS         cross_target,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_opts_plugin_with_gates(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     gates: crate::Policy::GateSet,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_plugin_with_gates_and_settings(
+//RS         file,
+//RS         mode,
+//RS         gates,
+//RS         cross_target,
+//RS         &BTreeMap::new(),
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_opts_plugin_with_gates_and_settings(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     gates: crate::Policy::GateSet,
+//RS     cross_target: Option<&str>,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_plugin_with_gates_and_profile_and_settings(
+//RS         file,
+//RS         mode,
+//RS         gates,
+//RS         cross_target,
+//RS         "dev",
+//RS         setting_overrides,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_opts_plugin_with_gates_and_profile_and_settings(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     gates: crate::Policy::GateSet,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_full(
+//RS         file,
+//RS         mode,
+//RS         false,
+//RS         gates,
+//RS         false,
+//RS         true,
+//RS         false,
+//RS         false,
+//RS         cross_target,
+//RS         None,
+//RS         profile,
+//RS         setting_overrides,
+//RS         false,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Like `compile_bundle_path_opts_plugin`, but for a checked `Library` output
+//RS /// (D-LIB-EXPORT1=C). Library packages do not need an executable `fn run`; the
+//RS /// selected public surface is validated and projected into native artifacts by
+//RS /// the caller after this front-end stage.
+//RS pub fn compile_bundle_path_opts_library(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     explicit_output: Option<&str>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_library_with_gates(
+//RS         file,
+//RS         mode,
+//RS         crate::Policy::GateSet::default(),
+//RS         explicit_output,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_opts_library_with_gates(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     gates: crate::Policy::GateSet,
+//RS     explicit_output: Option<&str>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_library_with_gates_and_settings(
+//RS         file,
+//RS         mode,
+//RS         gates,
+//RS         explicit_output,
+//RS         false,
+//RS         &BTreeMap::new(),
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_opts_library_with_gates_and_settings(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     gates: crate::Policy::GateSet,
+//RS     explicit_output: Option<&str>,
+//RS     locked: bool,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_library_with_gates_and_profile_and_settings(
+//RS         file,
+//RS         mode,
+//RS         gates,
+//RS         explicit_output,
+//RS         locked,
+//RS         "dev",
+//RS         setting_overrides,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_opts_library_with_gates_and_profile_and_settings(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     gates: crate::Policy::GateSet,
+//RS     explicit_output: Option<&str>,
+//RS     locked: bool,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_full(
+//RS         file,
+//RS         mode,
+//RS         false,
+//RS         gates,
+//RS         false,
+//RS         false,
+//RS         true,
+//RS         false,
+//RS         None,
+//RS         explicit_output,
+//RS         profile,
+//RS         setting_overrides,
+//RS         locked,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Like `compile_bundle_path_opts`, with the debug line-map request carried
+//RS /// through the checked MIR compile boundary (D-DBG3 step 2 / dap-debugger).
+//RS /// The MIR Rust adapter owns the generated source; ordinary callers keep
+//RS /// `debug_linemap = false`.
+//RS pub fn compile_bundle_path_opts_dbg(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     web_target: bool,
+//RS     debug_linemap: bool,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_full(
+//RS         file,
+//RS         mode,
+//RS         no_os,
+//RS         gates,
+//RS         web_target,
+//RS         false,
+//RS         false,
+//RS         debug_linemap,
+//RS         cross_target,
+//RS         None,
+//RS         "dev",
+//RS         &BTreeMap::new(),
+//RS         false,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Compile one explicitly addressed runnable Output. Selection is resolved in
+//RS /// sema and carried into every lower tier as one checked callable fact.
+//RS pub fn compile_bundle_path_output(
+//RS     file: &str,
+//RS     output: &str,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_output_opts(
+//RS         file,
+//RS         output,
+//RS         false,
+//RS         crate::Policy::GateSet::default(),
+//RS         false,
+//RS         false,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_output_opts(
+//RS     file: &str,
+//RS     output: &str,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_output_opts_with_settings(
+//RS         file,
+//RS         output,
+//RS         no_os,
+//RS         gates,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         &BTreeMap::new(),
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_output_opts_with_settings(
+//RS     file: &str,
+//RS     output: &str,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_output_opts_with_profile_and_settings(
+//RS         file,
+//RS         output,
+//RS         no_os,
+//RS         gates,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         "dev",
+//RS         setting_overrides,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_bundle_path_output_opts_with_profile_and_settings(
+//RS     file: &str,
+//RS     output: &str,
+//RS     no_os: bool,
+//RS     gates: crate::Policy::GateSet,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts_full(
+//RS         file,
+//RS         crate::Sema::CompileMode::Run,
+//RS         no_os,
+//RS         gates,
+//RS         web_target,
+//RS         plugin_target,
+//RS         false,
+//RS         false,
+//RS         cross_target,
+//RS         Some(output),
+//RS         profile,
+//RS         setting_overrides,
+//RS         false,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn compiler_toolchain_identity() -> String {
+//RS     format!(
+//RS         "{}@{}#{}",
+//RS         crate::Syntax::BINARY_NAME,
+//RS         env!("CARGO_PKG_VERSION"),
+//RS         option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
+//RS     )
+//RS }
+//RS 
+//RS fn target_layer_for_usage(
+//RS     usage: &crate::TargetMachine::TargetMachineUse,
+//RS ) -> crate::Syntax::RuntimeLayer {
+//RS     jet_foundation::RingLayer::classify_prelude_closure(usage.core_apis.iter())
+//RS         .values()
+//RS         .copied()
+//RS         .max()
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn target_dossier_for_usage(
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS     usage: &crate::TargetMachine::TargetMachineUse,
+//RS     dependency_identity: &str,
+//RS ) -> jet_foundation::Facts::TargetDossier {
+//RS     let mut dossier = machine.target_dossier(
+//RS         usage,
+//RS         crate::TargetMachine::ExecutionTier::Aot,
+//RS         compiler_toolchain_identity(),
+//RS         dependency_identity,
+//RS     );
+//RS     // The machine's maximum layer is an admission ceiling. The dossier names
+//RS     // the layer actually selected by the sema-owned Prelude closure.
+//RS     dossier.layer = target_layer_for_usage(usage);
+//RS     dossier
+//RS }
+//RS 
+//RS fn target_machine_for_facts(
+//RS     no_os: bool,
+//RS     web_target: bool,
+//RS     target_triple: &str,
+//RS ) -> crate::TargetMachine::TargetMachine {
+//RS     if web_target {
+//RS         crate::TargetMachine::TargetMachine::wasm_browser()
+//RS     } else if target_triple == crate::Syntax::BUILD_TARGET_WASI_SERVER {
+//RS         crate::TargetMachine::TargetMachine::wasm_wasi()
+//RS     } else if no_os {
+//RS         crate::TargetMachine::TargetMachine::bare_metal("no-os", target_triple)
+//RS     } else {
+//RS         crate::TargetMachine::TargetMachine::hosted(target_triple)
+//RS     }
+//RS }
+//RS 
+//RS fn refresh_target_dossier(bundle: &mut crate::AST::ProgramBundle, no_os: bool, web_target: bool) {
+//RS     let target_triple = bundle.build_facts.target_triple.clone();
+//RS     let selected_machine = bundle
+//RS         .build_facts
+//RS         .target_dossier
+//RS         .machine
+//RS         .as_deref()
+//RS         .cloned();
+//RS     let machine = selected_machine
+//RS         .unwrap_or_else(|| target_machine_for_facts(no_os, web_target, &target_triple));
+//RS     if web_target {
+//RS         bundle.build_facts.target_triple = machine.triple.clone();
+//RS     }
+//RS     let usage = crate::TargetMachine::TargetMachineUse::from_core_apis(bundle.used_core.iter());
+//RS     let mut dossier = target_dossier_for_usage(&machine, &usage, "none");
+//RS     // Sema records the complete selected closure, including helper-level
+//RS     // exceptions that are not visible in a raw import list.
+//RS     dossier.layer = bundle.inferred_layer;
+//RS     bundle.build_facts.target_dossier = dossier;
+//RS }
+//RS 
+//RS fn compiler_action_identity(facts: &jet_foundation::Facts::BuildFactSnapshot) -> String {
+//RS     let target_digest = crate::SHA256::sha256_hex(&facts.artifact_identity_bytes());
+//RS     format!(
+//RS         "{};target-dossier={target_digest}",
+//RS         compiler_toolchain_identity()
+//RS     )
+//RS }
+//RS 
+//RS fn target_machine_usage_for_file(
+//RS     file: &str,
+//RS     mode: crate::Sema::CompileMode,
+//RS     machine: &crate::TargetMachine::TargetMachine,
+//RS     profile: &str,
+//RS     locked: bool,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     source_closure: &[(std::path::PathBuf, String)],
+//RS ) -> Result<crate::TargetMachine::TargetMachineUse, Vec<Diagnostic>> {
+//RS     let overlays = source_closure
+//RS         .iter()
+//RS         .map(|(path, source)| (path.as_path(), source.as_str()))
+//RS         .collect::<Vec<_>>();
+//RS     let mut bundle = crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
+//RS     seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
+//RS     let (diags, effect_facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
+//RS     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
+//RS     let _lints = gate_diagnostics(&bundle, parse_teaching, diags, Vec::new())?;
+//RS     let mut usage = crate::Sema::target_machine_use(&bundle);
+//RS     usage.mmio = collect_mmio_usage(&bundle);
+//RS     let hardware = crate::Sema::target_hardware_use_with_effect_facts(&bundle, &effect_facts);
+//RS     let mut target_diags = crate::Sema::check_target_machine(machine, &usage);
+//RS     target_diags.extend(crate::Sema::validate_target_hardware(machine, &hardware));
+//RS     if target_diags.is_empty() {
+//RS         Ok(usage)
+//RS     } else {
+//RS         Err(target_diags)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct PtrFact {
+//RS     address: u64,
+//RS     size: crate::TargetMachine::ByteSize,
+//RS }
+//RS 
+//RS fn collect_mmio_usage(bundle: &crate::AST::ProgramBundle) -> Vec<crate::TargetMachine::MmioAccess> {
+//RS     let mut out = Vec::new();
+//RS     for module in &bundle.modules {
+//RS         let core_aliases = core_aliases(module);
+//RS         for item in &module.items {
+//RS             match item {
+//RS                 crate::AST::Item::Func(f) => collect_mmio_func(f, &core_aliases, &mut out),
+//RS                 crate::AST::Item::Struct(s) => {
+//RS                     for m in &s.methods {
+//RS                         collect_mmio_func(m, &core_aliases, &mut out);
+//RS                     }
+//RS                 }
+//RS                 crate::AST::Item::Enum(e) => {
+//RS                     for m in &e.methods {
+//RS                         collect_mmio_func(m, &core_aliases, &mut out);
+//RS                     }
+//RS                 }
+//RS                 crate::AST::Item::Impl(i) => {
+//RS                     for m in &i.methods {
+//RS                         collect_mmio_func(m, &core_aliases, &mut out);
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn core_aliases(module: &crate::AST::LoadedModule) -> std::collections::HashMap<String, String> {
+//RS     let mut aliases = std::collections::HashMap::new();
+//RS     for import in &module.imports {
+//RS         if let crate::AST::ImportKind::Module(name, _) = &import.kind {
+//RS             if crate::Syntax::is_known_core_module(name) {
+//RS                 let alias = if import.alias.is_empty() {
+//RS                     name.rsplit('.').next().unwrap_or(name).to_string()
+//RS                 } else {
+//RS                     import.alias.clone()
+//RS                 };
+//RS                 aliases.insert(alias, name.clone());
+//RS             }
+//RS         } else if let Some(prefix) = match &import.kind {
+//RS             crate::AST::ImportKind::Unqualified { module_alias, .. } => {
+//RS                 crate::AST::core_list_prefix(module_alias)
+//RS             }
+//RS             _ => None,
+//RS         } {
+//RS             for binding in import.walk_bindings() {
+//RS                 let Some(original) = binding.original else {
+//RS                     continue;
+//RS                 };
+//RS                 let full = format!("{prefix}.{original}");
+//RS                 if crate::Syntax::is_known_core_module(&full) {
+//RS                     aliases.insert(binding.local, full);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     aliases
+//RS }
+//RS 
+//RS fn collect_mmio_func(
+//RS     f: &crate::AST::Func,
+//RS     core_aliases: &std::collections::HashMap<String, String>,
+//RS     out: &mut Vec<crate::TargetMachine::MmioAccess>,
+//RS ) {
+//RS     let mut ptrs = std::collections::HashMap::new();
+//RS     let reason = if f.is_unsafe {
+//RS         f.unsafe_reason.as_deref()
+//RS     } else {
+//RS         None
+//RS     };
+//RS     collect_mmio_stmts(&f.body, core_aliases, &mut ptrs, reason, out);
+//RS }
+//RS 
+//RS fn collect_mmio_stmts(
+//RS     stmts: &[crate::AST::Stmt],
+//RS     core_aliases: &std::collections::HashMap<String, String>,
+//RS     ptrs: &mut std::collections::HashMap<String, PtrFact>,
+//RS     unsafe_reason: Option<&str>,
+//RS     out: &mut Vec<crate::TargetMachine::MmioAccess>,
+//RS ) {
+//RS     for stmt in stmts {
+//RS         match stmt {
+//RS             crate::AST::Stmt::Val(b) => {
+//RS                 collect_mmio_expr(&b.init, core_aliases, ptrs, unsafe_reason, out);
+//RS                 if let Some(fact) = ptr_fact_from_expr(&b.init) {
+//RS                     ptrs.insert(b.name.clone(), fact);
+//RS                 }
+//RS             }
+//RS             crate::AST::Stmt::Expr(e)
+//RS             | crate::AST::Stmt::DeferClose { close: e, .. }
+//RS             | crate::AST::Stmt::Return(Some(e), _) => {
+//RS                 collect_mmio_expr(e, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS             crate::AST::Stmt::Assign { value, .. } => {
+//RS                 collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS             crate::AST::Stmt::While { cond, body, .. } => {
+//RS                 collect_mmio_expr(cond, core_aliases, ptrs, unsafe_reason, out);
+//RS                 collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS             crate::AST::Stmt::For { kind, body, .. } => {
+//RS                 collect_mmio_for_kind(kind, core_aliases, ptrs, unsafe_reason, out);
+//RS                 collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS             crate::AST::Stmt::Switch {
+//RS                 subject,
+//RS                 arms,
+//RS                 else_body,
+//RS                 ..
+//RS             } => {
+//RS                 collect_mmio_expr(subject, core_aliases, ptrs, unsafe_reason, out);
+//RS                 for arm in arms {
+//RS                     collect_mmio_stmts(&arm.body, core_aliases, ptrs, unsafe_reason, out);
+//RS                 }
+//RS                 if let Some(body) = else_body {
+//RS                     collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+//RS                 }
+//RS             }
+//RS             crate::AST::Stmt::Loop { body, .. }
+//RS             | crate::AST::Stmt::Impure { body, .. }
+//RS             | crate::AST::Stmt::Reactive { body, .. }
+//RS             | crate::AST::Stmt::Region { body, .. }
+//RS             | crate::AST::Stmt::Policy { body, .. }
+//RS             | crate::AST::Stmt::TaskGroup { body, .. } => {
+//RS                 collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS             crate::AST::Stmt::Unsafe { audit, body, .. } => {
+//RS                 collect_mmio_stmts(body, core_aliases, ptrs, audit.as_deref(), out);
+//RS             }
+//RS             crate::AST::Stmt::CountedLoop {
+//RS                 init,
+//RS                 cond,
+//RS                 step,
+//RS                 body,
+//RS                 ..
+//RS             } => {
+//RS                 collect_mmio_expr(&init.init, core_aliases, ptrs, unsafe_reason, out);
+//RS                 if let Some(fact) = ptr_fact_from_expr(&init.init) {
+//RS                     ptrs.insert(init.name.clone(), fact);
+//RS                 }
+//RS                 collect_mmio_expr(cond, core_aliases, ptrs, unsafe_reason, out);
+//RS                 if let Some(step) = step {
+//RS                     collect_mmio_stmts(
+//RS                         std::slice::from_ref(step),
+//RS                         core_aliases,
+//RS                         ptrs,
+//RS                         unsafe_reason,
+//RS                         out,
+//RS                     );
+//RS                 }
+//RS                 collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS             crate::AST::Stmt::Return(None, _)
+//RS             | crate::AST::Stmt::Break(_)
+//RS             | crate::AST::Stmt::Continue(_)
+//RS             | crate::AST::Stmt::BreakLabel(_, _)
+//RS             | crate::AST::Stmt::ContinueLabel(_, _) => {}
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_mmio_for_kind(
+//RS     kind: &crate::AST::ForKind,
+//RS     core_aliases: &std::collections::HashMap<String, String>,
+//RS     ptrs: &mut std::collections::HashMap<String, PtrFact>,
+//RS     unsafe_reason: Option<&str>,
+//RS     out: &mut Vec<crate::TargetMachine::MmioAccess>,
+//RS ) {
+//RS     match kind {
+//RS         crate::AST::ForKind::Range {
+//RS             start,
+//RS             end,
+//RS             step,
+//RS             exclusive: _,
+//RS         } => {
+//RS             collect_mmio_expr(start, core_aliases, ptrs, unsafe_reason, out);
+//RS             collect_mmio_expr(end, core_aliases, ptrs, unsafe_reason, out);
+//RS             if let Some(step) = step {
+//RS                 collect_mmio_expr(step, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         crate::AST::ForKind::In { collection, step } => {
+//RS             collect_mmio_expr(collection, core_aliases, ptrs, unsafe_reason, out);
+//RS             if let Some(step) = step {
+//RS                 collect_mmio_expr(step, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_mmio_expr(
+//RS     expr: &crate::AST::Expr,
+//RS     core_aliases: &std::collections::HashMap<String, String>,
+//RS     ptrs: &std::collections::HashMap<String, PtrFact>,
+//RS     unsafe_reason: Option<&str>,
+//RS     out: &mut Vec<crate::TargetMachine::MmioAccess>,
+//RS ) {
+//RS     match expr {
+//RS         crate::AST::Expr::PtrFromAddr { addr, .. } => {
+//RS             collect_mmio_expr(addr, core_aliases, ptrs, unsafe_reason, out);
+//RS         }
+//RS         crate::AST::Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             args,
+//RS             ..
+//RS         } => {
+//RS             if is_core_mem_receiver(receiver, core_aliases)
+//RS                 && matches!(method.as_str(), "volatile_read" | "volatile_write")
+//RS             {
+//RS                 if let Some(first) = args.first() {
+//RS                     if let crate::AST::Expr::Ident(name, _) = &first.expr {
+//RS                         if let Some(fact) = ptrs.get(name) {
+//RS                             out.push(crate::TargetMachine::MmioAccess {
+//RS                                 address: fact.address,
+//RS                                 size: fact.size,
+//RS                                 unsafe_gate: unsafe_reason.map(|reason| {
+//RS                                     crate::TargetMachine::UnsafeGate {
+//RS                                         reason: reason.to_string(),
+//RS                                     }
+//RS                                 }),
+//RS                             });
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             collect_mmio_expr(receiver, core_aliases, ptrs, unsafe_reason, out);
+//RS             for arg in args {
+//RS                 collect_mmio_expr(&arg.expr, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::Call(c) => {
+//RS             for arg in &c.args {
+//RS                 collect_mmio_expr(&arg.expr, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::Binary(_, a, b, _) => {
+//RS             collect_mmio_expr(a, core_aliases, ptrs, unsafe_reason, out);
+//RS             collect_mmio_expr(b, core_aliases, ptrs, unsafe_reason, out);
+//RS         }
+//RS         crate::AST::Expr::Index { base, index, .. } => {
+//RS             collect_mmio_expr(base, core_aliases, ptrs, unsafe_reason, out);
+//RS             collect_mmio_expr(index, core_aliases, ptrs, unsafe_reason, out);
+//RS         }
+//RS         crate::AST::Expr::OrFallback {
+//RS             value, fallback, ..
+//RS         } => {
+//RS             collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
+//RS             if let crate::AST::OrFallback::Value(v) = fallback {
+//RS                 collect_mmio_expr(v, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::Unary(_, e, _)
+//RS         | crate::AST::Expr::Copy(e, _)
+//RS         | crate::AST::Expr::Place(e, _, _)
+//RS         | crate::AST::Expr::Deref(e, _)
+//RS         | crate::AST::Expr::RawOf(e, _)
+//RS         | crate::AST::Expr::Field(e, _, _)
+//RS         | crate::AST::Expr::OptField { base: e, .. } => {
+//RS             collect_mmio_expr(e, core_aliases, ptrs, unsafe_reason, out);
+//RS         }
+//RS         crate::AST::Expr::StructLit { fields, .. } => {
+//RS             for (_, _, value) in fields {
+//RS                 collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::ListLit(elems, _) => {
+//RS             for elem in elems {
+//RS                 collect_mmio_expr(elem, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::MapLit(entries, _) => {
+//RS             for (k, v) in entries {
+//RS                 collect_mmio_expr(k, core_aliases, ptrs, unsafe_reason, out);
+//RS                 collect_mmio_expr(v, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::TupleLit(fields, _, _) => {
+//RS             for (_, value) in fields {
+//RS                 collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::CallValue { callee, args, .. } => {
+//RS             collect_mmio_expr(callee, core_aliases, ptrs, unsafe_reason, out);
+//RS             for arg in args {
+//RS                 collect_mmio_expr(&arg.expr, core_aliases, ptrs, unsafe_reason, out);
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn is_core_mem_receiver(
+//RS     receiver: &crate::AST::Expr,
+//RS     core_aliases: &std::collections::HashMap<String, String>,
+//RS ) -> bool {
+//RS     matches!(receiver, crate::AST::Expr::Ident(alias, _) if core_aliases.get(alias).is_some_and(|m| m == "core.mem"))
+//RS }
+//RS 
+//RS fn ptr_fact_from_expr(expr: &crate::AST::Expr) -> Option<PtrFact> {
+//RS     let crate::AST::Expr::PtrFromAddr { elem, addr, .. } = expr else {
+//RS         return None;
+//RS     };
+//RS     let crate::AST::Expr::Int(address, _, _, _) = addr.as_ref() else {
+//RS         return None;
+//RS     };
+//RS     if *address < 0 {
+//RS         return None;
+//RS     }
+//RS     Some(PtrFact {
+//RS         address: *address as u64,
+//RS         size: byte_size_for_type(elem)?,
+//RS     })
+//RS }
+//RS 
+//RS fn byte_size_for_type(ty: &crate::AST::Type) -> Option<crate::TargetMachine::ByteSize> {
+//RS     match ty {
+//RS         crate::AST::Type::Bool => Some(crate::TargetMachine::ByteSize::bytes(1)),
+//RS         crate::AST::Type::Char | crate::AST::Type::Float32 => {
+//RS             Some(crate::TargetMachine::ByteSize::bytes(4))
+// END-PORT-PENDING 2019 crates/jet-driver/src/Driver/mod.rs:1-1800
+

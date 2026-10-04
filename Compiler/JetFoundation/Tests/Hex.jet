@@ -1,0 +1,12 @@
+use JetFoundation.Hex.[encode, decode, nibble]
+// Rust: crates/jet-foundation/src/Hex.rs:11,21,31
+// No original inline tests; exact encoding/alphabet controls.
+#Test("hex lowercase encoding mixed case decoding and strict rejection") {
+    bytes :: [U8]{0, 15, 16, 127, 128, 255}
+    assert(encode(bytes.view()) == "000f107f80ff")
+    assert(decode("000F107f80Ff") == Val(bytes))
+    assert(decode("") == Val([U8]{}))
+    loop value in [String]{"0", "gg", "+0", " 0", "é"} { assert(decode(value) == None) }
+    assert(nibble(48) == Val(0) && nibble(70) == Val(15) && nibble(102) == Val(15))
+    assert(nibble(47) == None && nibble(71) == None && nibble(103) == None)
+}

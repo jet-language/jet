@@ -1,0 +1,1804 @@
+// PORT-PENDING 2053 compiler-bootstrap-host-native-slice-1: Compiler/Bootstrap/Host/Native.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Native half of the private source-coupled compiler bootstrap.
+//RS //
+//RS // The Jet half (`Entry.jet`) is linked by the private source-coupled host
+//RS // artifact, outside the public source inventory. This half owns the
+//RS // filesystem authority lease, the ambient native Prelude scope, and the
+//RS // source-coupled carrier codec; it never parses Jet source or invokes the Rust
+//RS // front end as a semantic fallback.
+//RS 
+//RS use jet_driver::Authority::{
+//RS     AuthorityError, AuthorityKind, AuthorityResolver, CheckedFile, FileIdentity,
+//RS };
+//RS use crate::Codegen::MIRRust::{
+//RS     MirRustAotMetadata, MirRustCallableMetadata, MirRustConfig, MirRustTraitMetadata,
+//RS     MirRustTraitMethodMetadata, MirRustVariantMetadata,
+//RS };
+//RS use jet_jit::SourceResources::SourceResourceRetireError;
+//RS use jet_foundation::MIR::{
+//RS     MirFieldId, MirProgram, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirVariantPayload,
+//RS };
+//RS use std::cell::RefCell;
+//RS use std::collections::{BTreeMap, HashMap};
+//RS use std::fmt::{self, Write as _};
+//RS use std::path::Path;
+//RS #[path = "NativeAdapter.rs"]
+//RS mod compiler_bootstrap_native_adapter;
+//RS use self::compiler_bootstrap_native_adapter::emit_bootstrap_native_adapter_impl;
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct AuthorizedSourceFile {
+//RS     pub(crate) path: String,
+//RS     pub(crate) relative_path: String,
+//RS     pub(crate) identity: String,
+//RS     pub(crate) source: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct AuthorizedSourceRoot {
+//RS     pub(crate) canonical_path: String,
+//RS     pub(crate) identity: String,
+//RS     pub(crate) allow_hardlinks: bool,
+//RS     pub(crate) files: Vec<AuthorizedSourceFile>,
+//RS     pub(crate) foreign_cache_files: Vec<AuthorizedSourceFile>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct AuthorizedSourceSnapshot {
+//RS     pub(crate) roots: Vec<AuthorizedSourceRoot>,
+//RS     pub(crate) entry_root_identity: String,
+//RS     pub(crate) entry_path: String,
+//RS }
+//RS 
+//RS /// Holds the checked handles for one authorized source root.
+//RS struct AuthorizedSourceRootLease {
+//RS     resolver: AuthorityResolver,
+//RS     root: crate::Authority::CheckedDirectory,
+//RS     manifest: CheckedFile,
+//RS     files: Vec<CheckedFile>,
+//RS     foreign_cache_files: Vec<CheckedFile>,
+//RS }
+//RS 
+//RS /// Holds the checked handles for the complete source snapshot until the
+//RS /// generated Jet callable has returned. Keeping the handles alive is part of
+//RS /// the authority proof: source bytes are not detached from the objects that
+//RS /// were checked before the call.
+//RS pub(crate) struct AuthorizedSourceLease {
+//RS     roots: Vec<AuthorizedSourceRootLease>,
+//RS     snapshot: AuthorizedSourceSnapshot,
+//RS }
+//RS impl AuthorizedSourceLease {
+//RS     pub(crate) fn snapshot(&self) -> &AuthorizedSourceSnapshot {
+//RS         &self.snapshot
+//RS     }
+//RS 
+//RS     /// Revalidate every checked source root, manifest, and file immediately
+//RS     /// before a generated Jet call.
+//RS     pub(crate) fn revalidate(&self) -> Result<(), AuthorityError> {
+//RS         for root in &self.roots {
+//RS             root.resolver.revalidate_directory(&root.root)?;
+//RS             root.resolver.revalidate_file(&root.manifest)?;
+//RS             for file in &root.files {
+//RS                 root.resolver.revalidate_file(file)?;
+//RS             }
+//RS             for file in &root.foreign_cache_files {
+//RS                 root.resolver.revalidate_file(file)?;
+//RS             }
+//RS             root.resolver.revalidate_root()?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS struct AuthorizedRootRecord {
+//RS     lease: AuthorizedSourceRootLease,
+//RS     snapshot: AuthorizedSourceRoot,
+//RS }
+//RS 
+//RS /// Open one or more descriptor-relative source authorities. The caller names
+//RS /// candidate roots but does not select dependencies; Driver receives every
+//RS /// checked root and performs package/path/version matching from the snapshot.
+//RS pub(crate) fn open_authorized_sources(
+//RS     root: &Path,
+//RS     entry: &Path,
+//RS ) -> Result<AuthorizedSourceLease, AuthorityError> {
+//RS     open_authorized_source_candidates(&[root], 0, entry)
+//RS }
+//RS 
+//RS pub(crate) fn open_authorized_source_candidates(
+//RS     roots: &[&Path],
+//RS     entry_root_index: usize,
+//RS     entry: &Path,
+//RS ) -> Result<AuthorizedSourceLease, AuthorityError> {
+//RS     if roots.is_empty() {
+//RS         return Err(AuthorityError::Invalid {
+//RS             path: entry.to_path_buf(),
+//RS             detail: "the native source snapshot has no candidate authority roots".to_string(),
+//RS         });
+//RS     }
+//RS     if entry_root_index >= roots.len() {
+//RS         return Err(AuthorityError::Invalid {
+//RS             path: entry.to_path_buf(),
+//RS             detail: "the selected entry root is outside the candidate authority roots".to_string(),
+//RS         });
+//RS     }
+//RS 
+//RS     let mut records = Vec::with_capacity(roots.len());
+//RS     let mut entry_root_identity = None;
+//RS     let mut entry_path = None;
+//RS     for (root_index, root_path) in roots.iter().enumerate() {
+//RS         let resolver = AuthorityResolver::open(root_path)?;
+//RS         let root_directory = resolver.checked_directory(Path::new("."))?;
+//RS         // This checks both the canonical package.jet and the retired jet.toml
+//RS         // marker before either can enter the source snapshot.
+//RS         let manifest = resolver.checked_manifest(Path::new("."))?.file;
+//RS         let mut files = resolver.discover_source_files()?;
+//RS         let checked_entry = if root_index == entry_root_index {
+//RS             Some(resolver.checked_file(entry)?)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let entry_file = if let Some(checked) = checked_entry.as_ref() {
+//RS             let file = files
+//RS                 .iter()
+//RS                 .find(|file| file.relative == checked.relative)
+//RS                 .ok_or_else(|| AuthorityError::Invalid {
+//RS                     path: checked.path.clone(),
+//RS                     detail: "the selected entry is not present in the complete authorized source walk"
+//RS                         .to_string(),
+//RS                 })?;
+//RS             if file.identity != checked.identity || file.bytes != checked.bytes {
+//RS                 return Err(AuthorityError::Changed(checked.path.clone()));
+//RS             }
+//RS             Some(file.relative.clone())
+//RS         } else {
+//RS             None
+//RS         };
+//RS 
+//RS         if !files
+//RS             .iter()
+//RS             .any(|file| file.relative == manifest.relative)
+//RS         {
+//RS             files.push(manifest.clone());
+//RS             files.sort_by(|left, right| left.relative.cmp(&right.relative));
+//RS         }
+//RS         let foreign_cache_files =
+//RS             collect_authorized_foreign_cache_files(&resolver, &files)?;
+//RS         let mut authorized_files = Vec::with_capacity(files.len());
+//RS         for file in &files {
+//RS             resolver.revalidate_file(file)?;
+//RS             authorized_files.push(authorized_source_file(file)?);
+//RS         }
+//RS         let mut authorized_foreign_cache_files =
+//RS             Vec::with_capacity(foreign_cache_files.len());
+//RS         for file in &foreign_cache_files {
+//RS             resolver.revalidate_file(file)?;
+//RS             authorized_foreign_cache_files.push(authorized_source_file(file)?);
+//RS         }
+//RS         resolver.revalidate_file(&manifest)?;
+//RS         resolver.revalidate_root()?;
+//RS 
+//RS         let root_identity = identity_key(&root_directory.identity);
+//RS         let canonical_path = root_directory.path.display().to_string();
+//RS         if root_index == entry_root_index {
+//RS             let relative = entry_file.ok_or_else(|| AuthorityError::Invalid {
+//RS                 path: entry.to_path_buf(),
+//RS                 detail: "the selected entry root did not produce an entry file".to_string(),
+//RS             })?;
+//RS             let selected = authorized_files
+//RS                 .iter()
+//RS                 .find(|file| file.relative_path == relative)
+//RS                 .ok_or_else(|| AuthorityError::Invalid {
+//RS                     path: entry.to_path_buf(),
+//RS                     detail: "the selected entry was lost while building the authorized snapshot"
+//RS                         .to_string(),
+//RS                 })?;
+//RS             entry_root_identity = Some(root_identity.clone());
+//RS             entry_path = Some(selected.path.clone());
+//RS         }
+//RS         records.push(AuthorizedRootRecord {
+//RS             lease: AuthorizedSourceRootLease {
+//RS                 resolver,
+//RS                 root: root_directory,
+//RS                 manifest,
+//RS                 files,
+//RS                 foreign_cache_files,
+//RS             },
+//RS             snapshot: AuthorizedSourceRoot {
+//RS                 canonical_path,
+//RS                 identity: root_identity,
+//RS                 allow_hardlinks: false,
+//RS                 files: authorized_files,
+//RS                 foreign_cache_files: authorized_foreign_cache_files,
+//RS             },
+//RS         });
+//RS     }
+//RS 
+//RS 
+//RS     records.sort_by(|left, right| {
+//RS         left.snapshot
+//RS             .canonical_path
+//RS             .cmp(&right.snapshot.canonical_path)
+//RS     });
+//RS     for pair in records.windows(2) {
+//RS         if pair[0].snapshot.canonical_path == pair[1].snapshot.canonical_path {
+//RS             return Err(AuthorityError::Invalid {
+//RS                 path: Path::new(&pair[1].snapshot.canonical_path).to_path_buf(),
+//RS                 detail: "candidate authority roots must be physically distinct".to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS     let snapshot = AuthorizedSourceSnapshot {
+//RS         roots: records
+//RS             .iter()
+//RS             .map(|record| record.snapshot.clone())
+//RS             .collect(),
+//RS         entry_root_identity: entry_root_identity.ok_or_else(|| AuthorityError::Invalid {
+//RS             path: entry.to_path_buf(),
+//RS             detail: "the selected entry root was not recorded".to_string(),
+//RS         })?,
+//RS         entry_path: entry_path.ok_or_else(|| AuthorityError::Invalid {
+//RS             path: entry.to_path_buf(),
+//RS             detail: "the selected entry path was not recorded".to_string(),
+//RS         })?,
+//RS     };
+//RS     let roots = records.into_iter().map(|record| record.lease).collect();
+//RS     Ok(AuthorizedSourceLease { roots, snapshot })
+//RS }
+//RS 
+//RS fn authorized_source_file(file: &CheckedFile) -> Result<AuthorizedSourceFile, AuthorityError> {
+//RS     Ok(AuthorizedSourceFile {
+//RS         path: file.path.display().to_string(),
+//RS         relative_path: relative_text(&file.relative),
+//RS         identity: identity_key(&file.identity),
+//RS         source: file.text()?,
+//RS     })
+//RS }
+//RS fn append_authorized_foreign_cache_file(
+//RS     foreign_cache_files: &mut Vec<CheckedFile>,
+//RS     file: CheckedFile,
+//RS     total_files: &mut usize,
+//RS     total_bytes: &mut u64,
+//RS ) -> Result<(), AuthorityError> {
+//RS     let next_file_count = (*total_files).saturating_add(1);
+//RS     let next_byte_count = (*total_bytes).saturating_add(file.bytes.len() as u64);
+//RS     if next_file_count > jet_foundation::SHA256::MAX_TREE_FILES
+//RS         || next_byte_count > jet_foundation::SHA256::MAX_TREE_TOTAL_BYTES
+//RS     {
+//RS         return Err(AuthorityError::Invalid {
+//RS             path: file.path.clone(),
+//RS             detail: "authorized source and foreign cache snapshot exceeds the authority tree read bounds"
+//RS                 .to_string(),
+//RS         });
+//RS     }
+//RS     *total_files = next_file_count;
+//RS     *total_bytes = next_byte_count;
+//RS     foreign_cache_files.push(file);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn collect_authorized_foreign_cache_files(
+//RS     resolver: &AuthorityResolver,
+//RS     source_files: &[CheckedFile],
+//RS ) -> Result<Vec<CheckedFile>, AuthorityError> {
+//RS     let mut foreign_cache_files = Vec::new();
+//RS     let mut total_files = source_files.len();
+//RS     let mut total_bytes = source_files
+//RS         .iter()
+//RS         .fold(0u64, |total, file| total.saturating_add(file.bytes.len() as u64));
+//RS     for cache_directory in [
+//RS         Path::new(".jet/bindings/c"),
+//RS         Path::new(".jet/bindings/cpp"),
+//RS     ] {
+//RS         let cache_files = match resolver.discover_files(cache_directory, Some("jet")) {
+//RS             Ok(files) => files,
+//RS             Err(error) if error.is_missing() => continue,
+//RS             Err(error) => return Err(error),
+//RS         };
+//RS         for cache in cache_files {
+//RS             if cache
+//RS                 .relative
+//RS                 .file_name()
+//RS                 .and_then(|name| name.to_str())
+//RS                 .is_some_and(|name| name.ends_with(".adapted.jet"))
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             for extension in ["metadata", "provenance"] {
+//RS                 let sidecar = cache.relative.with_extension(extension);
+//RS                 match resolver.checked_file(&sidecar) {
+//RS                     Ok(file) => append_authorized_foreign_cache_file(
+//RS                         &mut foreign_cache_files,
+//RS                         file,
+//RS                         &mut total_files,
+//RS                         &mut total_bytes,
+//RS                     )?,
+//RS                     Err(error) if error.is_missing() => {}
+//RS                     Err(error) => return Err(error),
+//RS                 }
+//RS             }
+//RS             append_authorized_foreign_cache_file(
+//RS                 &mut foreign_cache_files,
+//RS                 cache,
+//RS                 &mut total_files,
+//RS                 &mut total_bytes,
+//RS             )?;
+//RS         }
+//RS     }
+//RS     foreign_cache_files.sort_by(|left, right| left.relative.cmp(&right.relative));
+//RS     Ok(foreign_cache_files)
+//RS }
+//RS 
+//RS fn relative_text(path: &Path) -> String {
+//RS     let text = path.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
+//RS     if text.is_empty() {
+//RS         ".".to_string()
+//RS     } else {
+//RS         text
+//RS     }
+//RS }
+//RS 
+//RS fn identity_key(identity: &FileIdentity) -> String {
+//RS     let kind = match identity.kind {
+//RS         AuthorityKind::File => "file",
+//RS         AuthorityKind::Directory => "directory",
+//RS     };
+//RS     let modified = identity
+//RS         .modified_ns
+//RS         .map_or_else(|| "none".to_string(), |value| value.to_string());
+//RS     let device = identity
+//RS         .device
+//RS         .map_or_else(|| "none".to_string(), |value| value.to_string());
+//RS     let inode = identity
+//RS         .inode
+//RS         .map_or_else(|| "none".to_string(), |value| value.to_string());
+//RS     format!(
+//RS         "authority-file-v1;kind={kind};length={};modified_ns={modified};device={device};inode={inode}",
+//RS         identity.length
+//RS     )
+//RS }
+//RS 
+//RS /// Install the one canonical native Prelude adapter around a generated
+//RS /// callable. The adapter itself remains owned by Codegen; Host only installs
+//RS /// the existing ambient hook and never duplicates its route table.
+//RS pub(crate) fn with_native_prelude<R>(body: impl FnOnce() -> R) -> R {
+//RS     crate::Comptime::with_ambient_mir_prelude(
+//RS         Some(crate::Codegen::NativePreludeBridge::ambient_call),
+//RS         body,
+//RS     )
+//RS }
+//RS 
+//RS /// Revalidate the lease, install the canonical native adapter, and invoke the
+//RS /// source-coupled callable. The callable is deliberately generic so the
+//RS /// generated Rust artifact owns its exact private request/result types.
+//RS pub(crate) fn invoke_with_authority<R>(
+//RS     lease: &AuthorizedSourceLease,
+//RS     invoke: impl FnOnce(&AuthorizedSourceSnapshot) -> R,
+//RS ) -> Result<R, AuthorityError> {
+//RS     lease.revalidate()?;
+//RS     Ok(with_native_prelude(|| invoke(lease.snapshot())))
+//RS }
+//RS 
+//RS /// The machine record store behind the self-hosted driver's
+//RS /// `JetDriverRecordStore`. The host owns where records live; the compiler
+//RS /// names a record only by schema and key. Every failure is a miss: an unknown
+//RS /// schema, an unreadable or undecodable record, or a rejected publish.
+//RS #[derive(Clone)]
+//RS pub(crate) struct BootstrapRecordStore {
+//RS     store: jet_store::Store,
+//RS }
+//RS 
+//RS impl BootstrapRecordStore {
+//RS     /// The store configured for this process (`JET_STORE_DIR` or the default
+//RS     /// machine store), or `None` when it cannot be opened.
+//RS     pub(crate) fn from_env() -> Option<Self> {
+//RS         jet_store::Store::from_env().ok().map(|store| Self { store })
+//RS     }
+//RS 
+//RS     pub(crate) fn record(&self, schema: &str, key: &str) -> Option<Vec<u8>> {
+//RS         let kind = jet_store::RecordKind::from_schema(schema)?;
+//RS         self.store.record(kind, key).ok().flatten()
+//RS     }
+//RS 
+//RS     pub(crate) fn put_record(&self, schema: &str, key: &str, bytes: &[u8]) -> bool {
+//RS         jet_store::RecordKind::from_schema(schema)
+//RS             .is_some_and(|kind| self.store.put_record(kind, key, bytes).is_ok())
+//RS     }
+//RS 
+//RS     /// `size:mtime_ns:ctime_ns:inode` of a regular file, the same stamp the
+//RS     /// Rust driver keeps in its stamp table.
+//RS     pub(crate) fn stamp(&self, path: &str) -> Option<String> {
+//RS         jet_store::project_state::file_stamp(Path::new(path))
+//RS     }
+//RS }
+//RS 
+//RS /// Failure while binding the private generated callback to the exact carriers
+//RS /// emitted for the same MIR artifact. These failures are deliberately raised
+//RS /// before mutating the generated source buffer.
+//RS #[derive(Debug)]
+//RS pub(crate) enum BootstrapHostCodecError {
+//RS     MissingType(String),
+//RS     MissingField { owner: String, field: String },
+//RS     MissingVariant { owner: String, variant: String },
+//RS     MissingEntry(String),
+//RS     InvalidMetadata(String),
+//RS     ResourceRetirement {
+//RS         cause: Box<BootstrapHostCodecError>,
+//RS         retirement: SourceResourceRetireError,
+//RS     },
+//RS     /// Every failure one packaging run found: packaging keeps going after a
+//RS     /// failed lookup or stage so a single stage-zero run reports them all.
+//RS     Multiple(Vec<BootstrapHostCodecError>),
+//RS }
+//RS 
+//RS impl BootstrapHostCodecError {
+//RS     /// One error for a non-empty `errors` list: the error itself when alone.
+//RS     pub(crate) fn combine(mut errors: Vec<BootstrapHostCodecError>) -> Self {
+//RS         if errors.len() == 1 {
+//RS             if let Some(error) = errors.pop() {
+//RS                 return error;
+//RS             }
+//RS         }
+//RS         Self::Multiple(errors)
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for BootstrapHostCodecError {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::MissingType(name) => write!(formatter, "bootstrap codec type `{name}` is not emitted"),
+//RS             Self::MissingField { owner, field } => {
+//RS                 write!(formatter, "bootstrap codec field `{owner}.{field}` is not emitted")
+//RS             }
+//RS             Self::MissingVariant { owner, variant } => {
+//RS                 write!(formatter, "bootstrap codec variant `{owner}::{variant}` is not emitted")
+//RS             }
+//RS             Self::MissingEntry(name) => write!(formatter, "bootstrap codec entry `{name}` is not emitted"),
+//RS             Self::InvalidMetadata(detail) => write!(formatter, "invalid bootstrap codec metadata: {detail}"),
+//RS             Self::ResourceRetirement { cause, retirement } => write!(
+//RS                 formatter,
+//RS                 "{cause}; Source resource retirement failed: {}",
+//RS                 retirement.error
+//RS             ),
+//RS             Self::Multiple(errors) => {
+//RS                 write!(formatter, "{} bootstrap packaging errors:", errors.len())?;
+//RS                 for error in errors {
+//RS                     write!(formatter, "\n  - {error}")?;
+//RS                 }
+//RS                 Ok(())
+//RS             }
+//RS         }
+//RS }
+//RS }
+//RS /// Source-coupled bindings emitted by one Rust artifact.
+//RS ///
+//RS /// The ordinary Rust emitter and the Jet emitter expose the same four row
+//RS /// families. The initial bootstrap stage adapts `MirRustAotMetadata` here;
+//RS /// the self-emitted stage supplies the same rows from its generated manifest.
+//RS /// Host glue only consumes these mechanical facts and never infers semantics.
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct BootstrapBindingDescriptor {
+//RS     pub(crate) callables: Vec<BootstrapCallableBinding>,
+//RS     pub(crate) types: Vec<BootstrapTypeBinding>,
+//RS     pub(crate) fields: Vec<BootstrapFieldBinding>,
+//RS     pub(crate) variants: Vec<MirRustVariantMetadata>,
+//RS     pub(crate) traits: Vec<MirRustTraitMetadata>,
+//RS     pub(crate) trait_methods: Vec<MirRustTraitMethodMetadata>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct BootstrapCallableBinding {
+//RS     pub(crate) source_name: String,
+//RS     pub(crate) metadata: MirRustCallableMetadata,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct BootstrapTypeBinding {
+//RS     pub(crate) ty: MirTypeId,
+//RS     pub(crate) source_name: String,
+//RS     pub(crate) symbol: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct BootstrapFieldBinding {
+//RS     pub(crate) field: MirFieldId,
+//RS     pub(crate) owner: MirTypeId,
+//RS     pub(crate) source_name: String,
+//RS     pub(crate) symbol: String,
+//RS     pub(crate) ty: MirType,
+//RS }
+//RS 
+//RS impl BootstrapBindingDescriptor {
+//RS     pub(crate) fn from_aot(
+//RS         program: &MirProgram,
+//RS         metadata: &MirRustAotMetadata,
+//RS     ) -> Result<Self, BootstrapHostCodecError> {
+//RS         let callables = metadata
+//RS             .callables
+//RS             .iter()
+//RS             .map(|row| {
+//RS                 let source_name = program
+//RS                     .functions
+//RS                     .iter()
+//RS                     .find(|function| function.id == row.function)
+//RS                     .map(|function| function.name.clone())
+//RS                     .ok_or_else(|| {
+//RS                         BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                             "Rust metadata callable {:?} is absent from the MIR program",
+//RS                             row.function
+//RS                         ))
+//RS                     })?;
+//RS                 Ok((source_name, row.clone()))
+//RS             })
+//RS             .collect::<Result<Vec<_>, BootstrapHostCodecError>>()?;
+//RS         let types = metadata
+//RS             .types
+//RS             .iter()
+//RS             .map(|row| {
+//RS                 let source_name = program
+//RS                     .types
+//RS                     .iter()
+//RS                     .find(|definition| definition.id == row.ty)
+//RS                     .map(|definition| definition.name.clone())
+//RS                     .ok_or_else(|| {
+//RS                         BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                             "Rust metadata type {:?} is absent from the MIR program",
+//RS                             row.ty
+//RS                         ))
+//RS                     })?;
+//RS                 Ok((row.ty, source_name, row.symbol.clone()))
+//RS             })
+//RS             .collect::<Result<Vec<_>, BootstrapHostCodecError>>()?;
+//RS         let fields = metadata
+//RS             .fields
+//RS             .iter()
+//RS             .map(|row| {
+//RS                 let field = program
+//RS                     .fields
+//RS                     .iter()
+//RS                     .find(|field| field.id == row.field && field.owner == row.owner)
+//RS                     .ok_or_else(|| {
+//RS                         BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                             "Rust metadata field {:?} is absent from the MIR program",
+//RS                             row.field
+//RS                         ))
+//RS                     })?;
+//RS                 Ok((
+//RS                     row.field,
+//RS                     row.owner,
+//RS                     field.field.name.clone(),
+//RS                     row.symbol.clone(),
+//RS                     field.field.ty.clone(),
+//RS                 ))
+//RS             })
+//RS             .collect::<Result<Vec<_>, BootstrapHostCodecError>>()?;
+//RS         Ok(Self::from_rows(
+//RS             callables,
+//RS             types,
+//RS             fields,
+//RS             metadata.variants.clone(),
+//RS             metadata.traits.clone(),
+//RS             metadata.trait_methods.clone(),
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(crate) fn from_rows(
+//RS         callables: Vec<(String, MirRustCallableMetadata)>,
+//RS         types: Vec<(MirTypeId, String, String)>,
+//RS         fields: Vec<(MirFieldId, MirTypeId, String, String, MirType)>,
+//RS         variants: Vec<MirRustVariantMetadata>,
+//RS         traits: Vec<MirRustTraitMetadata>,
+//RS         trait_methods: Vec<MirRustTraitMethodMetadata>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             callables: callables
+//RS                 .into_iter()
+//RS                 .map(|(source_name, metadata)| BootstrapCallableBinding {
+//RS                     source_name,
+//RS                     metadata,
+//RS                 })
+//RS                 .collect(),
+//RS             types: types
+//RS                 .into_iter()
+//RS                 .map(|(ty, source_name, symbol)| BootstrapTypeBinding {
+//RS                     ty,
+//RS                     source_name,
+//RS                     symbol,
+//RS                 })
+//RS                 .collect(),
+//RS             fields: fields
+//RS                 .into_iter()
+//RS                 .map(|(field, owner, source_name, symbol, ty)| BootstrapFieldBinding {
+//RS                     field,
+//RS                     owner,
+//RS                     source_name,
+//RS                     symbol,
+//RS                     ty,
+//RS                 })
+//RS                 .collect(),
+//RS             variants,
+//RS             traits,
+//RS             trait_methods,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS pub(crate) struct BootstrapCodecSymbols<'a> {
+//RS     metadata: &'a BootstrapBindingDescriptor,
+//RS     // The checked program the bindings were emitted from: the authority for
+//RS     // payload shapes and the emitter's boxed (recursive) edges.
+//RS     program: &'a MirProgram,
+//RS     types: BTreeMap<&'a str, &'a str>,
+//RS     // First row per key, matching the linear-scan meaning these replace: the
+//RS     // host glue walks the whole compiler type graph once per root, so each
+//RS     // field and variant lookup must not rescan every row.
+//RS     definitions: HashMap<&'a str, MirTypeId>,
+//RS     fields: HashMap<(MirTypeId, &'a str), &'a BootstrapFieldBinding>,
+//RS     // Enum variants with named payloads may repeat a field name across
+//RS     // variants, so their payload fields resolve by checked field identity.
+//RS     field_ids: HashMap<(MirTypeId, MirFieldId), &'a BootstrapFieldBinding>,
+//RS     variants: HashMap<(MirTypeId, &'a str), &'a str>,
+//RS     // Failed symbol lookups. A miss yields `MISSING_SYMBOL` so packaging keeps
+//RS     // going and `finish` reports every miss of one run, not just the first.
+//RS     missed: RefCell<Vec<BootstrapHostCodecError>>,
+//RS }
+//RS 
+//RS /// Placeholder spelling returned for a failed lookup; the packaging result is
+//RS /// an error whenever one was handed out, so it never reaches emitted Rust.
+//RS const MISSING_SYMBOL: &str = "__jet_bootstrap_missing_symbol";
+//RS 
+//RS impl<'a> BootstrapCodecSymbols<'a> {
+//RS     pub(crate) fn new(
+//RS         metadata: &'a BootstrapBindingDescriptor,
+//RS         program: &'a MirProgram,
+//RS     ) -> Result<Self, BootstrapHostCodecError> {
+//RS         let mut types = BTreeMap::new();
+//RS         let mut definitions = HashMap::new();
+//RS         for row in &metadata.types {
+//RS             types.entry(row.source_name.as_str()).or_insert(row.symbol.as_str());
+//RS             definitions.entry(row.source_name.as_str()).or_insert(row.ty);
+//RS         }
+//RS         let mut fields = HashMap::new();
+//RS         let mut field_ids = HashMap::new();
+//RS         for row in &metadata.fields {
+//RS             fields.entry((row.owner, row.source_name.as_str())).or_insert(row);
+//RS             field_ids.entry((row.owner, row.field)).or_insert(row);
+//RS         }
+//RS         let mut variants = HashMap::new();
+//RS         for row in &metadata.variants {
+//RS             variants
+//RS                 .entry((row.owner, row.source_name.as_str()))
+//RS                 .or_insert(row.symbol.as_str());
+//RS         }
+//RS         Ok(Self {
+//RS             metadata,
+//RS             program,
+//RS             types,
+//RS             definitions,
+//RS             fields,
+//RS             field_ids,
+//RS             variants,
+//RS             missed: RefCell::new(Vec::new()),
+//RS         })
+//RS     }
+//RS 
+//RS     /// Keep a packaging failure and go on, so `finish` reports it with the rest.
+//RS     pub(crate) fn record(&self, error: BootstrapHostCodecError) {
+//RS         self.missed.borrow_mut().push(error);
+//RS     }
+//RS 
+//RS     fn symbol_or_record<'s>(&self, symbol: Result<&'s str, BootstrapHostCodecError>) -> &'s str {
+//RS         symbol.unwrap_or_else(|error| {
+//RS             self.record(error);
+//RS             MISSING_SYMBOL
+//RS         })
+//RS     }
+//RS 
+//RS     /// `result`, unless lookups were recorded: then every recorded failure
+//RS     /// plus `result`'s own error, in the order they happened.
+//RS     pub(crate) fn finish<T>(
+//RS         &self,
+//RS         result: Result<T, BootstrapHostCodecError>,
+//RS     ) -> Result<T, BootstrapHostCodecError> {
+//RS         let mut missed = std::mem::take(&mut *self.missed.borrow_mut());
+//RS         match result {
+//RS             Ok(value) if missed.is_empty() => Ok(value),
+//RS             Ok(_) => Err(BootstrapHostCodecError::combine(missed)),
+//RS             Err(error) => {
+//RS                 missed.push(error);
+//RS                 Err(BootstrapHostCodecError::combine(missed))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn type_symbol(&self, name: &str) -> Result<&str, BootstrapHostCodecError> {
+//RS         Ok(self.symbol_or_record(
+//RS             self.types
+//RS                 .get(name)
+//RS                 .copied()
+//RS                 .ok_or_else(|| BootstrapHostCodecError::MissingType(name.to_string())),
+//RS         ))
+//RS     }
+//RS 
+//RS     fn definition_id(&self, name: &str) -> Result<MirTypeId, BootstrapHostCodecError> {
+//RS         self.definitions
+//RS             .get(name)
+//RS             .copied()
+//RS             .ok_or_else(|| BootstrapHostCodecError::MissingType(name.to_string()))
+//RS     }
+//RS 
+//RS     pub(crate) fn field_symbol(
+//RS         &self,
+//RS         owner: &str,
+//RS         field: &str,
+//RS     ) -> Result<&str, BootstrapHostCodecError> {
+//RS         Ok(self.symbol_or_record(self.field_binding(owner, field).map(|row| row.symbol.as_str())))
+//RS     }
+//RS 
+//RS     pub(crate) fn field_binding(
+//RS         &self,
+//RS         owner: &str,
+//RS         field: &str,
+//RS     ) -> Result<&BootstrapFieldBinding, BootstrapHostCodecError> {
+//RS         let owner_id = self.definition_id(owner)?;
+//RS         self.fields
+//RS             .get(&(owner_id, field))
+//RS             .copied()
+//RS             .ok_or_else(|| BootstrapHostCodecError::MissingField {
+//RS                 owner: owner.to_string(),
+//RS                 field: field.to_string(),
+//RS             })
+//RS     }
+//RS 
+//RS     /// The binding of one checked field by identity: the lookup for enum
+//RS     /// payload fields, whose names are unique only within their variant.
+//RS     pub(crate) fn field_binding_by_id(
+//RS         &self,
+//RS         owner: MirTypeId,
+//RS         owner_name: &str,
+//RS         field: MirFieldId,
+//RS         field_name: &str,
+//RS     ) -> Result<&BootstrapFieldBinding, BootstrapHostCodecError> {
+//RS         self.field_ids
+//RS             .get(&(owner, field))
+//RS             .copied()
+//RS             .ok_or_else(|| BootstrapHostCodecError::MissingField {
+//RS                 owner: owner_name.to_string(),
+//RS                 field: field_name.to_string(),
+//RS             })
+//RS     }
+//RS 
+//RS     pub(crate) fn variant_symbol(
+//RS         &self,
+//RS         owner: &str,
+//RS         variant: &str,
+//RS     ) -> Result<&str, BootstrapHostCodecError> {
+//RS         let symbol = self.definition_id(owner).and_then(|owner_id| {
+//RS             self.variants.get(&(owner_id, variant)).copied().ok_or_else(|| {
+//RS                 BootstrapHostCodecError::MissingVariant {
+//RS                     owner: owner.to_string(),
+//RS                     variant: variant.to_string(),
+//RS                 }
+//RS             })
+//RS         });
+//RS         Ok(self.symbol_or_record(symbol))
+//RS     }
+//RS 
+//RS     pub(crate) fn variant_path(
+//RS         &self,
+//RS         owner: &str,
+//RS         variant: &str,
+//RS     ) -> Result<String, BootstrapHostCodecError> {
+//RS         Ok(self.variant_symbol(owner, variant)?.to_string())
+//RS     }
+//RS 
+//RS     /// The checked definition row of a bound nominal type.
+//RS     pub(crate) fn definition(&self, owner: &str) -> Result<&'a MirTypeDef, BootstrapHostCodecError> {
+//RS         let id = self.definition_id(owner)?;
+//RS         self.program
+//RS             .types
+//RS             .iter()
+//RS             .find(|definition| definition.id == id)
+//RS             .ok_or_else(|| BootstrapHostCodecError::MissingType(owner.to_string()))
+//RS     }
+//RS 
+//RS     /// The emitted Rust path and checked payload of `owner::variant`.
+//RS     fn variant_payload(
+//RS         &self,
+//RS         owner: &str,
+//RS         variant: &str,
+//RS     ) -> Result<(String, &'a MirTypeDef, &'a MirVariantPayload), BootstrapHostCodecError> {
+//RS         let path = self.variant_path(owner, variant)?;
+//RS         let definition = self.definition(owner)?;
+//RS         let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "bootstrap codec type `{owner}` is not an enum"
+//RS             )));
+//RS         };
+//RS         let payload = variants
+//RS             .iter()
+//RS             .find(|candidate| candidate.name == variant)
+//RS             .map(|candidate| &candidate.payload)
+//RS             .ok_or_else(|| BootstrapHostCodecError::MissingVariant {
+//RS                 owner: owner.to_string(),
+//RS                 variant: variant.to_string(),
+//RS             })?;
+//RS         Ok((path, definition, payload))
+//RS     }
+//RS 
+//RS     /// Pairs each listed payload field with its emitted symbol and whether the
+//RS     /// emitter boxes it. The list must name exactly the declared payload, so a
+//RS     /// drifted Jet declaration fails packaging instead of emitting stale Rust.
+//RS     fn named_payload<'f, T: Copy>(
+//RS         &self,
+//RS         owner: &str,
+//RS         variant: &str,
+//RS         definition: &MirTypeDef,
+//RS         declared: &[jet_foundation::MIR::MirField],
+//RS         listed: &[(&'f str, T)],
+//RS     ) -> Result<Vec<(&str, bool, T)>, BootstrapHostCodecError> {
+//RS         let mismatch = || {
+//RS             BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "host glue lists payload [{}] for `{owner}::{variant}`, the checked payload is [{}]",
+//RS                 listed.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", "),
+//RS                 declared.iter().map(|field| field.name.as_str()).collect::<Vec<_>>().join(", "),
+//RS             ))
+//RS         };
+//RS         if listed.len() != declared.len() {
+//RS             return Err(mismatch());
+//RS         }
+//RS         listed
+//RS             .iter()
+//RS             .map(|(name, item)| {
+//RS                 let field = declared.iter().find(|field| field.name == *name).ok_or_else(mismatch)?;
+//RS                 let symbol = self
+//RS                     .field_binding_by_id(definition.id, owner, field.id, &field.name)?
+//RS                     .symbol
+//RS                     .as_str();
+//RS                 let boxed = definition.boxed_edges.iter().any(|edge| *edge == format!("{variant}.{name}"));
+//RS                 Ok((symbol, boxed, *item))
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// A Rust pattern for `owner::variant`. Each entry is a checked payload
+//RS     /// field name, optionally `field: binding` (the binding defaults to the
+//RS     /// field name); `[".."]` ignores the whole payload. Boxed payload fields
+//RS     /// bind the `Box` itself.
+//RS     pub(crate) fn variant_pattern(
+//RS         &self,
+//RS         owner: &str,
+//RS         variant: &str,
+//RS         bindings: &[&str],
+//RS     ) -> Result<String, BootstrapHostCodecError> {
+//RS         let (path, definition, payload) = self.variant_payload(owner, variant)?;
+//RS         let ignore_all = bindings == [".."];
+//RS         Ok(match payload {
+//RS             MirVariantPayload::Unit if bindings.is_empty() || ignore_all => path,
+//RS             MirVariantPayload::Single(_) if ignore_all => format!("{path}(..)"),
+//RS             MirVariantPayload::Single(_) if bindings.len() == 1 => {
+//RS                 let binding = bindings[0].split_once(':').map_or(bindings[0], |(_, binding)| binding.trim());
+//RS                 format!("{path}({binding})")
+//RS             }
+//RS             MirVariantPayload::Named(_) if ignore_all => format!("{path} {{ .. }}"),
+//RS             MirVariantPayload::Named(declared) => {
+//RS                 let listed = bindings
+//RS                     .iter()
+//RS                     .map(|entry| match entry.split_once(':') {
+//RS                         Some((field, binding)) => (field.trim(), binding.trim()),
+//RS                         None => (entry.trim(), entry.trim()),
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 let fields = self.named_payload(owner, variant, definition, declared, &listed)?;
+//RS                 format!(
+//RS                     "{path} {{ {} }}",
+//RS                     fields
+//RS                         .iter()
+//RS                         .map(|(symbol, _, binding)| format!("{symbol}: {binding}"))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ")
+//RS                 )
+//RS             }
+//RS             _ => {
+//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                     "host glue binds {} payload values of `{owner}::{variant}`, which has a different checked payload",
+//RS                     bindings.len()
+//RS                 )))
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS     /// A Rust constructor for `owner::variant` from `(field, expression)`
+//RS     /// pairs naming exactly the checked payload. Fields the emitter boxes are
+//RS     /// wrapped in `Box::new`.
+//RS     pub(crate) fn variant_value(
+//RS         &self,
+//RS         owner: &str,
+//RS         variant: &str,
+//RS         values: &[(&str, &str)],
+//RS     ) -> Result<String, BootstrapHostCodecError> {
+//RS         let (path, definition, payload) = self.variant_payload(owner, variant)?;
+//RS         let boxed = |boxed: bool, value: &str| {
+//RS             if boxed { format!("Box::new({value})") } else { value.to_string() }
+//RS         };
+//RS         Ok(match payload {
+//RS             MirVariantPayload::Unit if values.is_empty() => path,
+//RS             MirVariantPayload::Single(_) if values.len() == 1 => format!(
+//RS                 "{path}({})",
+//RS                 boxed(definition.boxed_edges.iter().any(|edge| edge == variant), values[0].1)
+//RS             ),
+//RS             MirVariantPayload::Named(declared) => {
+//RS                 let fields = self.named_payload(owner, variant, definition, declared, values)?;
+//RS                 format!(
+//RS                     "{path} {{ {} }}",
+//RS                     fields
+//RS                         .iter()
+//RS                         .map(|(symbol, is_boxed, value)| format!("{symbol}: {}", boxed(*is_boxed, value)))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ")
+//RS                 )
+//RS             }
+//RS             _ => {
+//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                     "host glue builds `{owner}::{variant}` from {} values, which does not match its checked payload",
+//RS                     values.len()
+//RS                 )))
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS     /// `symbol: value` for one struct field, wrapping `value` in `Box::new`
+//RS     /// when the emitter boxes the field.
+//RS     pub(crate) fn field_init(
+//RS         &self,
+//RS         owner: &str,
+//RS         field: &str,
+//RS         value: &str,
+//RS     ) -> Result<String, BootstrapHostCodecError> {
+//RS         let symbol = self.field_symbol(owner, field)?;
+//RS         Ok(if self.definition(owner)?.boxed_edges.iter().any(|edge| edge == field) {
+//RS             format!("{symbol}: Box::new({value})")
+//RS         } else {
+//RS             format!("{symbol}: {value}")
+//RS         })
+//RS     }
+//RS 
+//RS     /// `symbol(arguments)` calling one checked Source callable. Each
+//RS     /// `(place, owned)` value is passed the way the emitter spells its
+//RS     /// parameter (`&mut place`, `&place`, or the owned expression), so the
+//RS     /// call follows the checked access of every parameter.
+//RS     pub(crate) fn call(
+//RS         &self,
+//RS         source_name: &str,
+//RS         values: &[(&str, &str)],
+//RS     ) -> Result<String, BootstrapHostCodecError> {
+//RS         let binding = checked_bootstrap_callable(self.metadata, source_name)?;
+//RS         if binding.metadata.parameter_types.len() != values.len() {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "host glue calls `{source_name}` with {} arguments; its checked signature has {}",
+//RS                 values.len(),
+//RS                 binding.metadata.parameter_types.len()
+//RS             )));
+//RS         }
+//RS         Ok(format!(
+//RS             "{}({})",
+//RS             binding.metadata.symbol,
+//RS             bootstrap_call_arguments(&binding.metadata.parameter_types, values)
+//RS         ))
+//RS     }
+//RS 
+//RS     /// Whether the emitter boxes `owner`'s edge (`field` for a struct field,
+//RS     /// `Variant.field` for a payload field, `Variant` for a single payload).
+//RS     pub(crate) fn boxed_edge(definition: &MirTypeDef, edge: &str) -> bool {
+//RS         definition.boxed_edges.iter().any(|candidate| candidate == edge)
+//RS     }
+//RS 
+//RS     /// A Rust struct literal of `owner` from `(field, expression)` pairs naming
+//RS     /// exactly its checked fields; boxed fields are wrapped in `Box::new`.
+//RS     pub(crate) fn struct_value(
+//RS         &self,
+//RS         owner: &str,
+//RS         values: &[(&str, &str)],
+//RS     ) -> Result<String, BootstrapHostCodecError> {
+//RS         let definition = self.definition(owner)?;
+//RS         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "bootstrap codec type `{owner}` is not a struct"
+//RS             )));
+//RS         };
+//RS         let listed = values.iter().map(|(name, _)| *name).collect::<Vec<_>>();
+//RS         if listed.len() != fields.len() || fields.iter().any(|field| !listed.contains(&field.name.as_str())) {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "host glue builds `{owner}` from fields [{}], the checked fields are [{}]",
+//RS                 listed.join(", "),
+//RS                 fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>().join(", "),
+//RS             )));
+//RS         }
+//RS         let initializers = values
+//RS             .iter()
+//RS             .map(|(field, value)| self.field_init(owner, field, value))
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         Ok(format!("{} {{ {} }}", self.type_symbol(owner)?, initializers.join(", ")))
+//RS     }
+//RS 
+//RS     /// `*` when the emitter boxes `owner.field` (a struct field) or
+//RS     /// `owner::variant.field` (a payload field), else empty: a dereference
+//RS     /// prefix that turns a read of the emitted field into the checked type.
+//RS     fn boxed_deref(&self, owner: &str, edge: &str) -> Result<&'static str, BootstrapHostCodecError> {
+//RS         Ok(if self.definition(owner)?.boxed_edges.iter().any(|candidate| candidate == edge) { "*" } else { "" })
+//RS     }
+//RS 
+//RS     /// Render a host-glue template against the binding metadata. Markers:
+//RS     /// `@t.Type@` type, `@f.Type.field@` field symbol, `@v.Type.Variant@`
+//RS     /// variant path, `@deref.Type.field@` / `@deref.Type.Variant.field@` the
+//RS     /// boxed-edge dereference prefix, and the shape-checked literals
+//RS     /// `@p.Type.Variant@{ field, field: binding }` (pattern),
+//RS     /// `@new.Type.Variant@{ field: expr }` (enum value) and
+//RS     /// `@s.Type@{ field: expr }` (struct value). Literal fields use checked Jet
+//RS     /// names; a unit variant takes no braces and `{ .. }` ignores a payload.
+//RS     /// A pattern or enum value may instead list its payload positionally,
+//RS     /// directly after the marker: `@p.Type.Variant@(binding, binding)` and
+//RS     /// `@new.Type.Variant@(expr, expr)` name every declared payload field in
+//RS     /// declaration order (`(..)` ignores a payload).
+//RS     ///
+//RS     /// A marker that does not match the checked shape is recorded and spelled
+//RS     /// `MISSING_SYMBOL`, so one packaging run reports every drifted marker.
+//RS     pub(crate) fn render(&self, template: &str) -> Result<String, BootstrapHostCodecError> {
+//RS         let mut out = String::with_capacity(template.len());
+//RS         let mut rest = template;
+//RS         while let Some(start) = rest.find('@') {
+//RS             out.push_str(&rest[..start]);
+//RS             let after = &rest[start + 1..];
+//RS             let marker = after.find('@').map(|end| &after[..end]).filter(|marker| {
+//RS                 matches!(marker.split('.').next(), Some("t" | "f" | "v" | "p" | "new" | "s" | "deref"))
+//RS                     && marker.contains('.')
+//RS                     && marker.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+//RS             });
+//RS             let Some(marker) = marker else {
+//RS                 out.push('@');
+//RS                 rest = after;
+//RS                 continue;
+//RS             };
+//RS             rest = &after[marker.len() + 1..];
+//RS             match self.render_marker(marker, &mut rest) {
+//RS                 Ok(rendered) => out.push_str(&rendered),
+//RS                 Err(error) => {
+//RS                     self.record(error);
+//RS                     out.push_str(MISSING_SYMBOL);
+//RS                 }
+//RS             }
+//RS         }
+//RS         out.push_str(rest);
+//RS         Ok(out)
+//RS     }
+//RS 
+//RS     /// One `@marker@`; a literal marker also consumes its `{ ... }` or
+//RS     /// `( ... )` body from `rest`.
+//RS     fn render_marker(&self, marker: &str, rest: &mut &str) -> Result<String, BootstrapHostCodecError> {
+//RS         let parts = marker.split('.').collect::<Vec<_>>();
+//RS         let invalid = || BootstrapHostCodecError::InvalidMetadata(format!("malformed host glue marker `@{marker}@`"));
+//RS         Ok(match parts.as_slice() {
+//RS             ["t", owner] => self.type_symbol(owner)?.to_string(),
+//RS             ["f", owner, field] => self.field_symbol(owner, field)?.to_string(),
+//RS             ["v", owner, variant] => self.variant_path(owner, variant)?,
+//RS             ["deref", owner, field] => self.boxed_deref(owner, field)?.to_string(),
+//RS             ["deref", owner, variant, field] => self.boxed_deref(owner, &format!("{variant}.{field}"))?.to_string(),
+//RS             [kind @ ("p" | "new" | "s"), owner, tail @ ..] => {
+//RS                 let entries = match template_literal_body(*rest) {
+//RS                     Some(('{', body, remaining)) => {
+//RS                         *rest = remaining;
+//RS                         template_literal_entries(body)
+//RS                     }
+//RS                     Some((_, body, remaining)) => {
+//RS                         *rest = remaining;
+//RS                         let [variant] = tail else { return Err(invalid()) };
+//RS                         self.positional_entries(owner, variant, body)?
+//RS                     }
+//RS                     None => Vec::new(),
+//RS                 };
+//RS                 let rendered = entries
+//RS                     .iter()
+//RS                     .map(|(name, value)| Ok((*name, value.map(|value| self.render(value)).transpose()?)))
+//RS                     .collect::<Result<Vec<_>, BootstrapHostCodecError>>()?;
+//RS                 match (*kind, tail) {
+//RS                     ("p", [variant]) => {
+//RS                         let bindings = rendered
+//RS                             .iter()
+//RS                             .map(|(name, binding)| match binding {
+//RS                                 Some(binding) => format!("{name}: {binding}"),
+//RS                                 None => name.to_string(),
+//RS                             })
+//RS                             .collect::<Vec<_>>();
+//RS                         let bindings = bindings.iter().map(String::as_str).collect::<Vec<_>>();
+//RS                         self.variant_pattern(owner, variant, &bindings)?
+//RS                     }
+//RS                     ("new", [variant]) => {
+//RS                         let values = rendered
+//RS                             .iter()
+//RS                             .map(|(name, value)| (*name, value.as_deref().unwrap_or(*name)))
+//RS                             .collect::<Vec<_>>();
+//RS                         self.variant_value(owner, variant, &values)?
+//RS                     }
+//RS                     ("s", []) => {
+//RS                         let values = rendered
+//RS                             .iter()
+//RS                             .map(|(name, value)| (*name, value.as_deref().unwrap_or(*name)))
+//RS                             .collect::<Vec<_>>();
+//RS                         self.struct_value(owner, &values)?
+//RS                     }
+//RS                     _ => return Err(invalid()),
+//RS                 }
+//RS             }
+//RS             _ => return Err(invalid()),
+//RS         })
+//RS     }
+//RS 
+//RS     /// Map a positional payload list onto the declared payload of
+//RS     /// `owner::variant`, in declaration order, as `(field, Some(entry))`
+//RS     /// pairs. `(..)` stays the ignore-all entry.
+//RS     fn positional_entries<'t>(
+//RS         &'t self,
+//RS         owner: &str,
+//RS         variant: &str,
+//RS         body: &'t str,
+//RS     ) -> Result<Vec<(&'t str, Option<&'t str>)>, BootstrapHostCodecError> {
+//RS         let entries = template_positional_entries(body);
+//RS         if entries == [".."] {
+//RS             return Ok(vec![("..", None)]);
+//RS         }
+//RS         let (_, _, payload) = self.variant_payload(owner, variant)?;
+//RS         let declared = match payload {
+//RS             MirVariantPayload::Named(declared) => declared.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+//RS             MirVariantPayload::Single(_) => vec!["value"],
+//RS             _ => Vec::new(),
+//RS         };
+//RS         if declared.len() != entries.len() {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "host glue lists {} positional payload values for `{owner}::{variant}`, the checked payload is [{}]",
+//RS                 entries.len(),
+//RS                 declared.join(", "),
+//RS             )));
+//RS         }
+//RS         Ok(declared.into_iter().zip(entries).map(|(name, entry)| (name, Some(entry))).collect())
+//RS     }
+//RS     pub(crate) fn callable_symbol(
+//RS         &self,
+//RS         source_name: &str,
+//RS     ) -> Result<&str, BootstrapHostCodecError> {
+//RS         let mut rows = self
+//RS             .metadata
+//RS             .callables
+//RS             .iter()
+//RS             .filter(|row| row.source_name == source_name);
+//RS         let symbol = match (rows.next(), rows.next()) {
+//RS             (Some(row), None) => Ok(row.metadata.symbol.as_str()),
+//RS             (None, _) => Err(BootstrapHostCodecError::MissingEntry(source_name.to_string())),
+//RS             (Some(_), Some(_)) => Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "Source callable `{source_name}` has an ambiguous emitted symbol"
+//RS             ))),
+//RS         };
+//RS         Ok(self.symbol_or_record(symbol))
+//RS     }
+//RS     pub(crate) fn trait_symbol(&self, name: &str) -> Result<&str, BootstrapHostCodecError> {
+//RS         let symbol = self
+//RS             .metadata
+//RS             .traits
+//RS             .iter()
+//RS             .find(|row| row.name == name)
+//RS             .map(|row| row.symbol.as_str())
+//RS             .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!("trait `{name}`")));
+//RS         Ok(self.symbol_or_record(symbol))
+//RS     }
+//RS 
+//RS     pub(crate) fn trait_method_metadata(
+//RS         &self,
+//RS         trait_name: &str,
+//RS         method_name: &str,
+//RS     ) -> Result<&MirRustTraitMethodMetadata, BootstrapHostCodecError> {
+//RS         let trait_id = self
+//RS             .metadata
+//RS             .traits
+//RS             .iter()
+//RS             .find(|row| row.name == trait_name)
+//RS             .map(|row| row.trait_id)
+//RS             .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!("trait `{trait_name}`")))?;
+//RS         self.metadata
+//RS             .trait_methods
+//RS             .iter()
+//RS             .find(|row| row.trait_id == trait_id && row.name == method_name)
+//RS             .ok_or_else(|| {
+//RS                 BootstrapHostCodecError::MissingEntry(format!(
+//RS                     "trait method `{trait_name}.{method_name}`"
+//RS                 ))
+//RS             })
+//RS     }
+//RS 
+//RS     /// Every checked method of `trait_name`, in the emitter's declaration
+//RS     /// order. The Jet trait is the only method list: host glue iterates this
+//RS     /// set instead of keeping its own copy.
+//RS     pub(crate) fn trait_methods(
+//RS         &self,
+//RS         trait_name: &str,
+//RS     ) -> Result<Vec<&MirRustTraitMethodMetadata>, BootstrapHostCodecError> {
+//RS         let trait_id = self
+//RS             .metadata
+//RS             .traits
+//RS             .iter()
+//RS             .find(|row| row.name == trait_name)
+//RS             .map(|row| row.trait_id)
+//RS             .ok_or_else(|| BootstrapHostCodecError::MissingEntry(format!("trait `{trait_name}`")))?;
+//RS         let methods = self
+//RS             .metadata
+//RS             .trait_methods
+//RS             .iter()
+//RS             .filter(|row| row.trait_id == trait_id)
+//RS             .collect::<Vec<_>>();
+//RS         if methods.is_empty() {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "trait `{trait_name}` has no checked methods"
+//RS             )));
+//RS         }
+//RS         Ok(methods)
+//RS     }
+//RS }
+//RS 
+//RS /// The `{ ... }` body that follows a shape-checked template marker (after
+//RS /// optional whitespace), or the positional `( ... )` body directly after it,
+//RS /// with its opening delimiter and the text after its closing one. Nested
+//RS /// delimiters and string literals inside the body are skipped.
+//RS fn template_literal_body(text: &str) -> Option<(char, &str, &str)> {
+//RS     let trimmed = text.trim_start();
+//RS     let offset = text.len() - trimmed.len();
+//RS     let open = trimmed.chars().next().filter(|open| *open == '{' || (*open == '(' && offset == 0))?;
+//RS     let mut depth = 0usize;
+//RS     let mut in_string = false;
+//RS     let mut escaped = false;
+//RS     for (index, ch) in trimmed.char_indices() {
+//RS         if in_string {
+//RS             match ch {
+//RS                 _ if escaped => escaped = false,
+//RS                 '\\' => escaped = true,
+//RS                 '"' => in_string = false,
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match ch {
+//RS             '"' => in_string = true,
+//RS             '{' | '(' | '[' => depth += 1,
+//RS             '}' | ')' | ']' => {
+//RS                 depth -= 1;
+//RS                 if depth == 0 {
+//RS                     return Some((open, &trimmed[1..index], &text[offset + index + 1..]));
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS /// Split a template literal body into `field` / `field: expression` entries
+//RS /// at its top-level commas. `::` path separators are not field separators.
+//RS fn template_literal_entries(body: &str) -> Vec<(&str, Option<&str>)> {
+//RS     let mut entries = Vec::new();
+//RS     let mut depth = 0usize;
+//RS     let mut in_string = false;
+//RS     let mut escaped = false;
+//RS     let mut start = 0;
+//RS     let mut colon = None;
+//RS     let mut angle = 0usize;
+//RS     let bytes = body.as_bytes();
+//RS     for (index, ch) in body.char_indices() {
+//RS         if in_string {
+//RS             match ch {
+//RS                 _ if escaped => escaped = false,
+//RS                 '\\' => escaped = true,
+//RS                 '"' => in_string = false,
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match ch {
+//RS             '"' => in_string = true,
+//RS             '{' | '(' | '[' => depth += 1,
+//RS             '}' | ')' | ']' => depth -= 1,
+//RS             '<' | '>' => template_angle_step(body, index, ch, &mut angle),
+//RS             ':' if depth == 0
+//RS                 && angle == 0
+//RS                 && colon.is_none()
+//RS                 && bytes.get(index + 1) != Some(&b':')
+//RS                 && (index == 0 || bytes[index - 1] != b':') =>
+//RS             {
+//RS                 colon = Some(index)
+//RS             }
+//RS             ',' if depth == 0 && angle == 0 => {
+//RS                 template_literal_entry(&body[start..index], colon.map(|colon| colon - start), &mut entries);
+//RS                 start = index + 1;
+//RS                 colon = None;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     template_literal_entry(&body[start..], colon.map(|colon| colon - start), &mut entries);
+//RS     entries
+//RS }
+//RS 
+//RS /// Split a positional `( ... )` body at its top-level commas.
+//RS fn template_positional_entries(body: &str) -> Vec<&str> {
+//RS     let mut entries = Vec::new();
+//RS     let mut depth = 0usize;
+//RS     let mut in_string = false;
+//RS     let mut escaped = false;
+//RS     let mut start = 0;
+//RS     let mut angle = 0usize;
+//RS     for (index, ch) in body.char_indices() {
+//RS         if in_string {
+//RS             match ch {
+//RS                 _ if escaped => escaped = false,
+//RS                 '\\' => escaped = true,
+//RS                 '"' => in_string = false,
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match ch {
+//RS             '"' => in_string = true,
+//RS             '{' | '(' | '[' => depth += 1,
+//RS             '}' | ')' | ']' => depth -= 1,
+//RS             '<' | '>' => template_angle_step(body, index, ch, &mut angle),
+//RS             ',' if depth == 0 && angle == 0 => {
+//RS                 entries.push(body[start..index].trim());
+//RS                 start = index + 1;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     entries.push(body[start..].trim());
+//RS     entries.retain(|entry| !entry.is_empty());
+//RS     entries
+//RS }
+//RS 
+//RS /// Track generic-argument nesting opened by a turbofish (`::<`), so commas
+//RS /// in `collect::<Result<Vec<_>, _>>()` do not split entries. A bare `<` is a
+//RS /// comparison and `->` / `=>` are not closers.
+//RS fn template_angle_step(body: &str, index: usize, ch: char, angle: &mut usize) {
+//RS     match ch {
+//RS         '<' if *angle > 0 || body[..index].ends_with("::") => *angle += 1,
+//RS         '>' if *angle > 0 && !matches!(body[..index].chars().last(), Some('-' | '=')) => *angle -= 1,
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn template_literal_entry<'t>(entry: &'t str, colon: Option<usize>, entries: &mut Vec<(&'t str, Option<&'t str>)>) {
+//RS     match colon {
+//RS         Some(colon) => entries.push((entry[..colon].trim(), Some(entry[colon + 1..].trim()))),
+//RS         None if !entry.trim().is_empty() => entries.push((entry.trim(), None)),
+//RS         None => {}
+//RS     }
+//RS }
+//RS 
+//RS fn bootstrap_required_type_names() -> &'static [&'static str] {
+//RS     &[
+//RS         "MIRPreludeCall",
+//RS         "MIRCallSignature",
+//RS         "MIRSymbol",
+//RS         "MIRType",
+//RS         "MIRTypeKind",
+//RS         "MIRTypeID",
+//RS         "MIRMeasure",
+//RS         "MIRMeasureRule",
+//RS         "MIRDimension",
+//RS         "MIRDimensionAxis",
+//RS         "MIRLayout",
+//RS         "MIRABI",
+//RS         "MIRScalarKind",
+//RS         "MIRSize",
+//RS         "MIRTraitID",
+//RS         "MIRTraitMethodID",
+//RS         "MIRArtifactID",
+//RS         "MIRProgram",
+//RS         "MIRNominalRef",
+//RS         "MIRTupleField",
+//RS         "MIRTagMarker",
+//RS         "MIRInternalTag",
+//RS         "MIRAccess",
+//RS         "MIRFunctionID",
+//RS         "MIRFieldID",
+//RS         "MIRParam",
+//RS         "MIROwnership",
+//RS         "MIROwnershipMode",
+//RS         "MIRDropKind",
+//RS         "MIRForeign",
+//RS         "MIRForeignABI",
+//RS         "MIRForeignLanguage",
+//RS         "MIRTargetApplicability",
+//RS         "MIREffectFacts",
+//RS         "MIRNamedSpan",
+//RS         "MIRModuleID",
+//RS         "MIRForeignID",
+//RS         "MIRLinkUnitID",
+//RS         "MIRCallbackID",
+//RS         "MIRHandleID",
+//RS         "JetEvalHostWriteback",
+//RS         "TComptimeValue",
+//RS         "JetEvalRuntimeValue",
+//RS         "JetEvalHostArgument",
+//RS         "JetEvalRuntimeAggregate",
+//RS         "JetEvalRuntimeMapEntry",
+//RS         "JetEvalRuntimeField",
+//RS         "JetEvalRuntimeEnumArg",
+//RS         "JetEvalHostResult",
+//RS         "JetEvalCallbackOutcome",
+//RS         "JetEvalCallbackResult",
+//RS         "JetEvalError",
+//RS         "JetEvalHostOutcome",
+//RS         "JetEvalHostTransfer",
+//RS         "JetEvalHostProjection",
+//RS         "JetEvalHostValue",
+//RS         "JetEvalHostMapEntry",
+//RS         "JetEvalHostField",
+//RS         "JetEvalHostEnumArg",
+//RS         "JetEvalHostOwner",
+//RS         "JetEvalHostTypeFieldShape",
+//RS         "JetEvalHostTypeArgShape",
+//RS         "JetEvalHostTypeVariantShape",
+//RS         "JetEvalHostTypeNode",
+//RS         "JetEvalHostTypeShape",
+//RS         "JetEvalErrorKind",
+//RS         "JetEvalInternalProblem",
+//RS         "JetEvalMachine",
+//RS         "JetEvalConfig",
+//RS         "JetDriverCompileResult",
+//RS         "JetDriverCompileRequest",
+//RS         "JetDriverCompileTarget",
+//RS         "JetRustEmitManifest",
+//RS         "JetRustEmitCallableMetadata",
+//RS         "JetRustEmitFieldMetadata",
+//RS         "JetRustEmitVariantMetadata",
+//RS         "JetRustEmitTypeMetadata",
+//RS         "Diagnostic",
+//RS         "TextEdit",
+//RS         "Span",
+//RS         "JetRustEmitTraitMetadata",
+//RS         "JetRustEmitTraitMethodMetadata",
+//RS         "JetWebAssets",
+//RS         "JetWebTimezoneAsset",
+//RS         "JetWebEmitConfig",
+//RS         "JetWebEmitFailureKind",
+//RS         "JetWebEmitFailure",
+//RS         "JetWebEmitResult",
+//RS         "JetWebArtifacts",
+//RS         "JetReleaseDevtoolsPolicy",
+//RS         "JetTargetLayout",
+//RS         "MIRArtifactBuildMode",
+//RS         "JetEvalHostCoreOwner",
+//RS         "MIRCoreOwner",
+//RS "MIRSourceFile",
+//RS     ]
+//RS }
+//RS 
+//RS fn bootstrap_required_callable<'a>(
+//RS     metadata: &'a BootstrapBindingDescriptor,
+//RS     name: &str,
+//RS ) -> Result<&'a MirRustCallableMetadata, BootstrapHostCodecError> {
+//RS     Ok(&checked_bootstrap_callable(metadata, name)?.metadata)
+//RS }
+//RS 
+//RS /// The checked Source callables the native compile entry reads facts from:
+//RS /// the callback-transfer helper names the Source `JetEvalMachine` ABI type
+//RS /// (its first parameter), and the host-shape accessor projects checked types
+//RS /// into evaluator host shapes.
+//RS #[derive(Clone, Debug)]
+//RS struct BootstrapNativeHelperRoots {
+//RS     callback_transfer: jet_foundation::MIR::MirFunctionId,
+//RS     host_type_shape: jet_foundation::MIR::MirFunctionId,
+//RS }
+//RS 
+//RS fn checked_bootstrap_callable<'a>(
+//RS     metadata: &'a BootstrapBindingDescriptor,
+//RS     name: &str,
+//RS ) -> Result<&'a BootstrapCallableBinding, BootstrapHostCodecError> {
+//RS     let mut rows = metadata
+//RS         .callables
+//RS         .iter()
+//RS         .filter(|row| row.source_name == name);
+//RS     let row = rows
+//RS         .next()
+//RS         .ok_or_else(|| BootstrapHostCodecError::MissingEntry(name.to_string()))?;
+//RS     if rows.next().is_some() {
+//RS         return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS             "Source callable `{name}` has ambiguous checked bindings"
+//RS         )));
+//RS     }
+//RS     Ok(row)
+//RS }
+//RS 
+//RS fn checked_bootstrap_native_helper_roots(
+//RS     metadata: &BootstrapBindingDescriptor,
+//RS     program: &MirProgram,
+//RS     artifact_id: jet_foundation::MIR::MirArtifactId,
+//RS ) -> Result<BootstrapNativeHelperRoots, BootstrapHostCodecError> {
+//RS     use jet_foundation::MIR::MirArtifactTarget;
+//RS 
+//RS     let artifact = program
+//RS         .artifacts
+//RS         .iter()
+//RS         .find(|artifact| artifact.id == artifact_id)
+//RS         .ok_or_else(|| BootstrapHostCodecError::InvalidMetadata(
+//RS             "native helper artifact is absent from checked MIR".to_string(),
+//RS         ))?;
+//RS     if artifact.target != MirArtifactTarget::RustAot {
+//RS         return Err(BootstrapHostCodecError::InvalidMetadata(
+//RS             "native helper roots require the canonical Rust AOT compiler artifact".to_string(),
+//RS         ));
+//RS     }
+//RS     let checked = |name: &str| {
+//RS         let binding = checked_bootstrap_callable(metadata, name)?;
+//RS         if binding.metadata.symbol.is_empty() {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "Source callable `{name}` has an empty emitted symbol"
+//RS             )));
+//RS         }
+//RS         let function = program
+//RS             .functions
+//RS             .iter()
+//RS             .find(|function| function.id == binding.metadata.function)
+//RS             .ok_or_else(|| BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "checked private Source helper `{name}` is absent from MIR"
+//RS             )))?;
+//RS         if !artifact.modules.contains(&function.module_id)
+//RS             || !function.capture_params.is_empty()
+//RS             || !function.target_applicability.rust_aot
+//RS         {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+//RS                 "checked private Source helper `{name}` is not capture-free and executable in artifact {artifact_id:?}"
+//RS             )));
+//RS         }
+//RS         Ok(function.id)
+//RS     };
+//RS     Ok(BootstrapNativeHelperRoots {
+//RS         callback_transfer: checked("jet_eval_callback_transfer")?,
+//RS         host_type_shape: checked("jet_eval_host_type_shape_from_program")?,
+//RS     })
+//RS }
+//RS 
+//RS fn validate_bootstrap_numeric_callable_type(
+//RS     field: &BootstrapFieldBinding,
+//RS ) -> Result<(), BootstrapHostCodecError> {
+//RS     let callback = match &field.ty.kind {
+//RS         jet_foundation::MIR::MirTypeKind::Option(callback) => callback,
+//RS         _ => {
+//RS             return Err(BootstrapHostCodecError::InvalidMetadata(
+//RS                 "SemaRegistrationHostHooks.numeric_unit_conversion_exact must be an optional checked function type"
+//RS                     .to_string(),
+//RS             ));
+//RS         }
+//RS     };
+//RS     let signature = callback.function_signature().ok_or_else(|| {
+//RS         BootstrapHostCodecError::InvalidMetadata(
+//RS             "SemaRegistrationHostHooks.numeric_unit_conversion_exact must contain a checked Fn type".to_string(),
+//RS         )
+//RS     })?;
+//RS     let parameter_types = signature
+//RS         .params
+//RS         .iter()
+//RS         .map(MirType::canonical_key)
+//RS         .collect::<Vec<_>>();
+//RS     let expected = ["Float", "String", "String", "String", "String"];
+//RS     if parameter_types.len() != expected.len()
+//RS         || parameter_types
+//RS             .iter()
+//RS             .zip(expected)
+//RS             .any(|(actual, expected)| actual != expected)
+//RS     {
+//RS         return Err(BootstrapHostCodecError::InvalidMetadata(
+//RS             "SemaRegistrationHostHooks.numeric_unit_conversion_exact must have its exact checked (Float, String, String, String, String) parameter types"
+//RS                 .to_string(),
+//RS         ));
+//RS     }
+//RS     let returns_optional_float = matches!(
+//RS         signature.ret.as_deref().and_then(MirType::option_inner),
+//RS         Some(output) if output.canonical_key() == "Float"
+//RS     );
+//RS     if !returns_optional_float {
+//RS         return Err(BootstrapHostCodecError::InvalidMetadata(
+//RS             "SemaRegistrationHostHooks.numeric_unit_conversion_exact must return the exact checked optional Float"
+//RS                 .to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS 
+//RS /// Append the private callback/entry splice using one binding descriptor
+//RS /// mechanically adapted from either initial Rust metadata or the generated
+//RS /// Jet manifest.
+//RS pub(crate) fn append_bootstrap_host_glue(
+//RS     source: &mut String,
+//RS     config: &MirRustConfig<'_>,
+//RS     bindings: &BootstrapBindingDescriptor,
+//RS     program: &MirProgram,
+//RS ) -> Result<(), BootstrapHostCodecError> {
+//RS     let symbols = BootstrapCodecSymbols::new(bindings, program)?;
+//RS     // Packaging keeps going after a failed check or stage, recording its error
+//RS     // beside the failed lookups, so one stage-zero run reports every failure.
+//RS     let keep = |result: Result<(), BootstrapHostCodecError>| {
+//RS         if let Err(error) = result {
+//RS             symbols.record(error);
+//RS         }
+//RS     };
+//RS     keep(
+//RS         symbols
+//RS             .field_binding("SemaRegistrationHostHooks", "numeric_unit_conversion_exact")
+//RS             .and_then(validate_bootstrap_numeric_callable_type),
+//RS     );
+//RS     for name in bootstrap_required_type_names() {
+//RS         let _ = symbols.type_symbol(name)?;
+//RS     }
+//RS     let entry = bootstrap_required_callable(bindings, "jet_bootstrap_compile")
+//RS         .and_then(|entry| {
+//RS             if entry.parameter_types.len() != 1 || entry.parameter_access.len() != 1 {
+//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(
+//RS                     "jet_bootstrap_compile must retain exactly one owned request parameter"
+//RS                         .to_string(),
+//RS                 ));
+//RS             }
+//RS             if entry.parameter_types[0].starts_with('&') {
+//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(
+//RS                     "jet_bootstrap_compile request must be an owned parameter".to_string(),
+//RS                 ));
+//RS             }
+//RS             Ok(entry)
+//RS         })
+//RS         .map_err(|error| symbols.record(error))
+//RS         .ok();
+//RS 
+//RS     let eval_default = bootstrap_required_callable(bindings, "jet_eval_default_config")
+//RS         .and_then(|eval_default| {
+//RS             if !eval_default.parameter_types.is_empty() || !eval_default.parameter_access.is_empty() {
+//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(
+//RS                     "jet_eval_default_config must be a zero-parameter callable".to_string(),
+//RS                 ));
+//RS             }
+//RS             Ok(eval_default)
+//RS         })
+//RS         .map_err(|error| symbols.record(error))
+//RS         .ok();
+//RS     let eval_runtime_config = bootstrap_required_callable(bindings, "jet_eval_runtime_config")
+//RS         .and_then(|eval_runtime_config| {
+//RS             if eval_runtime_config.parameter_types.len() != 1
+//RS                 || eval_runtime_config.parameter_access.as_slice()
+//RS                     != [jet_foundation::MIR::MirAccess::Read]
+//RS             {
+//RS                 return Err(BootstrapHostCodecError::InvalidMetadata(
+//RS                     "jet_eval_runtime_config must be a one-parameter Read fork".to_string(),
+//RS                 ));
+//RS             }
+//RS             Ok(eval_runtime_config)
+//RS         })
+//RS         .map_err(|error| symbols.record(error))
+//RS         .ok();
+//RS 
+//RS     let native_helper_roots = checked_bootstrap_native_helper_roots(
+//RS         bindings,
+//RS         program,
+//RS         config.execution.artifact,
+//RS     )
+//RS     .map_err(|error| symbols.record(error))
+//RS     .ok();
+//RS 
+//RS     let mut glue = String::new();
+//RS     emit_bootstrap_type_codec(&mut glue);
+//RS     emit_bootstrap_value_codec(&mut glue);
+//RS     emit_bootstrap_host_value_codec(&mut glue);
+//RS     crate::compiler_bootstrap_diagnostic_codec::append_diagnostic_codec(&mut glue);
+//RS     keep(crate::compiler_bootstrap_runtime_mir_codec::append_runtime_mir_codec(&mut glue, &symbols));
+//RS     if let Some(entry) = entry {
+//RS         keep(crate::compiler_bootstrap_entry_codec::append_bootstrap_entry_codec(
+//RS             &mut glue,
+//RS             bindings,
+//RS             &symbols,
+//RS             program,
+//RS             entry.function,
+//RS         ));
+//RS     }
+//RS     keep(emit_bootstrap_source_resource_bridge(&mut glue, &symbols));
+//RS     keep(emit_bootstrap_callback(&mut glue, &symbols));
+//RS     keep(emit_bootstrap_foreign_callback(&mut glue, &symbols));
+//RS     keep(emit_bootstrap_native_adapter_impl(&mut glue, &symbols));
+//RS     keep(emit_bootstrap_web_asset_provider(&mut glue, &symbols));
+//RS 
+//RS     keep(emit_bootstrap_manifest_adapter(&mut glue, &symbols));
+//RS     if let (Some(eval_default), Some(eval_runtime_config)) = (eval_default, eval_runtime_config) {
+//RS         keep(emit_bootstrap_host_factory(
+//RS             &mut glue,
+//RS             &symbols,
+//RS             &eval_default.symbol,
+//RS             &eval_runtime_config.symbol,
+//RS         ));
+//RS     }
+//RS 
+//RS     writeln!(
+//RS         glue,
+//RS         "fn __jet_bootstrap_numeric_unit_conversion_exact(\n\
+//RS              value: f64,\n\
+//RS              scale_num: String,\n\
+//RS              scale_den: String,\n\
+//RS              offset_num: String,\n\
+//RS              offset_den: String,\n\
+//RS          ) -> Result<f64, ::jet_foundation::Outcome::JetAbsent> {{\n\
+//RS              ::jet_foundation::jet_unit_conversion_exact(\n\
+//RS                  value,\n\
+//RS                  &scale_num,\n\
+//RS                  &scale_den,\n\
+//RS                  &offset_num,\n\
+//RS                  &offset_den,\n\
+//RS              )\n\
+//RS              .ok_or(::jet_foundation::Outcome::JetAbsent)\n\
+//RS          }}\n",
+//RS     )
+//RS     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
+//RS     glue.push_str(
+//RS         r#"#[doc(hidden)]
+//RS pub(crate) const __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY: &str =
+//RS     "jet_eval.numeric_unit_conversion_exact";
+//RS fn __jet_bootstrap_native_numeric_unit_conversion(
+//RS     call: &mut ::jet_jit::SourceInterfaces::NativeCallableCall,
+//RS ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
+//RS     let identity = call.identity().ok_or_else(|| "numeric-unit native call has no checked identity".to_string())?;
+//RS     if identity.key.as_str() != __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY {
+//RS         return Err("numeric-unit native call has a different registration key".to_string());
+//RS     }
+//RS     if call.signature().parameters.len() != 5 || call.argument(5).is_some() {
+//RS         return Err("numeric-unit native call does not have the exact five-argument signature".to_string());
+//RS     }
+//RS     let value = match call.argument(0).map(|argument| &argument.value) {
+//RS         Some(::jet_foundation::MIR::MirRuntimeValue::Float { value, f32: false }) => *value,
+//RS         _ => return Err("numeric-unit native call argument 0 is not checked Float".to_string()),
+//RS     };
+//RS     let read_string = |index| -> Result<&str, String> {
+//RS         match call.argument(index).map(|argument| &argument.value) {
+//RS             Some(::jet_foundation::MIR::MirRuntimeValue::String(value)) => Ok(value),
+//RS             _ => Err(format!("numeric-unit native call argument {index} is not checked String")),
+//RS         }
+//RS     };
+//RS     let scale_num = read_string(1)?;
+//RS     let scale_den = read_string(2)?;
+//RS     let offset_num = read_string(3)?;
+//RS     let offset_den = read_string(4)?;
+//RS     let return_type = call.signature().return_type.as_ref()
+//RS         .ok_or_else(|| "numeric-unit native callable has no checked return type".to_string())?;
+//RS     let ::jet_foundation::MIR::MirTypeKind::Option(element) = return_type.kind() else {
+//RS         return Err("numeric-unit native callable does not return checked optional Float".to_string());
+//RS     };
+//RS     if !matches!(element.kind(), ::jet_foundation::MIR::MirTypeKind::Float) {
+//RS         return Err("numeric-unit native callable does not return checked optional Float".to_string());
+//RS     }
+//RS     match ::jet_foundation::jet_unit_conversion_exact(
+//RS         value,
+//RS         scale_num,
+//RS         scale_den,
+//RS         offset_num,
+//RS         offset_den,
+//RS     ) {
+//RS         Some(value) => Ok(::jet_foundation::MIR::MirRuntimeValue::Present(Box::new(
+//RS             ::jet_foundation::MIR::MirRuntimeValue::Float { value, f32: false },
+//RS         ))),
+//RS         None => Ok(::jet_foundation::MIR::MirRuntimeValue::Absent {
+//RS             element: (**element).clone(),
+//RS         }),
+//RS     }
+//RS }
+//RS "#,
+//RS     );
+//RS     if let (Some(entry), Some(eval_runtime_config), Some(native_helper_roots)) =
+//RS         (entry, eval_runtime_config, &native_helper_roots)
+//RS     {
+//RS         keep(emit_bootstrap_native_compile_entry(
+//RS             &mut glue,
+//RS             bindings,
+// END-PORT-PENDING 2053 Compiler/Bootstrap/Host/Native.rs:1-1800
+

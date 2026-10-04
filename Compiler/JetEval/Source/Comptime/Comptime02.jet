@@ -1,0 +1,1769 @@
+// PORT-PENDING 2063 crates-jet-comptime-src-comptime-mod-slice-1801: crates/jet-comptime/src/Comptime/mod.rs:1801-3565
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     }
+//RS }
+//RS 
+//RS pub fn evaluate_owned_with_imports_opts_collecting_items<'a>(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &'a HashMap<String, Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     binding_types: &HashMap<String, crate::AST::Type>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS     items: &'a [crate::AST::Item],
+//RS     checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+//RS     mutated: Option<&mut HashMap<String, CtValue>>,
+//RS ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+//RS     let mut refs: HashMap<String, &Func> = funcs
+//RS         .iter()
+//RS         .map(|(name, function)| (name.clone(), function))
+//RS         .collect();
+//RS     let mut structs = HashMap::new();
+//RS     let mut methods = HashMap::new();
+//RS     for item in items {
+//RS         match item {
+//RS             crate::AST::Item::Impl(implementation) => {
+//RS                 for method in &implementation.methods {
+//RS                     let key = format!("{}::{}", implementation.type_name, method.name);
+//RS                     let Some(method) = funcs.get(&key) else {
+//RS                         continue;
+//RS                     };
+//RS                     insert_item_method_ref(
+//RS                         &mut refs,
+//RS                         &mut methods,
+//RS                         &implementation.type_name,
+//RS                         implementation.trait_name.as_deref(),
+//RS                         method,
+//RS                         implementation.is_generated_serde || method.compiler_generated,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             crate::AST::Item::Struct(definition) => {
+//RS                 structs.insert(definition.name.clone(), definition);
+//RS                 for method in &definition.methods {
+//RS                     let key = format!("{}::{}", definition.name, method.name);
+//RS                     let Some(method) = funcs.get(&key) else {
+//RS                         continue;
+//RS                     };
+//RS                     methods.insert((definition.name.clone(), method.name.clone()), method);
+//RS                 }
+//RS                 for block in &definition.trait_impls {
+//RS                     for method in &block.methods {
+//RS                         let key = format!("{}::{}", definition.name, method.name);
+//RS                         let Some(method) = funcs.get(&key) else {
+//RS                             continue;
+//RS                         };
+//RS                         insert_item_method_ref(
+//RS                             &mut refs,
+//RS                             &mut methods,
+//RS                             &definition.name,
+//RS                             Some(block.trait_name.as_str()),
+//RS                             method,
+//RS                             block.compiler_generated || method.compiler_generated,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             crate::AST::Item::Enum(definition) => {
+//RS                 for method in &definition.methods {
+//RS                     let key = format!("{}::{}", definition.name, method.name);
+//RS                     let Some(method) = funcs.get(&key) else {
+//RS                         continue;
+//RS                     };
+//RS                     methods.insert((definition.name.clone(), method.name.clone()), method);
+//RS                 }
+//RS                 for block in &definition.trait_impls {
+//RS                     for method in &block.methods {
+//RS                         let key = format!("{}::{}", definition.name, method.name);
+//RS                         let Some(method) = funcs.get(&key) else {
+//RS                             continue;
+//RS                         };
+//RS                         insert_item_method_ref(
+//RS                             &mut refs,
+//RS                             &mut methods,
+//RS                             &definition.name,
+//RS                             Some(block.trait_name.as_str()),
+//RS                             method,
+//RS                             block.compiler_generated || method.compiler_generated,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     // The fold is speculative: lower only the expression's call closure.
+//RS     // Include methods under the same qualified keys the TIR bridge uses so
+//RS     // method bodies participate in the closure without retaining the module.
+//RS     let mut candidates = refs.clone();
+//RS     for ((owner, name), method) in &methods {
+//RS         candidates
+//RS             .entry(format!("{owner}::{name}"))
+//RS             .or_insert(*method);
+//RS     }
+//RS     let reachable = Purity::reachable_func_names(init, &candidates);
+//RS     refs.retain(|name, _| reachable.contains(name));
+//RS     methods.retain(|(owner, name), _| reachable.contains(&format!("{owner}::{name}")));
+//RS     evaluate_with_imports_opts_collecting_structs_and_methods(
+//RS         init,
+//RS         &refs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         binding_types,
+//RS         core_imports,
+//RS         gates,
+//RS         initial_impure_depth,
+//RS         &structs,
+//RS         &methods,
+//RS         &item_method_traits(items),
+//RS         empty_distinct(),
+//RS         empty_distinct_bases(),
+//RS         &[],
+//RS         checked_nominals,
+//RS         mutated,
+//RS     )
+//RS }
+//RS 
+//RS /// D-META-CODE1=A / D-META-BODY1=A / D-META-USER1=A: expand a typed derive or
+//RS /// marker body in a comptime scope where `type_param` is bound to `type_info`.
+//RS /// The returned items are the same AST nodes the parser produced for
+//RS /// hand-written items; compile-time control flow only decides how many cloned
+//RS /// templates enter the ordinary sema path.
+//RS pub fn expand_derive_body(
+//RS     body: &[crate::AST::DeriveBodyItem],
+//RS     type_param: &str,
+//RS     type_info: CtValue,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+//RS ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
+//RS     let mut scope = HashMap::new();
+//RS     // `@name` is the canonical item-name splice for a derive target. Keep it
+//RS     // in the same typed scope as the reflected handle so a template does not
+//RS     // need a helper binding merely to name the generated item.
+//RS     if let CtValue::Struct { fields, .. } = &type_info {
+//RS         if let Some((_, CtValue::Str(name))) = fields.iter().find(|(field, _)| field == "name") {
+//RS             scope.insert("name".to_string(), CtValue::Str(name.clone()));
+//RS         }
+//RS     }
+//RS     scope.insert(type_param.to_string(), type_info);
+//RS     expand_template_body_with_nominals(body, &scope, funcs, base_dir, checked_nominals)
+//RS }
+//RS 
+//RS /// D-META-BODY1=A: expand the same typed item-template block for a build
+//RS /// generated module. The caller supplies the current compile-time scope, so
+//RS /// `@` holes in `b.generate` see the same values as a derive body.
+//RS pub fn expand_template_body(
+//RS     body: &[crate::AST::DeriveBodyItem],
+//RS     initial_scope: &HashMap<String, CtValue>,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
+//RS     expand_template_body_with_nominals(body, initial_scope, funcs, base_dir, None)
+//RS }
+//RS 
+//RS fn expand_template_body_with_nominals(
+//RS     body: &[crate::AST::DeriveBodyItem],
+//RS     initial_scope: &HashMap<String, CtValue>,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+//RS ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
+//RS     let mut scope = initial_scope.clone();
+//RS     let binding_types = scope
+//RS         .iter()
+//RS         .map(|(name, value)| (name.clone(), value.jet_type()))
+//RS         .collect();
+//RS     let mut interp = Interpreter::Interp {
+//RS         funcs,
+//RS         error_conversions: &[],
+//RS         base_dir,
+//RS         fuel: FUEL_BUDGET,
+//RS         sink: None,
+//RS         checked_nominals,
+//RS         core_imports: empty_imports(),
+//RS         debugger: None,
+//RS         runtime_execution: false,
+//RS         depth: 0,
+//RS         cur_func: "derive".to_string(),
+//RS         impure_depth: 0,
+//RS         gates: jet_foundation::Policy::GateSet::default(),
+//RS         repl_mode: false,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: None,
+//RS         repl_interruptible: false,
+//RS         embed_inputs: Vec::new(),
+//RS         binding_types,
+//RS         globals: empty_globals(),
+//RS         methods: empty_methods(),
+//RS         structs: empty_structs(),
+//RS         computed_fields: empty_computed(),
+//RS         distinct_ranges: empty_distinct(),
+//RS         distinct_bases: empty_distinct_bases(),
+//RS         migrations: empty_migrations(),
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     let mut expanded = Vec::new();
+//RS     expand_derive_items(body, &mut interp, &mut scope, &mut expanded)?;
+//RS     Ok(expanded)
+//RS }
+//RS 
+//RS /// D-ONCE-DERIVE1 / D-META-CODE1: compiler-owned item builders enter the same
+//RS /// typed template expansion as user derives and `b.generate`. Builders supply
+//RS /// AST items; this wrapper supplies the empty template scope and keeps the
+//RS /// ordinary sema boundary shared.
+//RS pub fn expand_generated_items(
+//RS     items: Vec<crate::AST::Item>,
+//RS ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
+//RS     let body = items
+//RS         .into_iter()
+//RS         .map(|item| crate::AST::DeriveBodyItem::Item(Box::new(item)))
+//RS         .collect::<Vec<_>>();
+//RS     expand_template_body(&body, &HashMap::new(), &HashMap::new(), Path::new("."))
+//RS }
+//RS 
+//RS /// Render expanded item templates through the ordinary Jet formatter before a
+//RS /// build context stores the generated module. This is only the build module's
+//RS /// materialization boundary; derive expansion itself never serializes and
+//RS /// re-lexes a body.
+//RS pub fn format_template_items(items: Vec<crate::AST::Item>) -> String {
+//RS     let program = crate::AST::Program {
+//RS         imports: Vec::new(),
+//RS         items,
+//RS         script_body: Vec::new(),
+//RS         block_spans: Vec::new(),
+//RS         fenced_statements: Vec::new(),
+//RS         web_target_ceiling: None,
+//RS         pub_file: false,
+//RS         no_prelude: false,
+//RS         default_target: None,
+//RS         html_path: None,
+//RS         policy_declarations: Vec::new(),
+//RS         user_policy_declarations: Vec::new(),
+//RS         applied_rules: Vec::new(),
+//RS         rule_facts: Vec::new(),
+//RS     };
+//RS     jet_parser::Formatter::format_synthetic_program(&program)
+//RS }
+//RS 
+//RS /// Expand and format one typed item-template body. Both comptime hosts use
+//RS /// this composition; only the BuildContext adapter stores the resulting source.
+//RS pub fn format_template_body(
+//RS     body: &[crate::AST::DeriveBodyItem],
+//RS     initial_scope: &HashMap<String, CtValue>,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS ) -> Result<String, Diagnostic> {
+//RS     let items = expand_template_body(body, initial_scope, funcs, base_dir)?;
+//RS     Ok(format_template_items(items))
+//RS }
+//RS 
+//RS fn template_literal_value(expr: &crate::AST::Expr) -> Option<CtValue> {
+//RS     match expr {
+//RS         crate::AST::Expr::ComptimeName {
+//RS             value: Some(value), ..
+//RS         } => Some(value.clone()),
+//RS         crate::AST::Expr::Bool(value, _) => Some(CtValue::Bool(*value)),
+//RS         crate::AST::Expr::Int(value, _, _, raw) => {
+//RS             Some(exact_integer_ct_value(*value, raw.as_deref()))
+//RS         }
+//RS         crate::AST::Expr::Float(value, _, is_f32, _) => Some(CtValue::Float(if *is_f32 {
+//RS             crate::AST::CtFloat::F32(*value as f32)
+//RS         } else {
+//RS             crate::AST::CtFloat::F64(*value)
+//RS         })),
+//RS         crate::AST::Expr::Char(value, _) => Some(CtValue::Char(*value)),
+//RS         crate::AST::Expr::Unit(_) => Some(CtValue::Unit),
+//RS         crate::AST::Expr::Str(parts, _) => {
+//RS             let mut value = String::new();
+//RS             for part in parts {
+//RS                 let crate::AST::StrPart::Lit(text) = part else {
+//RS                     return None;
+//RS                 };
+//RS                 value.push_str(text);
+//RS             }
+//RS             Some(CtValue::Str(value))
+//RS         }
+//RS         crate::AST::Expr::ListLit(items, _) => Some(CtValue::List(
+//RS             items
+//RS                 .iter()
+//RS                 .map(template_literal_value)
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         )),
+//RS         crate::AST::Expr::MapLit(entries, _) => {
+//RS             let mut value = std::collections::BTreeMap::new();
+//RS             for (key, item) in entries {
+//RS                 let key = crate::AST::CtKey::from_value(template_literal_value(key)?)?;
+//RS                 value.insert(key, template_literal_value(item)?);
+//RS             }
+//RS             Some(CtValue::Map(value))
+//RS         }
+//RS         crate::AST::Expr::StructLit {
+//RS             type_name, fields, ..
+//RS         } => Some(CtValue::Struct {
+//RS             type_name: type_name.clone(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, _, value)| Some((name.clone(), template_literal_value(value)?)))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         }),
+//RS         crate::AST::Expr::TupleLit(fields, _, _) => Some(CtValue::Struct {
+//RS             type_name: "tuple".to_string(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, value)| Some((name.clone(), template_literal_value(value)?)))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         }),
+//RS         crate::AST::Expr::EnumLit {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS             ..
+//RS         } if args.is_empty() => Some(CtValue::Enum {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS             args: Vec::new(),
+//RS         }),
+//RS         crate::AST::Expr::Present(value, _) => {
+//RS             Some(CtValue::Present(Box::new(template_literal_value(value)?)))
+//RS         }
+//RS         crate::AST::Expr::Paren(value, _) => template_literal_value(value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn sync_template_binding_types(
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &HashMap<String, CtValue>,
+//RS ) {
+//RS     interp
+//RS         .binding_types
+//RS         .retain(|name, _| scope.contains_key(name));
+//RS     for (name, value) in scope {
+//RS         interp.binding_types.insert(name.clone(), value.jet_type());
+//RS     }
+//RS }
+//RS 
+//RS fn bind_template_reified_statement(
+//RS     stmt: &crate::AST::Stmt,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<bool, Diagnostic> {
+//RS     let crate::AST::Stmt::Val(binding) = stmt else {
+//RS         return Ok(false);
+//RS     };
+//RS     let Some(value) = template_literal_value(&binding.init) else {
+//RS         return Ok(false);
+//RS     };
+//RS     if let Some(pattern) = &binding.pattern {
+//RS         interp.bind_pattern(pattern, value, scope)?;
+//RS     } else {
+//RS         scope.insert(binding.name.clone(), value);
+//RS     }
+//RS     sync_template_binding_types(interp, scope);
+//RS     Ok(true)
+//RS }
+//RS 
+//RS fn expand_derive_items(
+//RS     body: &[crate::AST::DeriveBodyItem],
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     out: &mut Vec<crate::AST::Item>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     for body_item in body {
+//RS         sync_template_binding_types(interp, scope);
+//RS         match body_item {
+//RS             crate::AST::DeriveBodyItem::Stmt(stmt) => {
+//RS                 let mut stmts = vec![stmt.clone()];
+//RS                 expand_template_stmts(&mut stmts, interp, scope)?;
+//RS                 if !bind_template_reified_statement(&stmts[0], interp, scope)? {
+//RS                     if let crate::AST::Stmt::Val(binding) = &stmts[0] {
+//RS                         let value = interp.eval(&binding.init, scope)?;
+//RS                         if let Some(pattern) = &binding.pattern {
+//RS                             interp.bind_pattern(pattern, value, scope)?;
+//RS                         } else {
+//RS                             scope.insert(binding.name.clone(), value);
+//RS                         }
+//RS                     } else {
+//RS                         sync_template_binding_types(interp, scope);
+//RS                         let _ = interp.exec_block(&stmts, scope)?;
+//RS                     }
+//RS                     sync_template_binding_types(interp, scope);
+//RS                 }
+//RS             }
+//RS             crate::AST::DeriveBodyItem::Item(item) => {
+//RS                 let mut item = (**item).clone();
+//RS                 expand_template_item(&mut item, interp, scope)?;
+//RS                 out.push(item);
+//RS             }
+//RS             crate::AST::DeriveBodyItem::Loop {
+//RS                 var, source, body, ..
+//RS             } => {
+//RS                 let value = eval_template_loop_source(source, interp, scope)?;
+//RS                 let CtValue::List(values) = value else {
+//RS                     return Err(Diagnostic::error(
+//RS                         "E0956",
+//RS                         "a `prep loop` source is not a compile-time list".to_string(),
+//RS                         "`prep loop` expands one item template for each value in its source list".to_string(),
+//RS                         "use a reflected/comptime list such as `T.$fields`, or a closed type list like `[TypeA, TypeB]`".to_string(),
+//RS                         Some(source.span()),
+//RS                     ));
+//RS                 };
+//RS                 let previous = scope.get(var).cloned();
+//RS                 for value in values {
+//RS                     scope.insert(var.clone(), value);
+//RS                     sync_template_binding_types(interp, scope);
+//RS                     expand_derive_items(body, interp, scope, out)?;
+//RS                 }
+//RS                 if let Some(previous) = previous {
+//RS                     scope.insert(var.clone(), previous);
+//RS                 } else {
+//RS                     scope.remove(var);
+//RS                 }
+//RS                 sync_template_binding_types(interp, scope);
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// D-STRUCT-ONCE1=A amendment: written type names are a closed loop source;
+//RS /// even though they are not runtime/comptime values that the value interpreter
+//RS /// can evaluate. They become text bindings only; sema still checks every
+//RS /// generated declaration against the ordinary type registry.
+//RS fn eval_template_loop_source(
+//RS     source: &crate::AST::Expr,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     if let crate::AST::Expr::Field(base, member, _) = source {
+//RS         let binding = match base.as_ref() {
+//RS             crate::AST::Expr::Ident(name, _) => Some(name.as_str()),
+//RS             crate::AST::Expr::ComptimeName { name, .. } => Some(name.as_str()),
+//RS             _ => None,
+//RS         };
+//RS         if let Some(binding) = binding {
+//RS             if let Some(CtValue::Struct { fields, .. }) =
+//RS                 scope_value(scope, binding.trim_start_matches('$'))
+//RS             {
+//RS                 if let Some((_, value)) = fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == member.trim_start_matches('$'))
+//RS                 {
+//RS                     return Ok(value.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     match interp.eval(source, scope) {
+//RS         Ok(value) => Ok(value),
+//RS         Err(diagnostic) => {
+//RS             let crate::AST::Expr::ListLit(values, _) = source else {
+//RS                 return Err(diagnostic);
+//RS             };
+//RS             if values.is_empty() {
+//RS                 return Err(diagnostic);
+//RS             }
+//RS             let mut names = Vec::with_capacity(values.len());
+//RS             for value in values {
+//RS                 let name = match value {
+//RS                     crate::AST::Expr::Ident(name, _) => name.clone(),
+//RS                     crate::AST::Expr::ComptimeName { name, .. } => {
+//RS                         name.trim_start_matches('$').to_string()
+//RS                     }
+//RS                     _ => return Err(diagnostic),
+//RS                 };
+//RS                 names.push(CtValue::Str(name));
+//RS             }
+//RS             Ok(CtValue::List(names))
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn expand_template_item(
+//RS     item: &mut crate::AST::Item,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     match item {
+//RS         crate::AST::Item::Func(function) => expand_template_func(function, interp, scope),
+//RS         crate::AST::Item::Impl(implementation) => {
+//RS             implementation.type_name = expand_template_name(
+//RS                 &implementation.type_name,
+//RS                 implementation.type_span,
+//RS                 interp,
+//RS                 scope,
+//RS             )?;
+//RS             let trait_span = implementation
+//RS                 .trait_span
+//RS                 .unwrap_or(implementation.type_span);
+//RS             if let Some(trait_name) = &mut implementation.trait_name {
+//RS                 *trait_name = expand_template_name(trait_name, trait_span, interp, scope)?;
+//RS             }
+//RS             for method in &mut implementation.methods {
+//RS                 expand_template_func(method, interp, scope)?;
+//RS             }
+//RS             for (_, _, ty) in &mut implementation.assoc_type_impls {
+//RS                 expand_template_type(ty, interp, scope)?;
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS         crate::AST::Item::ErrorConv(conversion) => {
+//RS             conversion.from_ty =
+//RS                 expand_template_name(&conversion.from_ty, conversion.from_span, interp, scope)?;
+//RS             conversion.to_ty =
+//RS                 expand_template_name(&conversion.to_ty, conversion.to_span, interp, scope)?;
+//RS             expand_template_stmts(&mut conversion.body, interp, scope)?;
+//RS             Ok(())
+//RS         }
+//RS         crate::AST::Item::Test(test) => {
+//RS             if let Some(expression) = &mut test.name_expr {
+//RS                 expand_template_expr(expression, interp, scope)?;
+//RS             }
+//RS             if let Some(expression) = &mut test.faults_expr {
+//RS                 expand_template_expr(expression, interp, scope)?;
+//RS             }
+//RS             if let Some(expression) = &mut test.expected_fail_expr {
+//RS                 expand_template_expr(expression, interp, scope)?;
+//RS             }
+//RS             for parameter in &mut test.params {
+//RS                 expand_template_type(&mut parameter.ty, interp, scope)?;
+//RS                 if let Some(default) = &mut parameter.default {
+//RS                     expand_template_expr(default, interp, scope)?;
+//RS                 }
+//RS             }
+//RS             expand_template_stmts(&mut test.body, interp, scope)?;
+//RS             Ok(())
+//RS         }
+//RS         crate::AST::Item::Struct(definition) => {
+//RS             definition.name =
+//RS                 expand_template_name(&definition.name, definition.name_span, interp, scope)?;
+//RS             for field in &mut definition.fields {
+//RS                 field.name = expand_template_name(&field.name, field.name_span, interp, scope)?;
+//RS                 expand_template_type(&mut field.ty, interp, scope)?;
+//RS                 if let Some(value) = &mut field.computed {
+//RS                     expand_template_expr(value, interp, scope)?;
+//RS                 }
+//RS                 if let Some(value) = &mut field.default {
+//RS                     expand_template_expr(value, interp, scope)?;
+//RS                 }
+//RS             }
+//RS             expand_template_markers(&mut definition.serde_markers, interp, scope)?;
+//RS             expand_template_markers(&mut definition.type_markers, interp, scope)?;
+//RS             for method in &mut definition.methods {
+//RS                 expand_template_func(method, interp, scope)?;
+//RS             }
+//RS             for implementation in &mut definition.trait_impls {
+//RS                 expand_template_trait_impl(implementation, interp, scope)?;
+//RS             }
+//RS             expand_template_stmts(&mut definition.validate_block, interp, scope)?;
+//RS             Ok(())
+//RS         }
+//RS         crate::AST::Item::Enum(definition) => {
+//RS             definition.name =
+//RS                 expand_template_name(&definition.name, definition.name_span, interp, scope)?;
+//RS             for variant in &mut definition.variants {
+//RS                 match &mut variant.payload {
+//RS                     crate::AST::VariantPayload::Unit => {}
+//RS                     crate::AST::VariantPayload::Single(ty, _) => {
+//RS                         expand_template_type(ty, interp, scope)?;
+//RS                     }
+//RS                     crate::AST::VariantPayload::Named(fields) => {
+//RS                         for field in fields {
+//RS                             field.name =
+//RS                                 expand_template_name(&field.name, field.name_span, interp, scope)?;
+//RS                             expand_template_type(&mut field.ty, interp, scope)?;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if let Some(discriminant) = &mut variant.discriminant_expr {
+//RS                     expand_template_expr(discriminant, interp, scope)?;
+//RS                 }
+//RS                 expand_template_markers(&mut variant.serde_markers, interp, scope)?;
+//RS             }
+//RS             expand_template_markers(&mut definition.serde_markers, interp, scope)?;
+//RS             expand_template_markers(&mut definition.type_markers, interp, scope)?;
+//RS             for method in &mut definition.methods {
+//RS                 expand_template_func(method, interp, scope)?;
+//RS             }
+//RS             for implementation in &mut definition.trait_impls {
+//RS                 expand_template_trait_impl(implementation, interp, scope)?;
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS         _ => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS fn expand_template_markers(
+//RS     markers: &mut [crate::AST::Marker],
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     for marker in markers {
+//RS         for arg in &mut marker.args {
+//RS             if let Some(expr) = arg.as_expr_mut() {
+//RS                 expand_template_expr(expr, interp, scope)?;
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn expand_template_trait_impl(
+//RS     implementation: &mut crate::AST::TraitImplBlock,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     implementation.trait_name = expand_template_name(
+//RS         &implementation.trait_name,
+//RS         implementation.trait_span,
+//RS         interp,
+//RS         scope,
+//RS     )?;
+//RS     for method in &mut implementation.methods {
+//RS         expand_template_func(method, interp, scope)?;
+//RS     }
+//RS     for (_, _, ty) in &mut implementation.assoc_type_impls {
+//RS         expand_template_type(ty, interp, scope)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn expand_template_func(
+//RS     function: &mut crate::AST::Func,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     function.name = expand_template_name(&function.name, function.name_span, interp, scope)?;
+//RS     for param in &mut function.params {
+//RS         expand_template_type(&mut param.ty, interp, scope)?;
+//RS         if let Some(default) = &mut param.default {
+//RS             expand_template_expr(default, interp, scope)?;
+//RS         }
+//RS     }
+//RS     if let Some(ty) = &mut function.return_type {
+//RS         expand_template_type(ty, interp, scope)?;
+//RS     }
+//RS     if let Some(pattern) = &mut function.head_pattern {
+//RS         expand_template_pattern(pattern, interp, scope, None)?;
+//RS     }
+//RS     for marker in &mut function.markers {
+//RS         for arg in &mut marker.args {
+//RS             if let Some(expr) = arg.as_expr_mut() {
+//RS                 expand_template_expr(expr, interp, scope)?;
+//RS             }
+//RS         }
+//RS     }
+//RS     for clause in &mut function.pre {
+//RS         expand_template_expr(&mut clause.cond, interp, scope)?;
+//RS         expand_template_expr(&mut clause.message_expr, interp, scope)?;
+//RS     }
+//RS     for clause in &mut function.post {
+//RS         expand_template_expr(&mut clause.cond, interp, scope)?;
+//RS         expand_template_expr(&mut clause.message_expr, interp, scope)?;
+//RS     }
+//RS     expand_template_stmts(&mut function.body, interp, scope)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn expand_template_stmts(
+//RS     stmts: &mut Vec<crate::AST::Stmt>,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let mut out = Vec::new();
+//RS     for stmt in std::mem::take(stmts) {
+//RS         expand_template_stmt_into(stmt, interp, scope, &mut out)?;
+//RS     }
+//RS     *stmts = out;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn expand_template_stmt_into(
+//RS     stmt: crate::AST::Stmt,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     out: &mut Vec<crate::AST::Stmt>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     match stmt {
+//RS         crate::AST::Stmt::ComptimeIf {
+//RS             mut cond,
+//RS             cond_span,
+//RS             then_body,
+//RS             else_body,
+//RS             span,
+//RS             ..
+//RS         } => {
+//RS             let mut chosen = if template_if_selected(&mut cond, cond_span, interp, scope)? {
+//RS                 then_body
+//RS             } else {
+//RS                 else_body.unwrap_or_default()
+//RS             };
+//RS             let _ = span;
+//RS             expand_template_stmts(&mut chosen, interp, scope)?;
+//RS             out.extend(chosen);
+//RS             Ok(())
+//RS         }
+//RS         crate::AST::Stmt::ComptimeBlock {
+//RS             is_template_loop: true,
+//RS             body,
+//RS             span,
+//RS         } => expand_template_loop_block(body, span, interp, scope, out),
+//RS         mut stmt => {
+//RS             expand_template_nested_bodies(&mut stmt, interp, scope)?;
+//RS             expand_template_stmt(&mut stmt, interp, scope)?;
+//RS             out.push(stmt);
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Expand one statement of a template that is reused across iterations. A
+//RS /// `prep if` selects its branch before anything is copied; every other
+//RS /// statement is copied and expanded as usual.
+//RS fn expand_template_stmt_ref_into(
+//RS     stmt: &crate::AST::Stmt,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     out: &mut Vec<crate::AST::Stmt>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let crate::AST::Stmt::ComptimeIf {
+//RS         cond,
+//RS         cond_span,
+//RS         then_body,
+//RS         else_body,
+//RS         ..
+//RS     } = stmt
+//RS     else {
+//RS         return expand_template_stmt_into(stmt.clone(), interp, scope, out);
+//RS     };
+//RS     let mut cond = cond.clone();
+//RS     let chosen = if template_if_selected(&mut cond, *cond_span, interp, scope)? {
+//RS         then_body.as_slice()
+//RS     } else {
+//RS         else_body.as_deref().unwrap_or_default()
+//RS     };
+//RS     for stmt in chosen {
+//RS         expand_template_stmt_ref_into(stmt, interp, scope, out)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Evaluate a `prep if` condition to the branch it selects.
+//RS fn template_if_selected(
+//RS     cond: &mut crate::AST::Expr,
+//RS     cond_span: crate::Diagnostics::Span,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<bool, Diagnostic> {
+//RS     expand_template_expr(cond, interp, scope)?;
+//RS     let value = interp.eval(cond, scope)?;
+//RS     let crate::AST::CtValue::Bool(selected) = value else {
+//RS         return Err(Diagnostic::error(
+//RS             "E0989",
+//RS             format!(
+//RS                 "a `prep if` condition must be {}, not another type",
+//RS                 crate::AST::Type::Bool.show()
+//RS             ),
+//RS             "the condition selects a branch at compile time — it must be true or false"
+//RS                 .to_string(),
+//RS             "write a Bool known-time expression, like `prep if flag { … }`".to_string(),
+//RS             Some(cond_span),
+//RS         ));
+//RS     };
+//RS     Ok(selected)
+//RS }
+//RS 
+//RS fn expand_template_loop_block(
+//RS     mut body: Vec<crate::AST::Stmt>,
+//RS     span: crate::Diagnostics::Span,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     out: &mut Vec<crate::AST::Stmt>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let Some(crate::AST::Stmt::For {
+//RS         var,
+//RS         kind: crate::AST::ForKind::In { collection, .. },
+//RS         body: loop_body,
+//RS         ..
+//RS     }) = body.first()
+//RS     else {
+//RS         expand_template_stmts(&mut body, interp, scope)?;
+//RS         out.extend(body);
+//RS         return Ok(());
+//RS     };
+//RS     let var = var.clone();
+//RS     let collection = collection.clone();
+//RS     let loop_body = loop_body.clone();
+//RS     let value = eval_template_loop_source(&collection, interp, scope)?;
+//RS     let CtValue::List(values) = value else {
+//RS         return Err(Diagnostic::error(
+//RS             "E0956",
+//RS             "a `prep loop` source is not a compile-time list".to_string(),
+//RS             "`prep loop` expands one statement template for each value in its source list".to_string(),
+//RS             "use a reflected/comptime list such as `T.$fields`".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     };
+//RS     let previous = scope.get(&var).cloned();
+//RS     for value in values {
+//RS         scope.insert(var.clone(), value);
+//RS         // Each iteration expands the shared template in place of a whole copy,
+//RS         // so a `prep if` that is not taken never clones its branch (derives
+//RS         // over an enum pair every variant with every other one).
+//RS         for stmt in &loop_body {
+//RS             expand_template_stmt_ref_into(stmt, interp, scope, out)?;
+//RS         }
+//RS     }
+//RS     if let Some(previous) = previous {
+//RS         scope.insert(var, previous);
+//RS     } else {
+//RS         scope.remove(&var);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn expand_template_nested_bodies(
+//RS     stmt: &mut crate::AST::Stmt,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     match stmt {
+//RS         crate::AST::Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         }
+//RS         | crate::AST::Stmt::ComptimeSwitch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             for arm in arms {
+//RS                 expand_template_expr(&mut arm.cond, interp, scope)?;
+//RS                 coerce_derive_enum_arm(&mut arm.cond, subject, scope);
+//RS                 expand_template_pattern_expr(&mut arm.cond, interp, scope)?;
+//RS                 expand_template_stmts(&mut arm.body, interp, scope)?;
+//RS             }
+//RS             if let Some(body) = else_body {
+//RS                 expand_template_stmts(body, interp, scope)?;
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS         crate::AST::Stmt::While { body, .. }
+//RS         | crate::AST::Stmt::For { body, .. }
+//RS         | crate::AST::Stmt::Loop { body, .. }
+//RS         | crate::AST::Stmt::Unsafe { body, .. }
+//RS         | crate::AST::Stmt::Impure { body, .. }
+//RS         | crate::AST::Stmt::Switched { body, .. }
+//RS         | crate::AST::Stmt::Shield { body, .. }
+//RS         | crate::AST::Stmt::Reactive { body, .. }
+//RS         | crate::AST::Stmt::Region { body, .. }
+//RS         | crate::AST::Stmt::Policy { body, .. }
+//RS         | crate::AST::Stmt::AuthorityScope { body, .. }
+//RS         | crate::AST::Stmt::Live { body, .. }
+//RS         | crate::AST::Stmt::Transact { body, .. }
+//RS         | crate::AST::Stmt::Layout { body, .. }
+//RS         | crate::AST::Stmt::ContextBlock { body, .. }
+//RS         | crate::AST::Stmt::ComptimeBlock { body, .. } => {
+//RS             expand_template_stmts(body, interp, scope)
+//RS         }
+//RS         crate::AST::Stmt::CountedLoop { body, step, .. } => {
+//RS             expand_template_stmts(body, interp, scope)?;
+//RS             if let Some(step) = step {
+//RS                 let mut stmts = vec![(**step).clone()];
+//RS                 expand_template_stmts(&mut stmts, interp, scope)?;
+//RS                 if let Some(next) = stmts.pop() {
+//RS                     **step = next;
+//RS                 }
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS         crate::AST::Stmt::ComptimeIf {
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             expand_template_stmts(then_body, interp, scope)?;
+//RS             if let Some(body) = else_body {
+//RS                 expand_template_stmts(body, interp, scope)?;
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS         _ => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS fn expand_template_stmt(
+//RS     stmt: &mut crate::AST::Stmt,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     match stmt {
+//RS         crate::AST::Stmt::Val(binding) => expand_template_binding(binding, interp, scope)?,
+//RS         crate::AST::Stmt::CountedLoop { init, .. } => {
+//RS             expand_template_binding(init, interp, scope)?;
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS     let mut error = None;
+//RS     stmt.for_each_expr_mut(|expr| {
+//RS         if error.is_none() {
+//RS             if let Err(diagnostic) = expand_template_expr(expr, interp, scope) {
+//RS                 error = Some(diagnostic);
+//RS             }
+//RS         }
+//RS     });
+//RS     if let Some(error) = error {
+//RS         Err(error)
+//RS     } else {
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn expand_template_binding(
+//RS     binding: &mut crate::AST::Binding,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if let Some(ty) = &mut binding.ty {
+//RS         expand_template_type(ty, interp, scope)?;
+//RS     }
+//RS     if let Some(pattern) = &mut binding.pattern {
+//RS         expand_template_bind_pattern(pattern, interp, scope)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn expand_template_bind_pattern(
+//RS     pattern: &mut crate::AST::BindPattern,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     match pattern {
+//RS         crate::AST::BindPattern::Struct {
+//RS             type_name,
+//RS             type_span,
+//RS             ..
+//RS         } => {
+//RS             *type_name = expand_template_name(type_name, *type_span, interp, scope)?;
+//RS         }
+//RS         crate::AST::BindPattern::Refutable { pattern, .. } => {
+//RS             expand_template_pattern(pattern, interp, scope, None)?;
+//RS         }
+//RS         crate::AST::BindPattern::List { .. } | crate::AST::BindPattern::Tuple { .. } => {}
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn expand_template_pattern(
+//RS     pattern: &mut crate::AST::Pattern,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     subject: Option<&crate::AST::Expr>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     match pattern {
+//RS         crate::AST::Pattern::Or(patterns, _) => {
+//RS             for pattern in patterns {
+//RS                 expand_template_pattern(pattern, interp, scope, None)?;
+//RS             }
+//RS         }
+//RS         crate::AST::Pattern::StrMatch { parts, .. } => {
+//RS             for part in parts {
+//RS                 if let crate::AST::StrMatchPart::Hole { ty: Some(ty), .. } = part {
+//RS                     expand_template_type(ty, interp, scope)?;
+//RS                 }
+//RS             }
+//RS         }
+//RS         crate::AST::Pattern::Variant {
+//RS             variant,
+//RS             bindings,
+//RS             span,
+//RS             ..
+//RS         } => {
+//RS             *variant = expand_template_name(variant, *span, interp, scope)?;
+//RS             fill_derive_variant_bindings(variant, bindings, *span, scope, subject);
+//RS         }
+//RS         crate::AST::Pattern::Present { .. }
+//RS         | crate::AST::Pattern::Absent(..)
+//RS         | crate::AST::Pattern::Ok { .. }
+//RS         | crate::AST::Pattern::Err { .. }
+//RS         | crate::AST::Pattern::Range { .. }
+//RS         | crate::AST::Pattern::Struct { .. }
+//RS         | crate::AST::Pattern::BinMatch { .. } => {}
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn expand_template_pattern_expr(
+//RS     expr: &mut crate::AST::Expr,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if let crate::AST::Expr::PatternTest {
+//RS         subject, pattern, ..
+//RS     } = expr
+//RS     {
+//RS         expand_template_pattern(pattern, interp, scope, Some(subject))?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn coerce_derive_enum_arm(
+//RS     cond: &mut crate::AST::Expr,
+//RS     subject: &crate::AST::Expr,
+//RS     scope: &HashMap<String, CtValue>,
+//RS ) {
+//RS     match cond {
+//RS         crate::AST::Expr::PatternTest { .. } => {}
+//RS         crate::AST::Expr::EnumLit {
+//RS             variant,
+//RS             args,
+//RS             span,
+//RS             ..
+//RS         } => {
+//RS             *cond = pattern_test_from_enum_lit(subject, variant, args, *span, scope);
+//RS         }
+//RS         crate::AST::Expr::Binary(crate::AST::BinOp::Eq, _, rhs, _) => {
+//RS             let crate::AST::Expr::EnumLit {
+//RS                 variant,
+//RS                 args,
+//RS                 span,
+//RS                 ..
+//RS             } = rhs.as_ref()
+//RS             else {
+//RS                 return;
+//RS             };
+//RS             *cond = pattern_test_from_enum_lit(subject, variant, args, *span, scope);
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn pattern_test_from_enum_lit(
+//RS     subject: &crate::AST::Expr,
+//RS     variant: &str,
+//RS     args: &[crate::AST::EnumLitArg],
+//RS     span: crate::Diagnostics::Span,
+//RS     scope: &HashMap<String, CtValue>,
+//RS ) -> crate::AST::Expr {
+//RS     let mut bindings = Vec::new();
+//RS     fill_derive_variant_bindings(variant, &mut bindings, span, scope, Some(subject));
+//RS     if bindings.is_empty() {
+//RS         for arg in args {
+//RS             let (name, bind_span) = match arg {
+//RS                 crate::AST::EnumLitArg::Positional(crate::AST::Expr::Ident(name, bind_span))
+//RS                 | crate::AST::EnumLitArg::Named {
+//RS                     expr: crate::AST::Expr::Ident(name, bind_span),
+//RS                     ..
+//RS                 } => (name.clone(), *bind_span),
+//RS                 _ => continue,
+//RS             };
+//RS             bindings.push(crate::AST::PatSlot::Bind {
+//RS                 name,
+//RS                 span: bind_span,
+//RS             });
+//RS         }
+//RS     }
+//RS     crate::AST::Expr::PatternTest {
+//RS         subject: Box::new(subject.clone()),
+//RS         pattern: crate::AST::Pattern::Variant {
+//RS             variant: variant.to_string(),
+//RS             bindings,
+//RS             leading_dot: true,
+//RS             span,
+//RS         },
+//RS         span,
+//RS     }
+//RS }
+//RS 
+//RS fn derive_loop_side(subject: Option<&crate::AST::Expr>) -> Option<&str> {
+//RS     let ident = subject.and_then(|subject| match subject {
+//RS         crate::AST::Expr::Ident(name, _) | crate::AST::Expr::ComptimeName { name, .. } => {
+//RS             Some(name.as_str())
+//RS         }
+//RS         _ => None,
+//RS     })?;
+//RS     Some(match ident {
+//RS         "self" => "left",
+//RS         "rhs" => "right",
+//RS         name => name.trim_start_matches('$'),
+//RS     })
+//RS }
+//RS 
+//RS fn cartesian_payload_owner(side: &str, variant: &str, scope: &HashMap<String, CtValue>) -> String {
+//RS     let variant = variant.trim_start_matches('$');
+//RS     let left = scope_value(scope, "left").and_then(reflected_variant_name);
+//RS     let right = scope_value(scope, "right").and_then(reflected_variant_name);
+//RS     match side {
+//RS         "left" => match left {
+//RS             Some(name) => format!("left_{name}"),
+//RS             None => format!("left_{variant}"),
+//RS         },
+//RS         "right" => match (left, right) {
+//RS             (Some(left), Some(right)) => format!("right_{left}_{right}"),
+//RS             (_, Some(right)) => format!("right_{right}"),
+//RS             // `if rhs == { .$left -> … }` matches `rhs` against the arm's own
+//RS             // variant; `derive_payload_owner` names its fields the same way.
+//RS             (Some(left), None) if variant == "left" => format!("right_{left}"),
+//RS             _ => format!("right_{variant}"),
+//RS         },
+//RS         _ => payload_binding_owner(variant, scope),
+//RS     }
+//RS }
+//RS 
+//RS fn payload_owner_for_subject(
+//RS     subject: Option<&crate::AST::Expr>,
+//RS     variant: &str,
+//RS     scope: &HashMap<String, CtValue>,
+//RS ) -> String {
+//RS     match derive_loop_side(subject) {
+//RS         Some(side) => cartesian_payload_owner(side, variant, scope),
+//RS         None => payload_binding_owner(variant, scope),
+//RS     }
+//RS }
+//RS 
+//RS fn fill_derive_variant_bindings(
+//RS     variant: &str,
+//RS     bindings: &mut Vec<crate::AST::PatSlot>,
+//RS     span: crate::Diagnostics::Span,
+//RS     scope: &HashMap<String, CtValue>,
+//RS     subject: Option<&crate::AST::Expr>,
+//RS ) {
+//RS     if !bindings.is_empty() {
+//RS         return;
+//RS     }
+//RS     let Some(payload) = derive_variant_payload_fields(variant, scope) else {
+//RS         return;
+//RS     };
+//RS     let owner = payload_owner_for_subject(subject, variant, scope);
+//RS     for field in payload {
+//RS         let field_name = derive_reflected_name(&field).unwrap_or_else(|| "value".to_string());
+//RS         bindings.push(crate::AST::PatSlot::Bind {
+//RS             name: format!("{owner}_{field_name}"),
+//RS             span,
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn reflected_variant_name(value: &CtValue) -> Option<&str> {
+//RS     let CtValue::Struct { fields, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     if !fields.iter().any(|(field, _)| field == "index") {
+//RS         return None;
+//RS     }
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(field, value)| match (field.as_str(), value) {
+//RS             ("name", CtValue::Str(name)) => Some(name.as_str()),
+//RS             _ => None,
+//RS         })
+//RS }
+//RS 
+//RS fn payload_binding_prefix(owner: &str, value: &CtValue) -> String {
+//RS     match reflected_variant_name(value) {
+//RS         Some(variant) => format!("{owner}_{variant}"),
+//RS         None => owner.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn payload_binding_owner(variant: &str, scope: &HashMap<String, CtValue>) -> String {
+//RS     let key = variant.trim_start_matches('$');
+//RS     for (name, value) in scope {
+//RS         let Some(reflected) = derive_reflected_name(value) else {
+//RS             continue;
+//RS         };
+//RS         if reflected == key || name.trim_start_matches('$') == key {
+//RS             if matches!(
+//RS                 value,
+//RS                 CtValue::Struct { fields, .. }
+//RS                     if fields.iter().any(|(field, _)| field == "index")
+//RS             ) {
+//RS                 return payload_binding_prefix(name.trim_start_matches('$'), value);
+//RS             }
+//RS         }
+//RS     }
+//RS     key.to_string()
+//RS }
+//RS 
+//RS fn derive_payload_owner(binding: Option<&str>, scope: &HashMap<String, CtValue>) -> Option<String> {
+//RS     let side = match binding? {
+//RS         "self" => "left",
+//RS         "rhs" => "right",
+//RS         _ => return None,
+//RS     };
+//RS     let left = scope_value(scope, "left").and_then(reflected_variant_name)?;
+//RS     Some(match side {
+//RS         "left" => format!("left_{left}"),
+//RS         // A template that matches `rhs` against the arm's own variant
+//RS         // (`if rhs == { .$left -> … }`) has no `right` loop; the pattern
+//RS         // bound `right_{left}_*` through `cartesian_payload_owner`.
+//RS         "right" => match scope_value(scope, "right").and_then(reflected_variant_name) {
+//RS             Some(right) => format!("right_{left}_{right}"),
+//RS             None => format!("right_{left}"),
+//RS         },
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn field_info_payload(value: &CtValue) -> Option<Vec<CtValue>> {
+//RS     let CtValue::Struct { fields, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     if !fields.iter().any(|(field, _)| field == "index") {
+//RS         return None;
+//RS     }
+//RS     let (_, CtValue::List(payload)) = fields.iter().find(|(field, _)| field == "fields")? else {
+//RS         return None;
+//RS     };
+//RS     if payload.is_empty() {
+//RS         None
+//RS     } else {
+//RS         Some(payload.clone())
+//RS     }
+//RS }
+//RS 
+//RS fn derive_variant_payload_fields(
+//RS     variant: &str,
+//RS     scope: &HashMap<String, CtValue>,
+//RS ) -> Option<Vec<CtValue>> {
+//RS     let key = variant.trim_start_matches('$');
+//RS     if let Some(value) = scope_value(scope, key) {
+//RS         if let Some(payload) = field_info_payload(value) {
+//RS             return Some(payload);
+//RS         }
+//RS         if let Some(payload) = type_info_variant_payload(value, key) {
+//RS             return Some(payload);
+//RS         }
+//RS     }
+//RS     for value in scope.values() {
+//RS         if let Some(payload) = type_info_variant_payload(value, key) {
+//RS             return Some(payload);
+//RS         }
+//RS         if derive_reflected_name(value).as_deref() == Some(key) {
+//RS             if let Some(payload) = field_info_payload(value) {
+//RS                 return Some(payload);
+//RS             }
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn type_info_variant_payload(value: &CtValue, variant: &str) -> Option<Vec<CtValue>> {
+//RS     let CtValue::Struct {
+//RS         type_name, fields, ..
+//RS     } = value
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     if type_name != "TypeInfo" {
+//RS         return None;
+//RS     }
+//RS     let (_, CtValue::List(variants)) = fields.iter().find(|(field, _)| field == "fields")? else {
+//RS         return None;
+//RS     };
+//RS     for variant_info in variants {
+//RS         if derive_reflected_name(variant_info).as_deref() == Some(variant) {
+//RS             return field_info_payload(variant_info);
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn derive_reflected_name(value: &CtValue) -> Option<String> {
+//RS     let CtValue::Struct { fields, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| match (name.as_str(), value) {
+//RS             ("name", CtValue::Str(name)) => Some(name.clone()),
+//RS             _ => None,
+//RS         })
+//RS }
+//RS 
+//RS fn expand_template_name(
+//RS     name: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<String, Diagnostic> {
+//RS     // D-NAME-SPLICE1=B: `$name` splices the template binding `name`.
+//RS     let explicit = name.starts_with('$');
+//RS     let binding = name.strip_prefix('$').unwrap_or(name);
+//RS     match scope_value(scope, binding) {
+//RS         Some(CtValue::Str(value)) => Ok(value.clone()),
+//RS         Some(CtValue::Struct { fields, .. }) if explicit => fields
+//RS             .iter()
+//RS             .find(|(field, _)| field == "name")
+//RS             .and_then(|(_, value)| match value {
+//RS                 CtValue::Str(value) => Some(value.clone()),
+//RS                 _ => None,
+//RS             })
+//RS             .ok_or_else(|| {
+//RS                 Diagnostic::error(
+//RS                     "E0956",
+//RS                     format!("compile-time name `${binding}` has no text name"),
+//RS                     "a generated item name needs the reflected value's `name` field".to_string(),
+//RS                     "bind the name to a String value".to_string(),
+//RS                     Some(span),
+//RS                 )
+//RS             }),
+//RS         Some(value) if explicit => Err(Diagnostic::error(
+//RS             "E0956",
+//RS             format!("compile-time name `{name}` is not text"),
+//RS             format!(
+//RS                 "a generated item name needs text, but this value is {}",
+//RS                 value.jet_type().name()
+//RS             ),
+//RS             "bind the name to a String value".to_string(),
+//RS             Some(span),
+//RS         )),
+//RS         Some(_) | None => {
+//RS             let _ = interp;
+//RS             Ok(name.to_string())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn expand_template_expr(
+//RS     expr: &mut crate::AST::Expr,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let mut error = None;
+//RS     expr.for_each_expr_mut(|node| {
+//RS         if error.is_none() {
+//RS             if let Err(diagnostic) = expand_template_expr_node(node, interp, scope) {
+//RS                 error = Some(diagnostic);
+//RS             }
+//RS         }
+//RS     });
+//RS     error.map_or(Ok(()), Err)
+//RS }
+//RS 
+//RS fn expand_template_expr_node(
+//RS     expr: &mut crate::AST::Expr,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let span = expr.span();
+//RS     match expr {
+//RS         crate::AST::Expr::Field(base, member, _) => {
+//RS             let binding = match base.as_ref() {
+//RS                 crate::AST::Expr::Ident(name, _) => Some(name.as_str()),
+//RS                 crate::AST::Expr::ComptimeName { name, .. } => Some(name.as_str()),
+//RS                 _ => None,
+//RS             };
+//RS             if let Some(binding) = binding {
+//RS                 if let Some(CtValue::Struct { fields, .. }) =
+//RS                     scope_value(scope, binding.trim_start_matches('$'))
+//RS                 {
+//RS                     if let Some((_, value)) = fields
+//RS                         .iter()
+//RS                         .find(|(name, _)| name == member.trim_start_matches('$'))
+//RS                     {
+//RS                         if let Some(literal) = comptime_literal_expr(value.clone(), span) {
+//RS                             *expr = literal;
+//RS                             return Ok(());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             // A `$` member that names no template binding is a compiler fact
+//RS             // (`self.$layout`) and stays for sema; one that does is a splice.
+//RS             if member
+//RS                 .strip_prefix('$')
+//RS                 .is_some_and(|bare| scope_value(scope, bare).is_some())
+//RS             {
+//RS                 if let Some(payload_owner) = derive_payload_owner(binding, scope) {
+//RS                     let field_name = expand_template_name(member, span, interp, scope)?;
+//RS                     *expr = crate::AST::Expr::Ident(format!("{payload_owner}_{field_name}"), span);
+//RS                     return Ok(());
+//RS                 }
+//RS                 *member = expand_template_name(member, span, interp, scope)?;
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::ComptimeName { name, .. } => {
+//RS             if let Some(value) = scope_value(scope, name.trim_start_matches('$')).cloned() {
+//RS                 if let Some(literal) = comptime_literal_expr(value, span) {
+//RS                     *expr = literal;
+//RS                 }
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::Ident(name, _) if name.starts_with('$') => {
+//RS             if let Some(value) = scope_value(scope, name.trim_start_matches('$')).cloned() {
+//RS                 if let Some(literal) = comptime_literal_expr(value, span) {
+//RS                     *expr = literal;
+//RS                 }
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::StrMatchLit(parts, _) => {
+//RS             for part in parts {
+//RS                 if let crate::AST::StrMatchPart::Hole { ty: Some(ty), .. } = part {
+//RS                     expand_template_type(ty, interp, scope)?;
+//RS                 }
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::Call(call) => {
+//RS             call.name = expand_template_name(&call.name, call.name_span, interp, scope)?;
+//RS             for ty in &mut call.type_args {
+//RS                 expand_template_type(ty, interp, scope)?;
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             method_span,
+//RS             owner_type_args,
+//RS             type_args,
+//RS             args,
+//RS             ..
+//RS         } => {
+//RS             if method == "reflect"
+//RS                 && args.is_empty()
+//RS                 && owner_type_args.is_empty()
+//RS                 && type_args.is_empty()
+//RS             {
+//RS                 let binding = match receiver.as_ref() {
+//RS                     crate::AST::Expr::Ident(name, _)
+//RS                     | crate::AST::Expr::ComptimeName { name, .. } => {
+//RS                         Some(name.trim_start_matches('$'))
+//RS                     }
+//RS                     _ => None,
+//RS                 };
+//RS                 if let Some(value @ CtValue::Struct { type_name, .. }) =
+//RS                     binding.and_then(|name| scope_value(scope, name))
+//RS                 {
+//RS                     if type_name == "TypeInfo" {
+//RS                         if let Some(literal) = comptime_literal_expr(value.clone(), span) {
+//RS                             *expr = literal;
+//RS                             return Ok(());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             *method = expand_template_name(method, *method_span, interp, scope)?;
+//RS             for ty in owner_type_args {
+//RS                 expand_template_type(ty, interp, scope)?;
+//RS             }
+//RS             for ty in type_args {
+//RS                 expand_template_type(ty, interp, scope)?;
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::Lambda(lambda) => {
+//RS             for param in &mut lambda.params {
+//RS                 if let Some(ty) = &mut param.ty {
+//RS                     expand_template_type(ty, interp, scope)?;
+//RS                 }
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::PtrFromAddr { elem, .. } => {
+//RS             expand_template_type(elem, interp, scope)?;
+//RS         }
+//RS         crate::AST::Expr::StructLit {
+//RS             type_name,
+//RS             type_args,
+//RS             ..
+//RS         } => {
+//RS             *type_name = expand_template_name(type_name, span, interp, scope)?;
+//RS             for ty in type_args {
+//RS                 expand_template_type(ty, interp, scope)?;
+//RS             }
+//RS         }
+//RS         crate::AST::Expr::TypedLit {
+//RS             head: Some(head), ..
+//RS         } => {
+//RS             expand_template_type(head, interp, scope)?;
+//RS         }
+//RS         crate::AST::Expr::EnumLit {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS             ..
+//RS         } => {
+//RS             let variant_key = variant.clone();
+//RS             if args.is_empty() {
+//RS                 if let Some(payload) = derive_variant_payload_fields(&variant_key, scope) {
+//RS                     let owner = payload_binding_owner(&variant_key, scope);
+//RS                     for field in &payload {
+//RS                         let field_name =
+//RS                             derive_reflected_name(field).unwrap_or_else(|| "value".to_string());
+//RS                         args.push(crate::AST::EnumLitArg::Positional(crate::AST::Expr::Ident(
+//RS                             format!("{owner}_{field_name}"),
+//RS                             span,
+//RS                         )));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             *type_name = expand_template_name(type_name, span, interp, scope)?;
+//RS             *variant = expand_template_name(variant, span, interp, scope)?;
+//RS         }
+//RS         crate::AST::Expr::PatternTest {
+//RS             subject, pattern, ..
+//RS         } => {
+//RS             expand_template_pattern(pattern, interp, scope, Some(subject))?;
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn scope_value<'a>(scope: &'a HashMap<String, CtValue>, name: &str) -> Option<&'a CtValue> {
+//RS     scope.get(name).or_else(|| scope.get(&format!("${name}")))
+//RS }
+//RS 
+//RS fn comptime_literal_expr(
+//RS     value: CtValue,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Option<crate::AST::Expr> {
+//RS     // Keep unit enum substitutions distinguishable from author-written enum
+//RS     // literals until the shared typed boundary. TIR uses canonical fact
+//RS     // metadata to fold compiler fact comparisons; other enum substitutions
+//RS     // resume ordinary enum lowering there.
+//RS     if matches!(&value, CtValue::Enum { args, .. } if args.is_empty()) {
+//RS         return Some(crate::AST::Expr::ComptimeName {
+//RS             name: String::new(),
+//RS             span,
+//RS             value: Some(value),
+//RS         });
+//RS     }
+//RS     build_fact_expr(&value, span)
+//RS }
+//RS 
+//RS fn expand_template_type(
+//RS     ty: &mut Type,
+//RS     interp: &mut Interpreter::Interp<'_>,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     match ty {
+//RS         Type::Named(name) => {
+//RS             *name = expand_template_name(name, crate::Diagnostics::Span::new(0, 0), interp, scope)?;
+//RS         }
+//RS         Type::List(inner)
+//RS         | Type::Shared(inner)
+//RS         | Type::Option(inner)
+//RS         | Type::FixedList { elem: inner, .. }
+//RS         | Type::Tagged { inner, .. } => expand_template_type(inner, interp, scope)?,
+//RS         Type::Map { key, value, .. }
+//RS         | Type::Result {
+//RS             ok: key,
+//RS             err: value,
+//RS         } => {
+//RS             expand_template_type(key, interp, scope)?;
+//RS             expand_template_type(value, interp, scope)?;
+//RS         }
+//RS         Type::Fn { params, ret, .. } => {
+//RS             for param in params {
+//RS                 expand_template_type(param, interp, scope)?;
+//RS             }
+//RS             if let Some(ret) = ret {
+//RS                 expand_template_type(ret, interp, scope)?;
+//RS             }
+//RS         }
+//RS         Type::Apply { name, args } => {
+//RS             *name = expand_template_name(name, crate::Diagnostics::Span::new(0, 0), interp, scope)?;
+//RS             for arg in args {
+//RS                 expand_template_type(arg, interp, scope)?;
+//RS             }
+//RS         }
+//RS         Type::Tuple(fields) => {
+//RS             for (_, field) in fields {
+//RS                 expand_template_type(field, interp, scope)?;
+//RS             }
+//RS         }
+//RS         Type::Union(members) => {
+//RS             for member in members {
+//RS                 expand_template_type(member, interp, scope)?;
+//RS             }
+//RS         }
+//RS         Type::Quantity { base, .. } | Type::InlineRange { base, .. } => {
+//RS             expand_template_type(base, interp, scope)?
+//RS         }
+//RS         Type::Int
+//RS         | Type::Float
+//RS         | Type::Bool
+//RS         | Type::String
+//RS         | Type::Char
+//RS         | Type::TraitObject(_)
+//RS         | Type::IntN { .. }
+//RS         | Type::Float32
+//RS         | Type::Measure(_) => {}
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// D-TEXTHEAD-TYPE1=A: evaluate the ordinary `CheckedText.check` method on
+//RS /// the exact complete text. The method is reached through the same associated
+//RS /// method table used by comptime/dev, so the checker is not duplicated here.
+//RS pub fn evaluate_checked_text_check<'a>(
+//RS     type_name: &str,
+//RS     body: String,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     methods: &HashMap<(String, String), &'a Func>,
+//RS     structs: &HashMap<String, &'a crate::AST::StructDef>,
+//RS     distinct_bases: &HashMap<String, crate::AST::Type>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     base_dir: &Path,
+//RS     core_imports: &HashMap<String, String>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let span = crate::Diagnostics::Span::new(0, 0);
+//RS     let check = crate::AST::Expr::MethodCall {
+//RS         receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
+//RS         method: "check".to_string(),
+//RS         method_span: span,
+//RS         owner_type_args: Vec::new(),
+//RS         type_args: Vec::new(),
+//RS         args: vec![crate::AST::CallArg {
+//RS             convention: crate::AST::AccessConvention::Read,
+//RS             expr: crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(body)], span),
+//RS             span,
+//RS             flags: crate::AST::CallArgFlags::default(),
+//RS             label: None,
+//RS             spread: false,
+//RS         }],
+//RS         recv_type: Some(type_name.to_string()),
+//RS         resolved_ret: None,
+//RS         operator_rhs: None,
+//RS         checked_widen: false,
+//RS     };
+//RS     let (value, _) = evaluate_with_imports_opts_collecting_structs_and_methods(
+//RS         &check,
+//RS         funcs,
+//RS         &HashSet::new(),
+//RS         base_dir,
+//RS         globals,
+//RS         &HashMap::new(),
+//RS         core_imports,
+//RS         jet_foundation::Policy::GateSet::default(),
+//RS         0,
+//RS         structs,
+//RS         methods,
+//RS         empty_method_traits(),
+//RS         &HashMap::new(),
+//RS         distinct_bases,
+//RS         &[],
+//RS         None,
+//RS         None,
+//RS     )?;
+//RS     match value {
+//RS         CtValue::Failed(_) => Err(Diagnostic::error(
+//RS             "E2712",
+//RS             "this checked text type rejected its body".to_string(),
+//RS             "the type's pure `CheckedText.check` method must accept the complete literal body"
+//RS                 .to_string(),
+//RS             "fix the body so it satisfies the type's declared text grammar".to_string(),
+//RS             Some(span),
+//RS         )),
+//RS         _ => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS /// Evaluate one `CheckedText.encode_hole` call for a compile-time-known hole.
+//RS /// The returned string is only used to prove the same complete body that the
+//RS /// emitted pure method will build at runtime.
+//RS pub fn evaluate_checked_text_hole<'a>(
+//RS     type_name: &str,
+//RS     value: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &'a Func>,
+//RS     methods: &HashMap<(String, String), &'a Func>,
+//RS     structs: &HashMap<String, &'a crate::AST::StructDef>,
+//RS     distinct_bases: &HashMap<String, crate::AST::Type>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     base_dir: &Path,
+//RS     core_imports: &HashMap<String, String>,
+//RS ) -> Result<String, Diagnostic> {
+//RS     let span = value.span();
+//RS     let call = crate::AST::Expr::MethodCall {
+//RS         receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
+//RS         method: "encode_hole".to_string(),
+//RS         method_span: span,
+//RS         owner_type_args: Vec::new(),
+//RS         type_args: Vec::new(),
+//RS         args: vec![crate::AST::CallArg {
+//RS             convention: crate::AST::AccessConvention::Read,
+//RS             expr: value.clone(),
+//RS             span,
+//RS             flags: crate::AST::CallArgFlags::default(),
+//RS             label: None,
+//RS             spread: false,
+//RS         }],
+//RS         recv_type: Some(type_name.to_string()),
+//RS         resolved_ret: Some(crate::AST::Type::String),
+//RS         operator_rhs: None,
+//RS         checked_widen: false,
+//RS     };
+//RS     let (value, _) = evaluate_with_imports_opts_collecting_structs_and_methods(
+//RS         &call,
+//RS         funcs,
+//RS         &HashSet::new(),
+//RS         base_dir,
+//RS         globals,
+//RS         &HashMap::new(),
+//RS         core_imports,
+//RS         jet_foundation::Policy::GateSet::default(),
+//RS         0,
+//RS         structs,
+//RS         methods,
+//RS         empty_method_traits(),
+//RS         &HashMap::new(),
+//RS         distinct_bases,
+//RS         &[],
+//RS         None,
+//RS         None,
+//RS     )?;
+//RS     match value {
+//RS         CtValue::Str(value) => Ok(value),
+//RS         CtValue::Present(value) => match *value {
+//RS             CtValue::Str(value) => Ok(value),
+//RS             _ => Err(Diagnostic::error(
+//RS                 "E2712",
+//RS                 "this checked text type could not encode its hole".to_string(),
+//RS                 "`CheckedText.encode_hole` must return a String for every printable value"
+//RS                     .to_string(),
+//RS                 "return a String from `encode_hole`".to_string(),
+//RS                 Some(span),
+//RS             )),
+//RS         },
+//RS         CtValue::Failed(_) => Err(Diagnostic::error(
+//RS             "E2712",
+//RS             "this checked text type could not encode its hole".to_string(),
+//RS             "`CheckedText.encode_hole` must return a String for every printable value".to_string(),
+//RS             "use a compile-time-known printable hole or construct the value with `Type.from(text)`"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         )),
+//RS         _ => Err(Diagnostic::error(
+//RS             "E2712",
+//RS             "this checked text type could not encode its hole".to_string(),
+//RS             "`CheckedText.encode_hole` must return a String for every printable value".to_string(),
+//RS             "return a String from `encode_hole`".to_string(),
+//RS             Some(span),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod typed_head_tests {
+//RS     use super::{validate_datetime_literal, validate_url_literal};
+//RS 
+//RS     #[test]
+//RS     fn boundary_heads_use_the_canonical_validation_kernels() {
+//RS         assert!(validate_url_literal("https://api.example.com/v2/jet-hole").is_ok());
+//RS         assert!(validate_url_literal("https:").is_err());
+//RS         assert!(validate_datetime_literal("2026-08-07T12:00:00Z").is_ok());
+//RS         assert!(validate_datetime_literal("2026-08-07T12:00:00").is_err());
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2063 crates/jet-comptime/src/Comptime/mod.rs:1801-3565
+

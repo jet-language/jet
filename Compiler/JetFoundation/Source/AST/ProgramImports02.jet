@@ -1,0 +1,918 @@
+// PORT-PENDING 2123 crates-jet-foundation-src-ast-program-imports: crates/jet-foundation/src/AST/program_imports.rs:1-914
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::{CFfi, ComptimeInput, Expr, Item, Marker, Stmt, Type};
+//RS use crate::{
+//RS     Diagnostics::{Diagnostic, Span},
+//RS     Syntax,
+//RS };
+//RS use std::collections::HashMap;
+//RS 
+//RS #[derive(Debug)]
+//RS pub struct Program {
+//RS     /// S16 (M6): `import` declarations at the top of this file.
+//RS     pub imports: Vec<ImportDecl>,
+//RS     pub items: Vec<Item>,
+//RS     /// D-ENTRY-SCRIPT1=C: top-level executable statements remain separate so
+//RS     /// sema can reject them outside an explicit `fn run`.
+//RS     pub script_body: Vec<Stmt>,
+//RS     /// Parser-owned inner boundaries for statement blocks. Each span starts
+//RS     /// immediately after `{` and ends immediately before `}`.
+//RS     pub block_spans: Vec<Span>,
+//RS     /// D-EACH1=C: authored fenced statements retained for formatter emission.
+//RS     /// Sema and tooling consume the ordinary expanded statements in `items`.
+//RS     pub fenced_statements: Vec<FencedStatement>,
+//RS     /// D-WASM1 (c123): optional file-level web bucket ceiling (`js target;` / `wasm target;`).
+//RS     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
+//RS     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
+//RS     pub pub_file: bool,
+//RS     /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
+//RS     pub no_prelude: bool,
+//RS     /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — this file's default CLI
+//RS     /// backend is the web target, so `jet run`/`jet dev`/`jet build` don't
+//RS     /// need `--target=web` on every invocation. `None` means the native
+//RS     /// default applies unless `pkg.jet` or an explicit `--target=` flag says
+//RS     /// otherwise. Distinct from `web_target_ceiling` (`Wasm`/`JS`, a partition
+//RS     /// ceiling *within* a web build) — `Web` here means "build for the web
+//RS     /// backend at all," a different axis, same marker family (I8).
+//RS     pub default_target: Option<String>,
+//RS     /// D-MARKERARGS1=A: `#HTML(Path{"path.html"})` — this program's
+//RS     /// companion host page for `--target=web` builds, explicit instead of
+//RS     /// the silent `<stem>.html` sibling-filename convention. Relative to the
+//RS     /// `.jet` source file's own directory.
+//RS     pub html_path: Option<String>,
+//RS     /// D-MARK-SCOPE1: source policy declarations with compiler-owned scope/target metadata.
+//RS     pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+//RS     /// D-STRUCT-POLICY1=A: package-scoped user policy settings. Kept beside,
+//RS     /// not inside, the scoped policy ladder because these declarations are
+//RS     /// callable wrappers rather than lexical policy contributions.
+//RS     pub user_policy_declarations: Vec<crate::AST::UserPolicyDecl>,
+//RS     /// D-MARK-STACK1: source-order applied rules for attachment sites whose
+//RS     /// semantic AST fields do not retain order. `None` targets the file;
+//RS     /// `Some(span)` targets the parsed function declaration.
+//RS     pub applied_rules: Vec<AppliedRuleApplication>,
+//RS     /// D-MARKSIG1=A: every source-order applied rule, retained unchanged for
+//RS     /// sema's shared signature-conformance pass.
+//RS     pub rule_facts: Vec<AppliedRuleApplication>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct FencedStatement {
+//RS     pub span: Span,
+//RS     pub fences: Vec<FencedNames>,
+//RS     pub copies: usize,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct FencedNames {
+//RS     pub span: Span,
+//RS     pub names: Vec<(String, Span)>,
+//RS     pub range: Option<(String, String)>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct AppliedRuleApplication {
+//RS     pub marker: Marker,
+//RS     pub target: Option<Span>,
+//RS     pub site: Option<crate::Policy::RuleSite>,
+//RS }
+//RS 
+//RS /// S16: `import "path" [as alias];` or `import name [as alias];`
+//RS #[derive(Debug, Clone)]
+//RS pub struct ImportDecl {
+//RS     pub kind: ImportKind,
+//RS     pub alias: String,
+//RS     pub alias_span: Span,
+//RS     pub span: Span,
+//RS     /// Source span for each member in an unqualified import list. Other import
+//RS     /// forms leave this empty; keeping it beside `items` preserves the lossless
+//RS     /// member shape without changing the semantic `(name, alias)` pairs.
+//RS     pub item_spans: Vec<Span>,
+//RS     /// Exact source span for each local binding in an unqualified import list.
+//RS     /// This is the explicit alias when present, otherwise the member's local
+//RS     /// leaf. Other import forms leave this empty.
+//RS     pub local_spans: Vec<Span>,
+//RS     /// D-MOD3/4: true for `pub use alias.Item` re-exports.
+//RS     pub is_pub: bool,
+//RS     /// D-PUBPKG1=A: true for `pub(package) use …` — package-scoped re-export.
+//RS     pub is_package_pub: bool,
+//RS     /// U11 (D-JPK-SCRIPTDEP1=A): the `#version` selector on `use pkg#version;` —
+//RS     /// an inline script dependency. Only ever `Some` for a single-segment
+//RS     /// `ImportKind::Module` (no dotted path); a manifest-less entry file's
+//RS     /// `Loader` pass resolves these (crate::Jetpack::ScriptDeps). `None` for
+//RS     /// every ordinary import, and ignored (kept for round-trip only) once a
+//RS     /// project has a `pkg.jet` — deps then come from the manifest.
+//RS     pub inline_version: Option<InlineVersion>,
+//RS }
+//RS 
+//RS /// The `#version` payload of `use pkg#version;` (U11). `text` is the exact
+//RS /// selector as written (e.g. `"1.4"`, `"1.4.2"`) — never renormalized, so
+//RS /// `jet fmt` round-trips it byte-for-byte.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct InlineVersion {
+//RS     pub text: String,
+//RS     pub span: Span,
+//RS }
+//RS 
+//RS /// The target selected by one member in a Core `.[…]` import list.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum CoreListPath {
+//RS     /// The member names another Core module, such as `encoding.json`.
+//RS     Module(String),
+//RS     /// The member names an item inside the longest known Core module prefix.
+//RS     Item { module: String, item: String },
+//RS }
+//RS 
+//RS /// D-CORE-USELIST1=A: the std path prefix a `use <prefix>.[…]` list walks, or
+//RS /// `None` when the prefix names something else. The prefix may be any depth, so
+//RS /// `use core.encoding.[json]` walks to `core.encoding.json` exactly as
+//RS /// `use core.[encoding.json]` does. Retired `jet` spellings do not enter this
+//RS /// path.
+//RS pub fn core_list_prefix(module_alias: &str) -> Option<String> {
+//RS     let rest = module_alias.strip_prefix(Syntax::CORE_SHORT)?;
+//RS     (rest.is_empty() || rest.starts_with('.')).then(|| format!("{}{rest}", Syntax::CORE_SHORT))
+//RS }
+//RS 
+//RS /// Resolve one member path in a Core `.[…]` import list. The longest known
+//RS /// module prefix wins, so `core.[math.abs]` and `core.math.[abs]` select the
+//RS /// same Core member while `core.encoding.[json]` selects a submodule.
+//RS pub fn core_list_path(module_alias: &str, member: &str) -> Option<CoreListPath> {
+//RS     let prefix = core_list_prefix(module_alias)?;
+//RS     let full = format!("{prefix}.{member}");
+//RS     if Syntax::is_known_core_module(&full) {
+//RS         return Some(CoreListPath::Module(full));
+//RS     }
+//RS 
+//RS     let parts: Vec<&str> = full.split('.').collect();
+//RS     for split in (1..parts.len()).rev() {
+//RS         let module = parts[..split].join(".");
+//RS         if Syntax::is_known_core_module(&module) {
+//RS             let item = parts[split..].join(".");
+//RS             if !item.is_empty() {
+//RS                 return Some(CoreListPath::Item { module, item });
+//RS             }
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS /// Return a compiler-owned target-profile import path.
+//RS ///
+//RS /// Target profiles are source-visible namespaces backed by the selected
+//RS /// `TargetMachine`; they are not filesystem modules and therefore must stay
+//RS /// out of the ordinary loader resolver. Keep this list aligned with the
+//RS /// target profiles that have authoritative fact constructors.
+//RS pub fn target_profile_path(import: &ImportDecl) -> Option<String> {
+//RS     let ImportKind::Module(name, _) = &import.kind else {
+//RS         return None;
+//RS     };
+//RS     matches!(name.as_str(), "board.sensor_v1" | "board.virt_aarch64")
+//RS         .then(|| name.clone())
+//RS }
+//RS 
+//RS /// Build the Core alias maps consumed by pre-sema comptime evaluation. The
+//RS /// same member walk handles qualified module imports and grouped Core items,
+//RS /// including dotted members and explicit aliases. Target-profile aliases use
+//RS /// this same namespace carrier so every checker sees one alias identity; the
+//RS /// target path is still distinguished from Core by its `board.` prefix.
+//RS pub fn core_import_maps(
+//RS     imports: &[ImportDecl],
+//RS ) -> (HashMap<String, String>, HashMap<String, String>) {
+//RS     let mut modules = HashMap::new();
+//RS     let mut items = HashMap::new();
+//RS     for import in imports {
+//RS         if let Some(module) = import.core_module_path().or_else(|| target_profile_path(import)) {
+//RS             modules.insert(import.import_alias(), module);
+//RS         }
+//RS         let ImportKind::Unqualified { module_alias, .. } = &import.kind else {
+//RS             continue;
+//RS         };
+//RS         if core_list_prefix(module_alias).is_none() {
+//RS             continue;
+//RS         }
+//RS         for binding in import.walk_bindings() {
+//RS             let Some(original) = binding.original else {
+//RS                 continue;
+//RS             };
+//RS             match core_list_path(module_alias, original) {
+//RS                 Some(CoreListPath::Module(module)) => {
+//RS                     modules.insert(binding.local, module);
+//RS                 }
+//RS                 Some(CoreListPath::Item { module, item }) => {
+//RS                     modules.insert(binding.local.clone(), module);
+//RS                     items.insert(binding.local, item);
+//RS                 }
+//RS                 None => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     (modules, items)
+//RS }
+//RS 
+//RS /// Rewrite one grouped Core item call to the ordinary qualified-method AST
+//RS /// shape. Sema and the early comptime pass share this exact normalization so
+//RS /// TIR sees one dispatch form on every path.
+//RS pub fn rewrite_core_item_call(expr: &mut Expr, method: &str) {
+//RS     if !matches!(expr, Expr::Call(_)) {
+//RS         return;
+//RS     }
+//RS     let span = expr.span();
+//RS     let Expr::Call(call) = std::mem::replace(expr, Expr::Absent(span)) else {
+//RS         unreachable!("Core item rewrite checked the expression shape");
+//RS     };
+//RS     *expr = Expr::MethodCall {
+//RS         receiver: Box::new(Expr::Ident(call.name, call.name_span)),
+//RS         method: method.to_string(),
+//RS         method_span: call.name_span,
+//RS         owner_type_args: Vec::new(),
+//RS         type_args: call.type_args,
+//RS         args: call.args,
+//RS         recv_type: None,
+//RS         resolved_ret: call.resolved_ret,
+//RS         operator_rhs: None,
+//RS         checked_widen: false,
+//RS     };
+//RS }
+//RS 
+//RS /// The binding introduced by one member-list item. A dotted Core member uses
+//RS /// its leaf by default (`use core.[encoding.json]` binds `json`); an explicit
+//RS /// alias always wins.
+//RS pub fn member_import_local(original: &str, alias: Option<&str>) -> String {
+//RS     alias
+//RS         .map(str::to_owned)
+//RS         .unwrap_or_else(|| original.rsplit('.').next().unwrap_or(original).to_string())
+//RS }
+//RS 
+//RS /// One canonical import binding produced by `ImportDecl::walk_bindings`.
+//RS ///
+//RS /// A single module import and every member of a `.[…]` list use this same
+//RS /// shape. The source `ImportKind` remains the parser's lossless representation;
+//RS /// this view carries the authority, scope metadata, alias, and full member path
+//RS /// needed by every consumer after parsing.
+//RS #[derive(Debug, Clone)]
+//RS pub struct ImportBinding<'a> {
+//RS     /// The path prefix. For a single module import this is the full module path;
+//RS     /// for a member list it is the list prefix before `.[…]`.
+//RS     pub module_alias: &'a str,
+//RS     /// The dotted member path, or `None` for a single module import.
+//RS     pub original: Option<&'a str>,
+//RS     /// The local binding introduced by this import.
+//RS     pub local: String,
+//RS     /// An explicit member alias, when the source supplied one.
+//RS     pub alias: Option<&'a str>,
+//RS     pub module_alias_span: Span,
+//RS     pub item_span: Option<Span>,
+//RS     pub local_span: Span,
+//RS     pub items_span: Option<Span>,
+//RS     pub import_span: Span,
+//RS     pub is_pub: bool,
+//RS     pub is_package_pub: bool,
+//RS }
+//RS 
+//RS impl ImportBinding<'_> {
+//RS     /// Reconstruct the canonical dotted path consumed by namespace resolvers.
+//RS     pub fn path(&self) -> String {
+//RS         match self.original {
+//RS             Some(original) => format!("{}.{}", self.module_alias, original),
+//RS             None => self.module_alias.to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A foreign-language-rooted import whose path cannot name exactly one library.
+//RS /// The error is returned before any member is resolved, so a group can never be
+//RS /// partially imported.
+//RS #[derive(Debug, Clone)]
+//RS pub struct ForeignImportError {
+//RS     pub path: String,
+//RS     pub language: ForeignLanguage,
+//RS     pub span: Span,
+//RS }
+//RS 
+//RS impl ForeignImportError {
+//RS     pub fn diagnostic(&self) -> Diagnostic {
+//RS         let root = self.language.root();
+//RS         Diagnostic::error(
+//RS             "E0611",
+//RS             format!("`{}` is not a foreign library namespace", self.path),
+//RS             format!(
+//RS                 "foreign imports have exactly one library segment after the `{root}` language root"
+//RS             ),
+//RS             format!("write `use {root}.[library]` or `use {root}.library as alias`"),
+//RS             Some(self.span),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl ImportDecl {
+//RS     /// The effective alias for this import: the user-given alias if present,
+//RS     /// otherwise the default derived from the import kind.
+//RS     pub fn import_alias(&self) -> String {
+//RS         if self.alias.is_empty() {
+//RS             match &self.kind {
+//RS                 ImportKind::File(path, _) => {
+//RS                     path.rsplit('/').next().unwrap_or("module").to_string()
+//RS                 }
+//RS                 ImportKind::Module(name, _) => name.clone(),
+//RS                 ImportKind::Unqualified { module_alias, .. } => module_alias.clone(),
+//RS             }
+//RS         } else {
+//RS             self.alias.clone()
+//RS         }
+//RS     }
+//RS 
+//RS     /// If this import uses Core's canonical namespace, return its path. The
+//RS     /// loader keeps unknown `core.*` paths in this lane so sema can report the
+//RS     /// module-specific diagnostic.
+//RS     pub fn core_module_path(&self) -> Option<String> {
+//RS         let ImportKind::Module(name, _) = &self.kind else {
+//RS             return None;
+//RS         };
+//RS         (name == Syntax::CORE_SHORT
+//RS             || name == Syntax::CORE_CANONICAL
+//RS             || name == "app"
+//RS             || name.starts_with("core."))
+//RS         .then(|| name.clone())
+//RS     }
+//RS 
+//RS     /// Walk one canonical binding for a single import or each member of a
+//RS     /// `.[…]` import list. All consumers use this view instead of destructuring
+//RS     /// `ImportKind::Unqualified` independently.
+//RS     pub fn walk_bindings(&self) -> Vec<ImportBinding<'_>> {
+//RS         match &self.kind {
+//RS             ImportKind::Module(name, path_span) => vec![ImportBinding {
+//RS                 module_alias: name,
+//RS                 original: None,
+//RS                 local: self.import_alias(),
+//RS                 alias: (!self.alias.is_empty()).then_some(self.alias.as_str()),
+//RS                 module_alias_span: *path_span,
+//RS                 item_span: None,
+//RS                 local_span: self.alias_span,
+//RS                 items_span: None,
+//RS                 import_span: self.span,
+//RS                 is_pub: self.is_pub,
+//RS                 is_package_pub: self.is_package_pub,
+//RS             }],
+//RS             ImportKind::Unqualified {
+//RS                 module_alias,
+//RS                 module_alias_span,
+//RS                 items,
+//RS                 items_span,
+//RS                 ..
+//RS             } => items
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, (original, alias))| ImportBinding {
+//RS                     module_alias,
+//RS                     original: Some(original),
+//RS                     local: member_import_local(original, alias.as_deref()),
+//RS                     alias: alias.as_deref(),
+//RS                     module_alias_span: *module_alias_span,
+//RS                     item_span: self.item_spans.get(index).copied(),
+//RS                     local_span: self
+//RS                         .local_spans
+//RS                         .get(index)
+//RS                         .copied()
+//RS                         .or_else(|| self.item_spans.get(index).copied())
+//RS                         .unwrap_or(*module_alias_span),
+//RS                     items_span: Some(*items_span),
+//RS                     import_span: self.span,
+//RS                     is_pub: self.is_pub,
+//RS                     is_package_pub: self.is_package_pub,
+//RS                 })
+//RS                 .collect(),
+//RS             ImportKind::File(_, _) => Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Resolve every foreign library carried by this import.
+//RS     ///
+//RS     /// The member-list form deliberately stays in `ImportKind::Unqualified`:
+//RS     /// `use c.[raylib as rl, sqlite3]` is the same parser path as an ordinary
+//RS     /// `use alias.[item as local]`.  This helper is the shared semantic seam
+//RS     /// for loaders, sema, and codegen; no foreign namespace gets a grammar of
+//RS     /// its own.
+//RS     pub fn foreign_imports(&self) -> Result<Vec<(ForeignNamespace, String)>, ForeignImportError> {
+//RS         if matches!(&self.kind, ImportKind::File(_, _)) {
+//RS             return Ok(Vec::new());
+//RS         }
+//RS         let mut imports = Vec::new();
+//RS         for binding in self.walk_bindings() {
+//RS             let path = binding.path();
+//RS             let Some(language) = path.split('.').next().and_then(ForeignLanguage::from_root) else {
+//RS                 continue;
+//RS             };
+//RS             let Some(namespace) = ForeignNamespace::from_module_path(&path) else {
+//RS                 return Err(ForeignImportError {
+//RS                     path,
+//RS                     language,
+//RS                     span: binding.import_span,
+//RS                 });
+//RS             };
+//RS             imports.push((namespace, binding.local));
+//RS         }
+//RS         Ok(imports)
+//RS     }
+//RS 
+//RS     /// True when this import is any C `use` form (`use c.<lib>`, a C member
+//RS     /// list, or `use "<…>.h"`).
+//RS     pub fn is_c_import(&self) -> Result<bool, ForeignImportError> {
+//RS         match &self.kind {
+//RS             ImportKind::Module(_, _) | ImportKind::Unqualified { .. } => {
+//RS                 self.foreign_imports().map(|imports| {
+//RS                     imports
+//RS                         .into_iter()
+//RS                         .any(|(ns, _)| ns.language == ForeignLanguage::C)
+//RS                 })
+//RS             }
+//RS             ImportKind::File(path, _) => Ok(path.ends_with(".h")),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-FFI-UNIFY1: registered foreign language roots. C, Python, JS, and Octave
+//RS /// are active namespace binders; rust/swift remain ratified mounts whose
+//RS /// binder depth lands on later cards.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum ForeignLanguage {
+//RS     C,
+//RS     Cpp,
+//RS     Rust,
+//RS     Py,
+//RS     JS,
+//RS     Swift,
+//RS     Go,
+//RS     Java,
+//RS     DotNet,
+//RS     Tcl,
+//RS     Lua,
+//RS     Fortran,
+//RS     Cobol,
+//RS     Ada,
+//RS     Pascal,
+//RS     Dart,
+//RS     PowerShell,
+//RS     Perl,
+//RS     Ruby,
+//RS     Php,
+//RS     R,
+//RS     Octave,
+//RS     Com,
+//RS }
+//RS 
+//RS impl ForeignLanguage {
+//RS     pub const ALL: [ForeignLanguage; 23] = [
+//RS         ForeignLanguage::C,
+//RS         ForeignLanguage::Cpp,
+//RS         ForeignLanguage::Rust,
+//RS         ForeignLanguage::Py,
+//RS         ForeignLanguage::JS,
+//RS         ForeignLanguage::Swift,
+//RS         ForeignLanguage::Go,
+//RS         ForeignLanguage::Java,
+//RS         ForeignLanguage::DotNet,
+//RS         ForeignLanguage::Tcl,
+//RS         ForeignLanguage::Lua,
+//RS         ForeignLanguage::Fortran,
+//RS         ForeignLanguage::Cobol,
+//RS         ForeignLanguage::Ada,
+//RS         ForeignLanguage::Pascal,
+//RS         ForeignLanguage::Dart,
+//RS         ForeignLanguage::PowerShell,
+//RS         ForeignLanguage::Perl,
+//RS         ForeignLanguage::Ruby,
+//RS         ForeignLanguage::Php,
+//RS         ForeignLanguage::R,
+//RS         ForeignLanguage::Octave,
+//RS         ForeignLanguage::Com,
+//RS     ];
+//RS 
+//RS     pub fn from_root(root: &str) -> Option<Self> {
+//RS         match root {
+//RS             Syntax::C_MODULE_ROOT => Some(ForeignLanguage::C),
+//RS             Syntax::CPP_MODULE_ROOT => Some(ForeignLanguage::Cpp),
+//RS             Syntax::KW_RUST => Some(ForeignLanguage::Rust),
+//RS             Syntax::PY_MODULE_ROOT => Some(ForeignLanguage::Py),
+//RS             Syntax::JS_MODULE_ROOT => Some(ForeignLanguage::JS),
+//RS             Syntax::SWIFT_MODULE_ROOT => Some(ForeignLanguage::Swift),
+//RS             Syntax::GO_MODULE_ROOT => Some(ForeignLanguage::Go),
+//RS             Syntax::JAVA_MODULE_ROOT => Some(ForeignLanguage::Java),
+//RS             Syntax::CS_MODULE_ROOT => Some(ForeignLanguage::DotNet),
+//RS             Syntax::TCL_MODULE_ROOT => Some(ForeignLanguage::Tcl),
+//RS             Syntax::LUA_MODULE_ROOT => Some(ForeignLanguage::Lua),
+//RS             Syntax::FORTRAN_MODULE_ROOT => Some(ForeignLanguage::Fortran),
+//RS             Syntax::COBOL_MODULE_ROOT => Some(ForeignLanguage::Cobol),
+//RS             Syntax::ADA_MODULE_ROOT => Some(ForeignLanguage::Ada),
+//RS             Syntax::PASCAL_MODULE_ROOT => Some(ForeignLanguage::Pascal),
+//RS             Syntax::DART_MODULE_ROOT => Some(ForeignLanguage::Dart),
+//RS             Syntax::PWSH_MODULE_ROOT => Some(ForeignLanguage::PowerShell),
+//RS             Syntax::PERL_MODULE_ROOT => Some(ForeignLanguage::Perl),
+//RS             Syntax::RUBY_MODULE_ROOT => Some(ForeignLanguage::Ruby),
+//RS             Syntax::PHP_MODULE_ROOT => Some(ForeignLanguage::Php),
+//RS             Syntax::R_MODULE_ROOT => Some(ForeignLanguage::R),
+//RS             Syntax::OCTAVE_MODULE_ROOT => Some(ForeignLanguage::Octave),
+//RS             Syntax::COM_MODULE_ROOT => Some(ForeignLanguage::Com),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn root(self) -> &'static str {
+//RS         match self {
+//RS             ForeignLanguage::C => Syntax::C_MODULE_ROOT,
+//RS             ForeignLanguage::Cpp => Syntax::CPP_MODULE_ROOT,
+//RS             ForeignLanguage::Rust => Syntax::KW_RUST,
+//RS             ForeignLanguage::Py => Syntax::PY_MODULE_ROOT,
+//RS             ForeignLanguage::JS => Syntax::JS_MODULE_ROOT,
+//RS             ForeignLanguage::Swift => Syntax::SWIFT_MODULE_ROOT,
+//RS             ForeignLanguage::Go => Syntax::GO_MODULE_ROOT,
+//RS             ForeignLanguage::Java => Syntax::JAVA_MODULE_ROOT,
+//RS             ForeignLanguage::DotNet => Syntax::CS_MODULE_ROOT,
+//RS             ForeignLanguage::Tcl => Syntax::TCL_MODULE_ROOT,
+//RS             ForeignLanguage::Lua => Syntax::LUA_MODULE_ROOT,
+//RS             ForeignLanguage::Fortran => Syntax::FORTRAN_MODULE_ROOT,
+//RS             ForeignLanguage::Cobol => Syntax::COBOL_MODULE_ROOT,
+//RS             ForeignLanguage::Ada => Syntax::ADA_MODULE_ROOT,
+//RS             ForeignLanguage::Pascal => Syntax::PASCAL_MODULE_ROOT,
+//RS             ForeignLanguage::Dart => Syntax::DART_MODULE_ROOT,
+//RS             ForeignLanguage::PowerShell => Syntax::PWSH_MODULE_ROOT,
+//RS             ForeignLanguage::Perl => Syntax::PERL_MODULE_ROOT,
+//RS             ForeignLanguage::Ruby => Syntax::RUBY_MODULE_ROOT,
+//RS             ForeignLanguage::Php => Syntax::PHP_MODULE_ROOT,
+//RS             ForeignLanguage::R => Syntax::R_MODULE_ROOT,
+//RS             ForeignLanguage::Octave => Syntax::OCTAVE_MODULE_ROOT,
+//RS             ForeignLanguage::Com => Syntax::COM_MODULE_ROOT,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn bindings_subdir(self) -> String {
+//RS         format!("{}/{}", Syntax::BINDINGS_ROOT_SUBDIR, self.root())
+//RS     }
+//RS }
+//RS 
+//RS /// D-FFI-UNIFY1: a mounted foreign library, `<lang>.<lib>`.
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub struct ForeignNamespace {
+//RS     pub language: ForeignLanguage,
+//RS     pub lib: String,
+//RS }
+//RS 
+//RS impl ForeignNamespace {
+//RS     pub fn from_module_path(path: &str) -> Option<Self> {
+//RS         let mut segs = path.split('.');
+//RS         let language = ForeignLanguage::from_root(segs.next()?)?;
+//RS         let lib = segs.next()?;
+//RS         if lib.is_empty() || segs.next().is_some() {
+//RS             return None;
+//RS         }
+//RS         Some(ForeignNamespace {
+//RS             language,
+//RS             lib: lib.to_string(),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn display(&self) -> String {
+//RS         format!("{}.{}", self.language.root(), self.lib)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub enum ImportKind {
+//RS     /// Quoted path relative to this file's directory (no `.jet` suffix).
+//RS     File(String, Span),
+//RS     /// Bare module name — searched from the project root.
+//RS     Module(String, Span),
+//RS     /// D-MOD3/4: `use alias.Item` / `use alias.[A, B as C]` / `pub use alias.Item`
+//RS     /// D-SELIMPORT1=A: each item may carry an `as alias` — `(original, alias_if_any)`.
+//RS     Unqualified {
+//RS         module_alias: String,
+//RS         module_alias_span: Span,
+//RS         /// `(original_name, local_alias)` — alias is the local binding name.
+//RS         items: Vec<(String, Option<String>)>,
+//RS         items_span: Span,
+//RS         span: Span,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub struct ProgramBundle {
+//RS     /// Index into `modules` for the entry file.
+//RS     pub entry: usize,
+//RS     /// Directory containing the entry file (project root until M12 `pkg.jet`).
+//RS     pub project_root: std::path::PathBuf,
+//RS     pub modules: Vec<LoadedModule>,
+//RS     /// D-DX-PLUGIN1=D: one checked package-wide devtools catalog. Completion
+//RS     /// populates this from TypeRegistry facts; inspect and codegen consume the
+//RS     /// same typed carrier instead of re-inferring panel identity from AST.
+//RS     pub devtools_registry: crate::AST::DevtoolsRegistry,
+//RS     /// S14 teaching diagnostics collected during a lenient parse (LSP check).
+//RS     pub parse_teaching: Vec<crate::Diagnostics::Diagnostic>,
+//RS     /// M10: Core helper names proven reachable by sema. Codegen emits only
+//RS     /// these helpers (SL9).
+//RS     pub used_core: std::collections::HashSet<String>,
+//RS     /// D-CABI-CALLBACK1: canonical function keys sema proved are passed as
+//RS     /// stable C callback symbols (`CallArgFlags::c_callback_symbol`) at
+//RS     /// `#Import` call sites anywhere in the bundle. Codegen keeps each Jet
+//RS     /// function's ordinary result carrier and emits a raw C trampoline beside it.
+//RS     pub ffi_callback_fns: std::collections::HashSet<String>,
+//RS     /// S59 (E2-M14): C-FFI artifacts produced by `CFFI::assemble` after loading
+//RS     /// — per-file `use c.<lib>` bindings and the libraries to link against.
+//RS     pub cffi: CFfi,
+//RS     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs accumulated by sema.
+//RS     /// Each entry records the path and sha256 of a file embedded at compile
+//RS     /// time. Written to `.jet/lock` by the build driver for reproducibility.
+//RS     pub comptime_inputs: Vec<ComptimeInput>,
+//RS     /// One name ledger. Loader seeds file-import edges; sema fills checked
+//RS     /// declaration, alias, visibility, path, and reference facts.
+//RS     pub name_ledger: crate::Names::NameLedger,
+//RS     /// D-RINGLAYER1: optional `runtime:` ceiling from `pkg.jet`.
+//RS     pub layer_ceiling: Option<crate::RingLayer::RuntimeLayer>,
+//RS     /// D-RINGLAYER1: inferred minimum runtime profile for this package.
+//RS     pub inferred_layer: crate::RingLayer::RuntimeLayer,
+//RS     /// D-WASM1: resolved web bucket per mangled function key (filled by sema).
+//RS     pub web_partitions: std::collections::HashMap<String, crate::WebPartition::WebBucket>,
+//RS     /// True when compiling for web (partition checks enforced).
+//RS     pub web_partition_enforced: bool,
+//RS     /// D-WASM1: human-readable partition report (`--explain-partition`).
+//RS     pub web_partition_report: Option<String>,
+//RS     /// D-EFFBUDGET1: dependency name → its resolved on-disk source root, for
+//RS     /// both `deps:` (path/git/provider) entries and hangar-realized `use <pkg>`
+//RS     /// libraries. Lets a downstream pass (the effect budget) attribute a
+//RS     /// loaded module's path back to the dependency that owns it. Empty for a
+//RS     /// single-file program with no `pkg.jet`.
+//RS     pub dep_roots: std::collections::HashMap<String, std::path::PathBuf>,
+//RS     /// D-MEM-GUARANTEE1: the package-only guarantee dial carried from the
+//RS     /// checked package seam into every execution tier. Single-file bundles
+//RS     /// use the ambient beginner authority default; engines never rediscover
+//RS     /// package.jet.
+//RS     pub package_guarantees: PackageGuarantees,
+//RS     /// D-ALLOC-PROGRAM1=A: the canonical package allocator fact projected by
+//RS     /// Loader. Engines marshal this value into the shared Prelude kernel and
+//RS     /// never read package.jet themselves.
+//RS     pub program_allocator: crate::TargetMachine::AllocatorPolicy,
+//RS     /// D-OSTARGET2 (=B, ratified 2026-07-03): the active native OS bucket for
+//RS     /// this build — resolved from `--target=<triple>` (host OS when absent or a
+//RS     /// web/wasm pseudo-target). Seeded by the driver right after load; defaults
+//RS     /// to the host OS for every other bundle constructor (LSP, tests). Sema's
+//RS     /// `prep if $build.os == { … }` desugar reads it to fold the switch to
+//RS     /// the arm matching this OS, and it must equal codegen's `active_os` so the
+//RS     /// selected arm's gated `impl` is the one codegen keeps.
+//RS     pub active_os: crate::OSTarget::OSTarget,
+//RS     /// D-CONF-READ1=A / D-CONF-STAMP1=B: one typed build-fact snapshot seeded
+//RS     /// by the driver before sema. TIR and every execution tier only receive
+//RS     /// the literals sema folds from this value.
+//RS     pub build_facts: crate::Facts::BuildFactSnapshot,
+//RS     /// D-REL3 / card #712: resolved package edition (`"2026"`, `"2027"`, …).
+//RS     /// Single-file programs use the toolchain's newest stable edition.
+//RS     pub edition: String,
+//RS }
+//RS 
+//RS /// The typed package-only portion of D-MEM-GUARANTEE1. These facts are kept
+//RS /// separate from source `PolicyDeclaration`s because `contain` and `harden`
+//RS /// govern dependency boundaries and build profiles, not lexical scopes.
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
+//RS pub struct PackageGuarantees {
+//RS     pub contain: std::collections::BTreeSet<String>,
+//RS     pub harden: bool,
+//RS     /// D-TEAMPOLICY1=A: every dependency name declared by the root package,
+//RS     /// including native/system and foreign dependencies with no source root.
+//RS     pub dependency_names: std::collections::BTreeSet<String>,
+//RS     /// D-TEAMPOLICY1=A: normalized module-path effect ceilings from the
+//RS     /// package policy. An empty set is an explicit pure ceiling.
+//RS     pub effects: std::collections::BTreeMap<
+//RS         String,
+//RS         std::collections::BTreeSet<String>,
+//RS     >,
+//RS     /// D-TEAMPOLICY1=A: `None` means no unsafe rule; `Some(empty)` denies all
+//RS     /// unsafe gates, while non-empty values allow only those project paths.
+//RS     pub unsafe_paths: Option<Vec<String>>,
+//RS     /// D-TEAMPOLICY1=A: `None` means no expert rule; `Some(false)` denies
+//RS     /// expert-only surfaces, while `Some(true)` permits them.
+//RS     pub expert: Option<bool>,
+//RS     /// D-TEAMPOLICY1=A: normalized dependency allow-list. Absence means no
+//RS     /// allow-list; an explicit empty list denies every declared dependency.
+//RS     pub deps: Option<Vec<String>>,
+//RS     /// D-TEAMPOLICY1=A: normalized diagnostics-as-errors classes. Absence
+//RS     /// leaves lint severity unchanged; an explicit empty list denies nothing.
+//RS     pub lints_deny: Option<Vec<String>>,
+//RS     /// D-AUTHORITY-MEM1/D-AUTHORITY-MEM2: package-wide memory denials from
+//RS     /// `authority.holds.deny`. The loader carries the raw canonical rights here so
+//RS     /// sema applies the same memory proof as a signature denial.
+//RS     pub memory_denials: Vec<String>,
+//RS     /// D-PLUGIN-AUTHORITY1: guest-declared host capabilities. These are
+//RS     /// declaration facts only; the host's tightened grant is carried
+//RS     /// separately and must be checked against this set at import time.
+//RS     pub authority_needs: Vec<String>,
+//RS 
+//RS     /// D-EFFECT-AUTHORITY1: the application-boundary policy and the exact
+//RS     /// sema-projected effects carried into every execution tier.
+//RS     pub application_authority: crate::Authority::ApplicationAuthority,
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub struct LoadedModule {
+//RS     pub path: std::path::PathBuf,
+//RS     /// Stable path string for diagnostics/codegen (e.g. `Examples/features/21_imports/main.jet`).
+//RS     pub display: String,
+//RS     pub source: String,
+//RS     /// Namespace when this file is imported (`import … as alias`).
+//RS     pub alias: String,
+//RS     pub imports: Vec<ImportDecl>,
+//RS     pub items: Vec<Item>,
+//RS     /// D-ENTRY-SCRIPT1=C: raw top-level statements from a script file. The
+//RS     /// sema entry check rejects them; notebook and REPL paths materialize their
+//RS     /// own explicit `fn run` separately.
+//RS     pub script_body: Vec<Stmt>,
+//RS     pub block_spans: Vec<Span>,
+//RS     /// D-WASM1: optional file-level web bucket ceiling.
+//RS     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
+//RS     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
+//RS     pub pub_file: bool,
+//RS     /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
+//RS     pub no_prelude: bool,
+//RS     /// D-APP-UNIFY1=B / D-WEBDEFAULT1: the file-level `#Target(Web)` default
+//RS     /// survives loading so sema resolves App capabilities from the same
+//RS     /// target fact that the CLI uses for the web backend.
+//RS     pub default_target: Option<String>,
+//RS     /// D-MARKERARGS1=A: `#HTML(Path{"path.html"})` — this file's explicit
+//RS     /// companion host page for `--target=web` builds.
+//RS     pub html_path: Option<String>,
+//RS     /// Mirrors `Program::policy_declarations` for sema/index/explain consumers.
+//RS     pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+//RS     /// Mirrors `Program::user_policy_declarations` for the package sema seam.
+//RS     pub user_policy_declarations: Vec<crate::AST::UserPolicyDecl>,
+//RS     /// Mirrors `Program::rule_facts` for sema signature conformance.
+//RS     pub rule_facts: Vec<AppliedRuleApplication>,
+//RS }
+//RS 
+//RS impl LoadedModule {
+//RS     /// True for an embedded Core library module scheduled by the loader.
+//RS     /// Its diagnostics are library facts, never user-facing lints.
+//RS     pub fn is_core_source(&self) -> bool {
+//RS         self.path.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT)
+//RS     }
+//RS }
+//RS 
+//RS /// Walk every import-bearing scope in a loaded module. Top-level imports use
+//RS /// `None`; inline, generic, and instantiated module bodies carry their owning
+//RS /// namespace. The recursive shape is shared by CFFI, foreign binders, and
+//RS /// codegen so no tier invents a second namespace traversal.
+//RS pub fn walk_imports(module: &LoadedModule) -> Vec<(Option<&str>, &ImportDecl)> {
+//RS     fn collect_code_module_imports<'a>(
+//RS         code_module: &'a crate::AST::CodeModule,
+//RS         imports: &mut Vec<(Option<&'a str>, &'a ImportDecl)>,
+//RS     ) {
+//RS         imports.extend(
+//RS             code_module
+//RS                 .imports
+//RS                 .iter()
+//RS                 .map(|import| (Some(code_module.name.as_str()), import)),
+//RS         );
+//RS         if let Some(body) = &code_module.body {
+//RS             for item in body {
+//RS                 if let Item::CodeModule(child) = item {
+//RS                     collect_code_module_imports(child, imports);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let mut imports = module
+//RS         .imports
+//RS         .iter()
+//RS         .map(|import| (None, import))
+//RS         .collect::<Vec<_>>();
+//RS     for item in &module.items {
+//RS         match item {
+//RS             Item::CodeModule(code_module) => {
+//RS                 collect_code_module_imports(code_module, &mut imports);
+//RS             }
+//RS             Item::GenericModule(generic_module) => {
+//RS                 imports.extend(
+//RS                     generic_module
+//RS                         .imports
+//RS                         .iter()
+//RS                         .map(|import| (Some(generic_module.name.as_str()), import)),
+//RS                 );
+//RS                 for alias in &module.items {
+//RS                     let Item::ModuleAlias(alias) = alias else {
+//RS                         continue;
+//RS                     };
+//RS                     if alias.target == generic_module.name {
+//RS                         imports.extend(
+//RS                             generic_module
+//RS                                 .imports
+//RS                                 .iter()
+//RS                                 .map(|import| (Some(alias.name.as_str()), import)),
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 for item in &generic_module.body {
+//RS                     if let Item::CodeModule(code_module) = item {
+//RS                         collect_code_module_imports(code_module, &mut imports);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     imports
+//RS }
+//RS 
+//RS /// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum TryConvert {
+//RS     /// Error types match exactly — no conversion needed.
+//RS     None,
+//RS     /// The source carrier has `Never` as its error side. Sema proved that
+//RS     /// this propagation site has no reachable failure route; lowering only
+//RS     /// unwraps the shared carrier and never converts or reports an error.
+//RS     Never,
+//RS     /// D-FAIL-ERROR1=A: a legacy string-shaped failure becomes the default
+//RS     /// `Err` value at the propagation seam.
+//RS     DefaultErr,
+//RS     /// Declared `impl Source -> Target { … }` conversion (D-ERR-CONV).
+//RS     /// Holds the mangled Rust function name and the exact sema-resolved error
+//RS     /// types carried into TIR.
+//RS     Typed {
+//RS         fn_name: String,
+//RS         source: Type,
+//RS         target: Type,
+//RS     },
+//RS     /// D-UNIONTYPE1=A: source error is one member of the return's anonymous union.
+//RS     /// Codegen wraps with the canonical `__jet_<enum>::__jet_<tag>(e)` path.
+//RS     WidenUnion { enum_name: String, tag: String },
+//RS }
+//RS 
+//RS /// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { body }` — declares
+//RS /// how a `Source` error becomes a `Target` error; `?` applies it automatically.
+//RS #[derive(Debug, Clone)]
+//RS pub struct ErrorConvDef {
+//RS     pub from_ty: String,
+//RS     pub from_span: Span,
+//RS     pub to_ty: String,
+//RS     pub to_span: Span,
+//RS     /// The single expression that is the conversion body.
+//RS     /// `self` in the body refers to the source error value.
+//RS     pub body: Vec<Stmt>,
+//RS     pub body_span: Span,
+//RS }
+//RS 
+//RS /// D-MIGRATE1 (ratified 2026-06-22): `migration TypeName { op; … }` block.
+//RS #[derive(Debug, Clone)]
+//RS pub struct MigrationDecl {
+//RS     pub type_name: String,
+//RS     pub type_span: Span,
+//RS     pub ops: Vec<MigrationOp>,
+//RS     pub span: Span,
+//RS }
+//RS 
+//RS /// D-MIGRATE1 / D-MIGRATE2: one operation inside a `migration { }` block.
+//RS #[derive(Debug, Clone)]
+//RS pub enum MigrationOp {
+//RS     /// D-MIGRATE1: `rename old_field -> new_field` — declares a field was renamed.
+//RS     Rename {
+//RS         from: String,
+//RS         from_span: Span,
+//RS         to: String,
+//RS         to_span: Span,
+//RS     },
+//RS     /// D-MIGRATE2A: `add f: T = default` — a new field with a default for old
+//RS     /// records. The `default` expr is the value old data is read with; sema
+//RS     /// checks intent, and D-MIGRATE4 lowers the default through `default_fn`
+//RS     /// for the runtime chain.
+//RS     Add {
+//RS         field: String,
+//RS         field_span: Span,
+//RS         ty: Type,
+//RS         ty_span: Span,
+//RS         default: Expr,
+//RS         default_span: Span,
+//RS         /// D-MIGRATE4: the mangled name of the synthetic zero-arg default
+//RS         /// function this `add` desugars to (`Sema::desugar_migrations`), so the
+//RS         /// runtime step function can evaluate the default. `None` until the
+//RS         /// desugar runs (and for a type with no runtime decode path).
+//RS         default_fn: Option<String>,
+//RS     },
+//RS     /// D-MIGRATE2D: `remove f` — deletes a field (verb is `remove`, not `drop`).
+//RS     Remove { field: String, field_span: Span },
+//RS     /// D-MIGRATE2E: `change f: Old -> New [via { expr }]` — a field type change.
+//RS     /// `converter` is the inline `via { … }` body (an expression, usually a
+//RS     /// lambda); `None` falls back to an `impl Old -> New` in scope (D-MIGRATE2B).
+//RS     Change {
+//RS         field: String,
+//RS         field_span: Span,
+//RS         from_ty: Type,
+//RS         from_span: Span,
+//RS         to_ty: Type,
+//RS         to_span: Span,
+//RS         converter: Option<Expr>,
+//RS         converter_span: Option<Span>,
+//RS         /// D-MIGRATE4: the mangled name of the synthetic top-level converter
+//RS         /// function this `change` desugars to (`Sema::desugar_migrations`), so
+//RS         /// the runtime step function codegen can call it. `None` until the
+//RS         /// desugar runs (and for a type with no runtime decode path).
+//RS         conv_fn: Option<String>,
+//RS     },
+//RS }
+//RS 
+// END-PORT-PENDING 2123 crates/jet-foundation/src/AST/program_imports.rs:1-914
+

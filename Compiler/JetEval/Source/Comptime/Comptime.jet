@@ -1,0 +1,1804 @@
+// PORT-PENDING 2062 crates-jet-comptime-src-comptime-mod-slice-1: crates/jet-comptime/src/Comptime/mod.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! M9.5 — Comptime v1 (CTFE). A tree-walking interpreter over the typed
+//RS //! AST that evaluates a pure, deterministic Jet subset at compile time and
+//RS //! bakes the answer into the binary. See the comptime section of Docs/spec/spec.md.
+//RS //!
+//RS //! One law (S26): comptime computes *values* only — it never creates,
+//RS //! parameterizes, or selects a type, and never affects dispatch.
+//RS //!
+//RS //! Diagnostics: E3401 impurity (with call path — shared code with the
+//RS //! run-time `-[]>` check, D-META-EFFECT1 c3) · E0952 fuel exhausted ·
+//RS //! E0953 comptime panic (user message verbatim, overflow, divide-by-zero) ·
+//RS //! E0955 embed_file errors · E0956 construct not yet supported at comptime.
+//RS //!
+//RS //! Semantics are bit-for-bit identical to the compiled runtime (the
+//RS //! differential battery in tests/comptime_diff.rs is the enforcement):
+//RS //! i64 `Int`, IEEE f64 `Float` (S21 display via `{:?}`), char-counted
+//RS //! `String` (S41), and `BTreeMap` ordering (S38).
+//RS 
+//RS mod AmbientRuntime;
+//RS pub mod AppLite;
+//RS mod ArgsLite;
+//RS pub mod AuthLite;
+//RS pub mod Build;
+//RS /// Host/builtin surface shared by the canonical TIR evaluator (#777) and
+//RS /// any remaining policy wrappers (purity). Public so `jet-codegen`'s TIR
+//RS /// eval can dispatch without a second builtin table.
+//RS pub mod Builtins;
+//RS /// Shared collection CtValue ops for MirBridge (#722 / #777).
+//RS pub mod CollectionEval;
+//RS pub mod ComplexParity;
+//RS pub mod ComputeLite;
+//RS mod CryptoLite;
+//RS #[doc(hidden)]
+//RS pub mod ClockRuntime {
+//RS     include!(concat!(env!("OUT_DIR"), "/clock_rt.rs"));
+//RS }
+//RS #[doc(hidden)]
+//RS pub mod PoolRuntime {
+//RS     include!(concat!(env!("OUT_DIR"), "/pool_rt.rs"));
+//RS }
+//RS /// I8/I9: the one `core.data` table/series/schema pipeline kernel. Public so
+//RS /// the canonical TIR evaluator marshals into it instead of owning a second
+//RS /// table construction (card #2015).
+//RS pub mod DataPipeline;
+//RS mod Diagnostics;
+//RS pub use Diagnostics::comptime_panic;
+//RS pub mod EmailAdapter;
+//RS mod EncodingLite;
+//RS mod EventLite;
+//RS mod Interpreter;
+//RS mod JSONInterp;
+//RS pub mod MathLayout;
+//RS mod Methods;
+//RS mod Purity;
+//RS mod Reflect;
+//RS mod jet_regex_syntax {
+//RS     pub use jet_foundation::RegexSyntax::validate;
+//RS }
+//RS mod regex_kernel {
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs");
+//RS }
+//RS pub mod ServicesLite;
+//RS pub mod SyncLite;
+//RS mod TextLite;
+//RS pub use TextLite::file_reader_next_line;
+//RS pub use TextLite::{mir_fs_lock, mir_fs_temp_dir, mir_fs_temp_file, MirFileOwner};
+//RS pub mod MirBridge;
+//RS pub mod Template;
+//RS mod TypedDecode;
+//RS mod UrlLite;
+//RS mod ZstdEntropy;
+//RS 
+//RS #[allow(dead_code)]
+//RS mod typed_text_kernel {
+//RS     include!("../../../jet-codegen/src/Prelude/TypedText.rs");
+//RS }
+//RS 
+//RS pub use AmbientRuntime::{
+//RS     ambient_hooks, ambient_mir_prelude_hook, ambient_runtime_snapshot, ambient_worker_context,
+//RS     package_read_root, record_package_input, try_ambient_core_closure, try_ambient_mir_handle,
+//RS     try_ambient_mir_prelude, try_ambient_standalone_closure, try_ambient_standalone_closure_mut,
+//RS     try_core_call as try_ambient_core_call, try_core_call_typed as try_ambient_core_call_typed,
+//RS     try_core_call_typed_with_sink, try_extern_call as try_ambient_extern_call,
+//RS     try_handle as try_ambient_handle, try_mir_extern_call as try_ambient_mir_extern_call,
+//RS     with_ambient, with_ambient_core_closure, with_ambient_mir_extern, with_ambient_mir_handle,
+//RS     with_ambient_mir_prelude, with_ambient_runtime_snapshot, with_ambient_worker_context,
+//RS     with_package_read_context, AmbientCoreCall, AmbientCoreClosureCall, AmbientExternCall,
+//RS     AmbientHandle, AmbientMirExternCall, AmbientMirExternResult, AmbientMirExternWriteback,
+//RS     AmbientMirHandle, AmbientMirHandleResult, AmbientMirPreludeCall, AmbientMirPreludeResult,
+//RS     AmbientRuntimeSnapshot, AmbientStandaloneClosure, AmbientWorkerContext, StandaloneClosureHost,
+//RS };
+//RS pub use Template::{
+//RS     format_tir_template_body, TemplateBody, TemplateHole, TemplateHoleKind, TemplateItem,
+//RS     TemplateSource, TemplateStatement,
+//RS };
+//RS pub use TypedDecode::{
+//RS     builtin_codec_kind, decode_builtin_codec, decode_error_under, encode_builtin_codec,
+//RS };
+//RS 
+//RS /// MIR typed Decode bridge: the canonical typed codec walker decodes
+//RS /// containers and scalars, and delegates nominal leaves to checked MIR
+//RS /// Decode methods.
+//RS #[doc(hidden)]
+//RS pub fn decode_typed_value_for_mir(
+//RS     ty: &Type,
+//RS     tree: &CtValue,
+//RS     decode_nominal: &mut dyn FnMut(&Type, &CtValue) -> Option<Result<CtValue, CtValue>>,
+//RS ) -> Option<Result<CtValue, CtValue>> {
+//RS     TypedDecode::typed_decode_value_with(ty, tree, decode_nominal)
+//RS }
+//RS 
+//RS /// MIR typed Encode bridge that keeps container traversal in the canonical
+//RS /// typed codec walker and delegates nominal leaves to checked MIR methods.
+//RS #[doc(hidden)]
+//RS pub fn encode_typed_value_for_mir(
+//RS     ty: &Type,
+//RS     value: &CtValue,
+//RS     encode_nominal: &mut dyn FnMut(&Type, &CtValue) -> Result<Option<CtValue>, String>,
+//RS ) -> Option<Result<CtValue, String>> {
+//RS     TypedDecode::encode_typed_value_with(ty, value, encode_nominal)
+//RS }
+//RS pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
+//RS pub use EventLite::{
+//RS     core_event_async_result, core_event_decision_hook, core_event_hook, core_event_new,
+//RS     core_event_policy_sync, core_event_scope, core_event_with_policy,
+//RS     eval_method as eval_event_method, reset as reset_event_lite,
+//RS };
+//RS pub use Reflect::{build_fact_value, build_setting_value, fact_read_value};
+//RS 
+//RS use std::collections::{HashMap, HashSet};
+//RS use std::path::Path;
+//RS use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Syntax;
+//RS use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
+//RS 
+//RS pub use Interpreter::{
+//RS     runtime_argv, with_runtime_argv, DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest,
+//RS     REPL_FUEL_BUDGET,
+//RS };
+//RS pub use Methods::{
+//RS     apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
+//RS     apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args,
+//RS     apply_core_call_without_ambient_with_type_args_and_history_schema, apply_core_pure_call,
+//RS     apply_core_pure_method, apply_data_line_call, apply_history_rng_method, apply_impure_core_call,
+//RS     apply_impure_core_call_with_type, apply_impure_core_call_with_type_args,
+//RS     apply_raylib_ambient_core_call, apply_repl_authorized_core_call,
+//RS     apply_repl_authorized_core_call_with_type, display_core_pure_value,
+//RS     eval_regex_replace_all_with, history_callback_fingerprint, history_command_schema_from_mir,
+//RS     jet_crypto_zeroize,
+//RS     set_trace_id, sketch_add, with_world_rng_provider, HistoryCommandSchema,
+//RS };
+//RS pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
+//RS // I9: the TIR evaluator in jet-codegen calls this same fake-data kernel, so it
+//RS // must be reachable from outside this crate. One kernel, every tier.
+//RS pub use DataPipeline::DataPipelineState;
+//RS pub use Methods::apply_fake_method;
+//RS #[doc(hidden)]
+//RS pub use Methods::{
+//RS     eval_build_time_io, eval_net_fetch, is_tier2_core_call, project_rejection,
+//RS     vault_comptime_denied,
+//RS };
+//RS 
+//RS /// D-BOUND-HEAD1: typed URL heads validate at comptime with the same URL
+//RS /// kernel that backs the runtime string constructor.
+//RS pub fn validate_url_literal(value: &str) -> Result<(), String> {
+//RS     UrlLite::parse(value).map(|_| ())
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1: validate URL literal components without flattening holes
+//RS /// into a string that can change the URL grammar.
+//RS pub fn validate_typed_url_literal(literals: &[String]) -> Result<(), String> {
+//RS     UrlLite::validate_typed_url_literal(literals)
+//RS }
+//RS 
+//RS pub fn validate_typed_path_literal(literals: &[String]) -> Result<(), String> {
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     typed_text_kernel::jet_validate_typed_path_literal(&literal_refs)
+//RS }
+//RS 
+//RS pub fn validate_typed_boundary_literal(
+//RS     kind: Syntax::TypedHeadKind,
+//RS     literals: &[String],
+//RS ) -> Result<(), String> {
+//RS     match kind {
+//RS         Syntax::TypedHeadKind::URL => validate_typed_url_literal(literals),
+//RS         Syntax::TypedHeadKind::Path => validate_typed_path_literal(literals),
+//RS         Syntax::TypedHeadKind::DateTime => {
+//RS             validate_datetime_literal(&literals.iter().map(String::as_str).collect::<String>())
+//RS         }
+//RS         _ => Err("typed head is not a checked boundary head".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1: typed holes use the same pure display projection as nested
+//RS /// runtime values. There is no CtValue debug fallback: sema must admit only
+//RS /// values for which this canonical renderer succeeds.
+//RS pub fn render_typed_hole(value: &crate::AST::CtValue) -> Option<String> {
+//RS     display_core_pure_value(value)
+//RS }
+//RS 
+//RS pub fn render_typed_holes(
+//RS     values: &[crate::AST::CtValue],
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     values
+//RS         .iter()
+//RS         .map(render_typed_hole)
+//RS         .collect::<Option<Vec<_>>>()
+//RS         .ok_or_else(|| {
+//RS             Diagnostic::error(
+//RS                 "E0112",
+//RS                 "a typed literal hole has no canonical JetShow renderer".to_string(),
+//RS                 "typed literal holes use one display contract in every execution tier".to_string(),
+//RS                 "use a sema-admitted printable value or convert it to String before the hole"
+//RS                     .to_string(),
+//RS                 Some(span),
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1: typed DateTime heads validate through the shared Prelude
+//RS /// parser; runtime string constructors remain unchanged.
+//RS pub fn validate_datetime_literal(value: &str) -> Result<(), String> {
+//RS     Methods::validate_datetime_literal(value)
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1: validate raw heads at the typed boundary, then evaluate a
+//RS /// sema-rewritten head through the one shared interpolation law and existing
+//RS /// pure Core parsers. Runtime string constructors stay on their existing paths.
+//RS pub fn evaluate_typed_head(
+//RS     kind: Syntax::TypedHeadKind,
+//RS     literals: &[String],
+//RS     holes: &[CtValue],
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let name = kind.source_name();
+//RS     if !kind.is_boundary() {
+//RS         return Err(Diagnostic::error(
+//RS             "E0956",
+//RS             format!("typed head `{name}` can't run at compile time yet"),
+//RS             "the canonical TIR evaluator only accepts the ratified URL, Path, and DateTime heads"
+//RS                 .to_string(),
+//RS             "use one of `URL.{\"…\"}`, `Path.{\"…\"}`, or `DateTime.{\"…\"}`".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     if kind.forbids_holes() && !holes.is_empty() {
+//RS         return Err(Diagnostic::error(
+//RS             "E0155",
+//RS             "a `DateTime` literal cannot contain interpolation".to_string(),
+//RS             "DateTime values are checked as complete RFC3339 literals before the program runs"
+//RS                 .to_string(),
+//RS             "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly"
+//RS                 .to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     if let Err(reason) = validate_typed_boundary_literal(kind, literals) {
+//RS         return Err(Diagnostic::error(
+//RS             "E0155",
+//RS             format!("this `{name}` literal is invalid"),
+//RS             reason,
+//RS             format!(
+//RS                 "fix the literal, or parse a runtime String with the ordinary `{name}` constructor"
+//RS             ),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     let shown_holes = render_typed_holes(holes, span)?;
+//RS     match kind {
+//RS         Syntax::TypedHeadKind::URL => {
+//RS             let url = UrlLite::typed_url_literal(literals, &shown_holes);
+//RS             Ok(Methods::url_parts_to_ct(&url))
+//RS         }
+//RS         Syntax::TypedHeadKind::Path => Ok(CtValue::Struct {
+//RS             type_name: Syntax::TYPE_PATH.to_string(),
+//RS             fields: vec![(
+//RS                 "inner".to_string(),
+//RS                 CtValue::Str(typed_text_kernel::jet_typed_path_interpolate(
+//RS                     &literal_refs,
+//RS                     &shown_holes,
+//RS                 )),
+//RS             )],
+//RS         }),
+//RS         Syntax::TypedHeadKind::DateTime => {
+//RS             let text =
+//RS                 typed_text_kernel::jet_typed_datetime_interpolate(&literal_refs, &shown_holes);
+//RS             let parsed = Methods::evaluate_typed_datetime_literal(&text, span)?;
+//RS             match parsed {
+//RS                 CtValue::Present(value) => Ok(*value),
+//RS                 failure => Err(Diagnostic::error(
+//RS                     "E0956",
+//RS                     format!("{name} typed head produced an invalid value"),
+//RS                     match render_typed_hole(&failure) {
+//RS                         Some(text) => format!(
+//RS                             "the typed head parser returned `{text}` after sema validation"
+//RS                         ),
+//RS                         None => "the typed head parser returned an unrenderable value after sema validation".to_string(),
+//RS                     },
+//RS                     "keep the literal skeleton valid and let holes supply only head-safe values".to_string(),
+//RS                     Some(span),
+//RS                 )),
+//RS             }
+//RS         }
+//RS         _ => unreachable!("boundary evaluation validated its descriptor"),
+//RS     }
+//RS }
+//RS 
+//RS /// D-DATA-STATUS1 / #708: the same rows `data.status()` returns, from the one
+//RS /// Prelude kernel — used by `jet inspect dossier data`.
+//RS pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
+//RS     Methods::data_status_rows()
+//RS }
+//RS pub use crate::AST::{CtReport, CtValue};
+//RS /// Preserve the exact value of a source integer literal across the comptime
+//RS /// boundary. The AST's `i64` field is only a lexer fast path; overflowed
+//RS /// literals retain their source spelling in the fourth field.
+//RS pub(crate) fn exact_integer_ct_value(value: i64, raw: Option<&str>) -> CtValue {
+//RS     let Some(raw) = raw else {
+//RS         return CtValue::Int(value);
+//RS     };
+//RS     let Ok(exact) = crate::Numeric::CtBigInt::from_literal(raw) else {
+//RS         return CtValue::Int(value);
+//RS     };
+//RS     match exact.try_i64() {
+//RS         Some(value) => CtValue::Int(value),
+//RS         None => CtValue::BigInt(exact),
+//RS     }
+//RS }
+//RS 
+//RS pub use Purity::{
+//RS     check_build_time_io, walk_calls, walk_expr_nodes_for_validation, walk_identifiers,
+//RS     walk_purity_expr, walk_purity_stmts, walk_purity_stmts_from,
+//RS     walk_stmt_expr_nodes_for_validation, PurityStage,
+//RS };
+//RS pub use Reflect::{
+//RS     build_attribution_info, build_dimension_info, build_distinct_type_info,
+//RS     build_distinct_type_info_with_path, build_effect_info, build_enum_layout_info,
+//RS     build_enum_layout_info_with_engine, build_enum_type_info, build_function_type_info,
+//RS     build_maturity_info, build_movedness_info, build_origin_info, build_origin_option,
+//RS     build_program_info, build_program_info_with_index, build_range_info,
+//RS     build_registered_fact_info, build_registered_fact_infos, build_sendability_info,
+//RS     build_state_infos, build_state_infos_with_graph, build_state_ref, build_state_refs,
+//RS     build_struct_layout_info, build_struct_layout_info_with_engine, build_struct_type_info,
+//RS     build_struct_type_info_with_path, build_struct_type_info_with_path_and_vocabulary,
+//RS     build_struct_type_info_with_path_and_vocabulary_and_engine, build_struct_type_info_with_states,
+//RS     build_unit_scale_provenance_info, build_view_provenance_info, program_reflection_identity,
+//RS     reflect_type_fact_value_with_target_and_graph_and_facts, reflect_type_value,
+//RS     reflect_type_value_with_target, reflect_type_value_with_target_and_graph,
+//RS     reflect_type_value_with_target_and_graph_and_facts, reflected_fact_field,
+//RS     registered_fact_value, ProgramIndexView, ProgramSemanticFacts,
+//RS };
+//RS 
+//RS static REPL_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
+//RS static REPL_RUNTIME_CALL_ACTIVE: AtomicBool = AtomicBool::new(false);
+//RS static REPL_INTERRUPTIBLE_TURN_ACTIVE: AtomicBool = AtomicBool::new(false);
+//RS static REPL_INTERRUPT_WARNING_EMITTED: AtomicBool = AtomicBool::new(false);
+//RS 
+//RS #[cfg(unix)]
+//RS unsafe extern "C" {
+//RS     fn write(fd: i32, bytes: *const u8, len: usize) -> isize;
+//RS }
+//RS 
+//RS /// Reset per-turn interrupt state immediately before raw REPL evaluation.
+//RS pub fn begin_repl_interruptible_turn() {
+//RS     REPL_INTERRUPTIBLE_TURN_ACTIVE.store(true, Ordering::SeqCst);
+//RS     REPL_RUNTIME_CALL_ACTIVE.store(false, Ordering::SeqCst);
+//RS     REPL_INTERRUPT_WARNING_EMITTED.store(false, Ordering::SeqCst);
+//RS     REPL_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+//RS }
+//RS 
+//RS pub fn end_repl_interruptible_turn() {
+//RS     REPL_INTERRUPTIBLE_TURN_ACTIVE.store(false, Ordering::SeqCst);
+//RS     REPL_RUNTIME_CALL_ACTIVE.store(false, Ordering::SeqCst);
+//RS }
+//RS 
+//RS pub fn repl_interruptible_turn_active() -> bool {
+//RS     REPL_INTERRUPTIBLE_TURN_ACTIVE.load(Ordering::SeqCst)
+//RS }
+//RS 
+//RS /// Async-signal-safe Ctrl-C note used by the raw REPL signal handlers.
+//RS pub fn note_repl_interrupt() {
+//RS     REPL_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+//RS }
+//RS 
+//RS pub fn repl_interrupt_count() -> usize {
+//RS     REPL_INTERRUPT_COUNT.load(Ordering::SeqCst)
+//RS }
+//RS 
+//RS pub fn repl_runtime_call_active() -> bool {
+//RS     REPL_RUNTIME_CALL_ACTIVE.load(Ordering::SeqCst)
+//RS }
+//RS 
+//RS /// Async-signal-safe notice for a Ctrl-C received inside a host runtime call.
+//RS pub fn warn_repl_runtime_call_stopping() {
+//RS     if !repl_runtime_call_active() || REPL_INTERRUPT_WARNING_EMITTED.swap(true, Ordering::SeqCst) {
+//RS         return;
+//RS     }
+//RS     #[cfg(unix)]
+//RS     {
+//RS         const MESSAGE: &[u8] =
+//RS             b"\r\nwarning: interrupt requested; waiting for active external I/O to stop\r\n";
+//RS         unsafe {
+//RS             write(2, MESSAGE.as_ptr(), MESSAGE.len());
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct ReplRuntimeCallGuard(bool);
+//RS 
+//RS impl ReplRuntimeCallGuard {
+//RS     fn new(active: bool) -> Self {
+//RS         if active {
+//RS             REPL_RUNTIME_CALL_ACTIVE.store(true, Ordering::SeqCst);
+//RS         }
+//RS         Self(active)
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for ReplRuntimeCallGuard {
+//RS     fn drop(&mut self) {
+//RS         if self.0 {
+//RS             REPL_RUNTIME_CALL_ACTIVE.store(false, Ordering::SeqCst);
+//RS             if !std::thread::panicking() && repl_interrupt_count() > 0 {
+//RS                 std::panic::resume_unwind(Box::new(ReplInterrupted));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS struct ReplInterrupted;
+//RS 
+//RS #[derive(Debug)]
+//RS pub enum ReplStepError {
+//RS     Diagnostic(Diagnostic),
+//RS     Interrupted,
+//RS }
+//RS 
+//RS use Interpreter::{Interp, DEV_FUEL_BUDGET, FUEL_BUDGET};
+//RS use Purity::check_purity;
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub struct ProgramBuildEvaluation {
+//RS     pub plan: Build::BuildPlan,
+//RS     pub comptime_inputs: Vec<crate::AST::ComptimeInput>,
+//RS     pub diagnostics: Vec<Diagnostic>,
+//RS }
+//RS 
+//RS /// Build entry with an explicit policy snapshot. The production driver uses
+//RS /// this seam so policy cannot be bypassed by the comptime bridge.
+//RS pub fn run_build_entry_with_policy(
+//RS     build: &Func,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     error_conversions: &[crate::AST::ErrorConvDef],
+//RS     base_dir: &Path,
+//RS     program: &ProgramInfo,
+//RS     program_value: CtValue,
+//RS     package: &str,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     policy: Build::BuildPolicy,
+//RS ) -> Result<ProgramBuildEvaluation, Diagnostic> {
+//RS     let context =
+//RS         Build::begin_program_build_with_policy_at(package, program_value, policy, base_dir);
+//RS     let mut interp = Interp {
+//RS         funcs,
+//RS         error_conversions,
+//RS         base_dir,
+//RS         fuel: DEV_FUEL_BUDGET,
+//RS         sink: None,
+//RS         checked_nominals: None,
+//RS         core_imports: &program.core_imports,
+//RS         debugger: None,
+//RS         runtime_execution: false,
+//RS         depth: 0,
+//RS         cur_func: "build".to_string(),
+//RS         impure_depth: 0,
+//RS         gates,
+//RS         repl_mode: false,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: None,
+//RS         repl_interruptible: false,
+//RS         embed_inputs: Vec::new(),
+//RS         binding_types: HashMap::new(),
+//RS         globals: &program.globals,
+//RS         methods: &program.methods,
+//RS         structs: &program.structs,
+//RS         computed_fields: &program.computed_fields,
+//RS         distinct_ranges: &program.distinct_ranges,
+//RS         distinct_bases: &program.distinct_bases,
+//RS         migrations: &program.migrations,
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     let mut frame = HashMap::new();
+//RS     frame.insert(build.params[0].name.clone(), context.clone());
+//RS     let (call_result, package_inputs) =
+//RS         with_package_read_context(base_dir, || interp.call_func("build", build, frame));
+//RS     interp.embed_inputs.extend(package_inputs);
+//RS     let returned = match call_result {
+//RS         Ok(value) => value,
+//RS         Err(error) => {
+//RS             Build::abort_program_build(&context);
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     if let CtValue::Failed(CtReport::Told(error)) = &returned {
+//RS         Build::abort_program_build(&context);
+//RS         if let Some(diagnostic) = Build::build_error_diagnostic_from_value(error, build.name_span) {
+//RS             return Err(diagnostic);
+//RS         }
+//RS         let detail = error.jet_show();
+//RS         let (code, what, why, fix) = if let Some(detail) = detail.strip_prefix("E3511: ") {
+//RS             (
+//RS                 "E3511",
+//RS                 detail.to_string(),
+//RS                 "generated source must reach a bounded deterministic order, not loop until quiescent".to_string(),
+//RS                 "break the dependency between these generators or give each generated module one owner".to_string(),
+//RS             )
+//RS         } else {
+//RS             (
+//RS                 "E3502",
+//RS                 format!("`fn build` returned an error: {detail}"),
+//RS                 "the selected root build entry must finish graph construction before any action runs".to_string(),
+//RS                 "fix the failing build operation; use `jet inspect explain-build` to inspect completed graph nodes".to_string(),
+//RS             )
+//RS         };
+//RS         return Err(Diagnostic::error(
+//RS             code,
+//RS             what,
+//RS             why,
+//RS             fix,
+//RS             Some(build.name_span),
+//RS         ));
+//RS     }
+//RS     let (plan, diagnostics) = Build::finish_program_build(&context, &returned)?;
+//RS     Ok(ProgramBuildEvaluation {
+//RS         plan,
+//RS         comptime_inputs: interp.embed_inputs,
+//RS         diagnostics,
+//RS     })
+//RS }
+//RS 
+//RS // An empty core_imports map for paths that don't have `use` declarations.
+//RS static EMPTY_IMPORTS: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
+//RS fn empty_imports() -> &'static HashMap<String, String> {
+//RS     EMPTY_IMPORTS.get_or_init(HashMap::new)
+//RS }
+//RS 
+//RS // c139: empty registries for evaluation contexts that don't thread the
+//RS // whole-program info a `jet dev` run collects (comptime bindings, `derive`
+//RS // bodies, the REPL) — user-method dispatch, computed fields, and
+//RS // distinct-type constructors reached from those contexts still surface their
+//RS // existing E0956 rather than silently no-op-ing.
+//RS static EMPTY_GLOBALS: std::sync::OnceLock<HashMap<String, CtValue>> = std::sync::OnceLock::new();
+//RS fn empty_globals() -> &'static HashMap<String, CtValue> {
+//RS     EMPTY_GLOBALS.get_or_init(HashMap::new)
+//RS }
+//RS static EMPTY_METHODS: std::sync::OnceLock<HashMap<(String, String), &'static Func>> =
+//RS     std::sync::OnceLock::new();
+//RS fn empty_methods() -> &'static HashMap<(String, String), &'static Func> {
+//RS     EMPTY_METHODS.get_or_init(HashMap::new)
+//RS }
+//RS static EMPTY_STRUCTS: std::sync::OnceLock<HashMap<String, &'static StructDef>> =
+//RS     std::sync::OnceLock::new();
+//RS fn empty_structs() -> &'static HashMap<String, &'static StructDef> {
+//RS     EMPTY_STRUCTS.get_or_init(HashMap::new)
+//RS }
+//RS 
+//RS static EMPTY_METHOD_TRAITS: std::sync::OnceLock<HashMap<(String, String), String>> =
+//RS     std::sync::OnceLock::new();
+//RS fn empty_method_traits() -> &'static HashMap<(String, String), String> {
+//RS     EMPTY_METHOD_TRAITS.get_or_init(HashMap::new)
+//RS }
+//RS 
+//RS pub fn render_datatree_for_tir(value: &CtValue) -> String {
+//RS     JSONInterp::render_ordered_datatree(value, false, 0)
+//RS }
+//RS 
+//RS pub fn render_datatree_pretty_for_tir(value: &CtValue) -> String {
+//RS     JSONInterp::render_ordered_datatree(value, true, 0)
+//RS }
+//RS 
+//RS /// TIR typed JSON decode uses the ordered DataTree shape. Dynamic JSON keeps
+//RS /// its BTreeMap shape, so this adapter is separate from `core.encoding.json.parse`.
+//RS pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
+//RS     match JSONInterp::parse_json_typed_ordered(text) {
+//RS         Ok(value) => CtValue::Present(Box::new(value)),
+//RS         Err(error) => CtValue::failed(Box::new(JSONInterp::encoding_error_value(error))),
+//RS     }
+//RS }
+//RS 
+//RS /// TIR typed TOML decode parses with the codec's own parser; a failure is the
+//RS /// canonical `EncodingError` (frame it with [`codec_parse_error_for_tir`]).
+//RS pub fn toml_parse_for_tir(text: &str) -> Result<CtValue, CtValue> {
+//RS     EncodingLite::toml_parse(text)
+//RS }
+//RS 
+//RS /// TIR typed YAML decode; same contract as [`toml_parse_for_tir`].
+//RS pub fn yaml_parse_for_tir(text: &str) -> Result<CtValue, CtValue> {
+//RS     EncodingLite::yaml_parse(text)
+//RS }
+//RS 
+//RS /// TIR/JIT bridge for the text codecs' parse-failure wording. `codec` is the
+//RS /// name as the Prelude writes it — `JSON`, `TOML`, `YAML` — so a typed decode
+//RS /// reports `invalid JSON (line 3): …` on every tier from one implementation.
+//RS pub fn codec_parse_error_for_tir(codec: &str, error: CtValue) -> CtValue {
+//RS     TypedDecode::json_parse_err_to_decode(codec, error)
+//RS }
+//RS 
+//RS /// TIR static-call bridge for shared EncodingLimits / XML safe constructors.
+//RS pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
+//RS     if method != "safe" {
+//RS         return None;
+//RS     }
+//RS     match path {
+//RS         "jet_std::EncodingLimits" => Some(EncodingLite::encoding_limits_safe_value()),
+//RS         "jet_std::XMLLimits" => Some(EncodingLite::xml_safe_limits_value()),
+//RS         "jet_std::XMLParseOptions" => Some(EncodingLite::xml_safe_options_value()),
+//RS         "jet_std::XMLRenderOptions" => Some(EncodingLite::xml_safe_render_options_value()),
+//RS         "jet_std::DataLimits" => Some(DataPipeline::data_limits_safe_value()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS static EMPTY_COMPUTED: std::sync::OnceLock<HashMap<(String, String), &'static Expr>> =
+//RS     std::sync::OnceLock::new();
+//RS fn empty_computed() -> &'static HashMap<(String, String), &'static Expr> {
+//RS     EMPTY_COMPUTED.get_or_init(HashMap::new)
+//RS }
+//RS static EMPTY_DISTINCT: std::sync::OnceLock<HashMap<String, Option<(i64, i64)>>> =
+//RS     std::sync::OnceLock::new();
+//RS fn empty_distinct() -> &'static HashMap<String, Option<(i64, i64)>> {
+//RS     EMPTY_DISTINCT.get_or_init(HashMap::new)
+//RS }
+//RS static EMPTY_DISTINCT_BASES: std::sync::OnceLock<HashMap<String, Type>> =
+//RS     std::sync::OnceLock::new();
+//RS fn empty_distinct_bases() -> &'static HashMap<String, Type> {
+//RS     EMPTY_DISTINCT_BASES.get_or_init(HashMap::new)
+//RS }
+//RS static EMPTY_MIGRATIONS: std::sync::OnceLock<
+//RS     HashMap<String, Vec<&'static crate::AST::MigrationDecl>>,
+//RS > = std::sync::OnceLock::new();
+//RS fn empty_migrations() -> &'static HashMap<String, Vec<&'static crate::AST::MigrationDecl>> {
+//RS     EMPTY_MIGRATIONS.get_or_init(HashMap::new)
+//RS }
+//RS 
+//RS // --- public entry ---------------------------------------------------------
+//RS 
+//RS /// Type-check happens elsewhere (every function body goes through sema);
+//RS /// this checks purity then evaluates `init` to a constant value.
+//RS pub fn evaluate(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     evaluate_with_imports(
+//RS         init,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         &HashMap::new(),
+//RS     )
+//RS }
+//RS 
+//RS /// D-CONF-MODULE1=A: the one closed-value evaluator for settings and generic
+//RS /// module value arguments. Registered facts are folded into value-carrying AST
+//RS /// nodes before the existing fuel-limited evaluator runs, so arithmetic,
+//RS /// bindings, calls, purity, and fuel keep one semantic path.
+//RS pub fn evaluate_closed_value(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     evaluate_closed_value_with_imports_opts_collecting_structs(
+//RS         init,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         &HashMap::new(),
+//RS         jet_foundation::Policy::GateSet::default(),
+//RS         0,
+//RS         &HashMap::new(),
+//RS         empty_methods(),
+//RS         &HashMap::new(),
+//RS         &HashMap::new(),
+//RS         &[],
+//RS         None,
+//RS         &[],
+//RS         build_facts,
+//RS     )
+//RS     .map(|(value, _)| value)
+//RS }
+//RS 
+//RS /// D-CONF-MODULE1=A: the settings evaluator is also the definition-side
+//RS /// comptime evaluator. Source items let the shared fact reader resolve
+//RS /// declaration facts before registration; optional collection arguments
+//RS /// preserve the normal build-time I/O evidence path.
+//RS pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &'a Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS     structs: &HashMap<String, &'a StructDef>,
+//RS     methods: &HashMap<(String, String), &'a Func>,
+//RS     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
+//RS     distinct_bases: &HashMap<String, crate::AST::Type>,
+//RS     unit_families: &[crate::AST::UnitFamilyDef],
+//RS     mutated: Option<&mut HashMap<String, CtValue>>,
+//RS     fact_items: &[crate::AST::Item],
+//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+//RS ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+//RS     let fact_registry = jet_foundation::Facts::FactRegistry::from_state_items(fact_items);
+//RS     evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
+//RS         init,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         core_imports,
+//RS         gates,
+//RS         initial_impure_depth,
+//RS         structs,
+//RS         methods,
+//RS         distinct_ranges,
+//RS         distinct_bases,
+//RS         unit_families,
+//RS         mutated,
+//RS         fact_items,
+//RS         build_facts,
+//RS         &fact_registry,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Evaluate a closed value against the caller's already-registered semantic
+//RS /// facts. Sema uses this variant so nested state rows are never reconstructed
+//RS /// from a parallel source-side lookup. `checked_nominals` carries the module's
+//RS /// imported nominals and the loaded Core and user source modules, so a
+//RS /// fragment calls another module's functions exactly as runtime code does.
+//RS pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &'a Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS     structs: &HashMap<String, &'a StructDef>,
+//RS     methods: &HashMap<(String, String), &'a Func>,
+//RS     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
+//RS     distinct_bases: &HashMap<String, crate::AST::Type>,
+//RS     unit_families: &[crate::AST::UnitFamilyDef],
+//RS     mutated: Option<&mut HashMap<String, CtValue>>,
+//RS     fact_items: &[crate::AST::Item],
+//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+//RS     fact_registry: &jet_foundation::Facts::FactRegistry,
+//RS     checked_nominals: Option<&MirBridge::MirFragmentNominalFacts>,
+//RS ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+//RS     let closed = fold_build_facts(init, fact_items, build_facts, fact_registry);
+//RS     // The checked projection carries every imported nominal, import alias and
+//RS     // loaded source module; the evaluated module's own enum rows come from
+//RS     // its items.
+//RS     let mut nominal_facts = checked_nominals.cloned().unwrap_or_default();
+//RS     for item in fact_items {
+//RS         if let crate::AST::Item::Enum(definition) = item {
+//RS             let mut row = definition.clone();
+//RS             row.methods.clear();
+//RS             row.trait_impls.clear();
+//RS             row.derives.clear();
+//RS             nominal_facts.enums.insert(row.name.clone(), row);
+//RS         }
+//RS     }
+//RS     evaluate_with_imports_opts_collecting_structs_and_methods(
+//RS         &closed,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         &HashMap::new(),
+//RS         core_imports,
+//RS         gates,
+//RS         initial_impure_depth,
+//RS         structs,
+//RS         methods,
+//RS         &item_method_traits(fact_items),
+//RS         distinct_ranges,
+//RS         distinct_bases,
+//RS         unit_families,
+//RS         Some(nominal_facts),
+//RS         mutated,
+//RS     )
+//RS }
+//RS 
+//RS /// The trait each item method implements, keyed like the evaluator's method
+//RS /// table. A fragment lowers a trait method under its trait identity, so a
+//RS /// checked `a == b` (sema's `Comparable.compare` operator hook) finds the same
+//RS /// target it calls at runtime.
+//RS fn item_method_traits(items: &[crate::AST::Item]) -> HashMap<(String, String), String> {
+//RS     let mut traits = HashMap::new();
+//RS     let mut insert = |owner: &str, trait_name: &str, methods: &[Func]| {
+//RS         for method in methods {
+//RS             traits.insert(
+//RS                 (owner.to_string(), method.name.clone()),
+//RS                 trait_name.to_string(),
+//RS             );
+//RS         }
+//RS     };
+//RS     for item in items {
+//RS         match item {
+//RS             crate::AST::Item::Impl(implementation) => {
+//RS                 if let Some(trait_name) = implementation.trait_name.as_deref() {
+//RS                     insert(&implementation.type_name, trait_name, &implementation.methods);
+//RS                 }
+//RS             }
+//RS             crate::AST::Item::Struct(definition) => {
+//RS                 for block in &definition.trait_impls {
+//RS                     insert(&definition.name, &block.trait_name, &block.methods);
+//RS                 }
+//RS             }
+//RS             crate::AST::Item::Enum(definition) => {
+//RS                 for block in &definition.trait_impls {
+//RS                     insert(&definition.name, &block.trait_name, &block.methods);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     traits
+//RS }
+//RS 
+//RS fn fold_build_facts(
+//RS     init: &crate::AST::Expr,
+//RS     fact_items: &[crate::AST::Item],
+//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+//RS     fact_registry: &jet_foundation::Facts::FactRegistry,
+//RS ) -> crate::AST::Expr {
+//RS     let mut closed = init.clone();
+//RS     closed.for_each_expr_mut(|expr| {
+//RS         let Some(value) =
+//RS             Reflect::fact_read_value_with_registry(expr, fact_items, build_facts, fact_registry)
+//RS         else {
+//RS             return;
+//RS         };
+//RS         let span = expr.span();
+//RS         *expr = match build_fact_expr(&value, span) {
+//RS             Some(literal) => literal,
+//RS             None => crate::AST::Expr::ComptimeName {
+//RS                 name: "@fact".to_string(),
+//RS                 span,
+//RS                 value: Some(value),
+//RS             },
+//RS         };
+//RS     });
+//RS     closed
+//RS }
+//RS 
+//RS fn build_fact_expr(value: &CtValue, span: crate::Diagnostics::Span) -> Option<crate::AST::Expr> {
+//RS     Some(match value {
+//RS         CtValue::Bool(value) => crate::AST::Expr::Bool(*value, span),
+//RS         CtValue::Int(value) => crate::AST::Expr::Int(*value, span, None, None),
+//RS         CtValue::BigInt(value) => crate::AST::Expr::Int(
+//RS             0,
+//RS             span,
+//RS             None,
+//RS             Some(value.to_string_rep()),
+//RS         ),
+//RS 
+//RS         CtValue::Float(value) => crate::AST::Expr::Float(value.as_f64(), span, false, None),
+//RS         CtValue::Char(value) => crate::AST::Expr::Char(*value, span),
+//RS         CtValue::Str(value) => {
+//RS             crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value.clone())], span)
+//RS         }
+//RS         CtValue::List(values) => crate::AST::Expr::ListLit(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| build_fact_expr(value, span))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS             span,
+//RS         ),
+//RS         CtValue::Map(values) => crate::AST::Expr::MapLit(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|(key, value)| {
+//RS                     Some((
+//RS                         build_fact_expr(&key.to_value(), span)?,
+//RS                         build_fact_expr(value, span)?,
+//RS                     ))
+//RS                 })
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS             span,
+//RS         ),
+//RS         CtValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if args.is_empty() => crate::AST::Expr::EnumLit {
+//RS             type_name: type_name.clone(),
+//RS             variant: variant.clone(),
+//RS             variant_span: None,
+//RS             args: Vec::new(),
+//RS             leading_dot: false,
+//RS             span,
+//RS         },
+//RS         CtValue::Struct { .. } => crate::AST::Expr::ComptimeName {
+//RS             name: String::new(),
+//RS             span,
+//RS             value: Some(value.clone()),
+//RS         },
+//RS         // Keep the carrier's present side as an AST optional literal so
+//RS         // template interpolation and the comptime evaluator see one typed
+//RS         // value instead of an unresolved `@fact` name.
+//RS         CtValue::Present(value) => {
+//RS             crate::AST::Expr::Present(Box::new(build_fact_expr(value, span)?), span)
+//RS         }
+//RS         // A bare `Absent` expression has no element type until ordinary sema
+//RS         // supplies an expected option. Preserve the reflected clean report in
+//RS         // a typed comptime carrier instead; this also keeps nested option facts
+//RS         // and unprefixed local bindings on their canonical path.
+//RS         CtValue::Failed(crate::AST::CtReport::Clean(_)) => crate::AST::Expr::ComptimeName {
+//RS             name: String::new(),
+//RS             span,
+//RS             value: Some(value.clone()),
+//RS         },
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS /// Like `evaluate` but with module aliases for effect-approved Core calls.
+//RS pub fn evaluate_with_imports(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     evaluate_with_imports_opts(
+//RS         init,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         core_imports,
+//RS         jet_foundation::Policy::GateSet::default(),
+//RS         0,
+//RS     )
+//RS }
+//RS 
+//RS /// Like `evaluate_with_imports` but with the invocation gate set and `initial_impure_depth`
+//RS /// for D-CTEFFECT1. When called from inside a sema `#Impure` block, pass
+//RS /// `initial_impure_depth: 1` (and `impure` allowed in the gate set) so the interpreter
+//RS /// starts with the gate already open for Tier-2 calls.
+//RS pub fn evaluate_with_imports_opts(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     // Only run the purity check when there is no active #Impure gate (i.e.
+//RS     // the expression is not nested inside a `#Impure` block at sema time).
+//RS     // When initial_impure_depth > 0, the gate is active — skip check_purity
+//RS     // so that Tier-2 calls fire E3411 ("gate present, flag absent") instead
+//RS     // of the bare E3401 impurity gate, giving a better fix message.
+//RS     if initial_impure_depth == 0 {
+//RS         check_purity(init, funcs, extern_names)?;
+//RS     }
+//RS     let (value, _) = with_package_read_context(base_dir, || {
+//RS         let mut data_pipeline = DataPipeline::DataPipelineState::default();
+//RS         MirBridge::eval_expr(&mut MirBridge::ExprEvalRequest {
+//RS             data_pipeline: &mut data_pipeline,
+//RS             expr: init,
+//RS             funcs,
+//RS             binding_types: &HashMap::new(),
+//RS             error_conversions: &[],
+//RS             method_traits: empty_method_traits(),
+//RS             methods: empty_methods(),
+//RS             extern_names,
+//RS             base_dir,
+//RS             globals,
+//RS             core_imports,
+//RS             gates,
+//RS             initial_impure_depth,
+//RS             runtime_execution: false,
+//RS             structs: &HashMap::new(),
+//RS             computed_fields: empty_computed(),
+//RS             distinct_ranges: empty_distinct(),
+//RS             distinct_bases: empty_distinct_bases(),
+//RS             unit_families: &[],
+//RS             fuel: FUEL_BUDGET,
+//RS             sink: None,
+//RS             checked_nominals: None,
+//RS             repl_mode: false,
+//RS             repl_grants: &[],
+//RS             repl_authorizer: None,
+//RS             embed_inputs: None,
+//RS             mutated: None,
+//RS         })
+//RS     });
+//RS     value
+//RS }
+//RS 
+//RS /// Like [`evaluate_with_imports_opts`] but also returns the Tier-1 embed
+//RS /// inputs accumulated during evaluation (D-CTEFFECT1). The caller (sema
+//RS /// Checker) drains these into `CompileOutput.comptime_inputs`.
+//RS pub fn evaluate_with_imports_opts_collecting(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS     mutated: Option<&mut HashMap<String, CtValue>>,
+//RS ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+//RS     evaluate_with_imports_opts_collecting_structs(
+//RS         init,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         core_imports,
+//RS         gates,
+//RS         initial_impure_depth,
+//RS         empty_structs(),
+//RS         mutated,
+//RS     )
+//RS }
+//RS 
+//RS /// Whole-item comptime evaluation variant. Codable encoding needs declared
+//RS /// field types so `[U8]` retains byte-string identity after CtValue erasure.
+//RS pub fn evaluate_with_imports_opts_collecting_structs<'a>(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &'a Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS     structs: &HashMap<String, &'a StructDef>,
+//RS     mutated: Option<&mut HashMap<String, CtValue>>,
+//RS ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+//RS     evaluate_with_imports_opts_collecting_structs_and_methods(
+//RS         init,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         &HashMap::new(),
+//RS         core_imports,
+//RS         gates,
+//RS         initial_impure_depth,
+//RS         structs,
+//RS         empty_methods(),
+//RS         empty_method_traits(),
+//RS         &HashMap::new(),
+//RS         &HashMap::new(),
+//RS         &[],
+//RS         None,
+//RS         mutated,
+//RS     )
+//RS }
+//RS fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, &'a Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     binding_types: &HashMap<String, crate::AST::Type>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS     structs: &HashMap<String, &'a StructDef>,
+//RS     methods: &HashMap<(String, String), &'a Func>,
+//RS     method_traits: &HashMap<(String, String), String>,
+//RS     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
+//RS     distinct_bases: &HashMap<String, crate::AST::Type>,
+//RS     unit_families: &[crate::AST::UnitFamilyDef],
+//RS     nominal_facts: Option<MirBridge::MirFragmentNominalFacts>,
+//RS     mutated: Option<&mut HashMap<String, CtValue>>,
+//RS ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+//RS     if initial_impure_depth == 0 {
+//RS         check_purity(init, funcs, extern_names)?;
+//RS     }
+//RS     let mut embed_inputs = Vec::new();
+//RS     let (value, package_inputs) = with_package_read_context(base_dir, || {
+//RS         let mut data_pipeline = DataPipeline::DataPipelineState::default();
+//RS         MirBridge::eval_expr(&mut MirBridge::ExprEvalRequest {
+//RS             data_pipeline: &mut data_pipeline,
+//RS             expr: init,
+//RS             funcs,
+//RS             binding_types,
+//RS             error_conversions: &[],
+//RS             method_traits,
+//RS             methods,
+//RS             extern_names,
+//RS             base_dir,
+//RS             globals,
+//RS             core_imports,
+//RS             gates,
+//RS             initial_impure_depth,
+//RS             runtime_execution: false,
+//RS             structs,
+//RS             computed_fields: empty_computed(),
+//RS             distinct_ranges,
+//RS             distinct_bases,
+//RS             unit_families,
+//RS             fuel: FUEL_BUDGET,
+//RS             sink: None,
+//RS             checked_nominals: nominal_facts,
+//RS             repl_mode: false,
+//RS             repl_grants: &[],
+//RS             repl_authorizer: None,
+//RS             embed_inputs: Some(&mut embed_inputs),
+//RS             mutated,
+//RS         })
+//RS     });
+//RS     embed_inputs.extend(package_inputs);
+//RS     Ok((value?, embed_inputs))
+//RS }
+//RS 
+//RS /// Whole-program dev interpretation (E2-M4 `jet dev`). Runs `main`'s body
+//RS /// with a buffered stdout/stderr sink, reusing the exact same evaluator the
+//RS /// M9.5 comptime path uses — there is no second interpreter. Output bytes are
+//RS /// produced via `CtValue::jet_show()` + `\n`, identical to the compiled
+//RS /// program (the differential battery in `tests/dev.rs` enforces this, I2).
+//RS ///
+//RS /// The canonical MIR caller supplies the checked artifact; this function
+//RS /// simply runs and may itself return E0956 (`unsupported`) when it reaches
+//RS /// a construct the evaluator can't run, or E2202 when the fuel budget is
+//RS /// exhausted.
+//RS /// c139: everything the dev interpreter needs beyond the flat `funcs` map to
+//RS /// run whole programs at parity with the real build — pre-evaluated
+//RS /// top-level `const`/`comptime` bindings, user-method dispatch (`impl`/
+//RS /// in-struct methods and D-MOD2 code-module namespaced calls), D-FIELDPOL1
+//RS /// computed fields, and D-RANGETYPE1/D-DIST1 distinct-type constructors.
+//RS /// Built once per `jet dev` run by `Source/Interpreter.rs::collect_program_info`.
+//RS pub struct ProgramInfo<'a> {
+//RS     pub globals: HashMap<String, CtValue>,
+//RS     pub methods: HashMap<(String, String), &'a Func>,
+//RS     pub structs: HashMap<String, &'a StructDef>,
+//RS     pub enums: HashMap<String, &'a EnumDef>,
+//RS     pub computed_fields: HashMap<(String, String), &'a Expr>,
+//RS     pub distinct_ranges: HashMap<String, Option<(i64, i64)>>,
+//RS     pub distinct_bases: HashMap<String, Type>,
+//RS     pub core_imports: HashMap<String, String>,
+//RS     /// D-CONF-READ1=A: the same pre-sema build snapshot used to fold source
+//RS     /// facts. The dev/build interpreter never probes the host for it.
+//RS     pub build_facts: jet_foundation::Facts::BuildFactSnapshot,
+//RS     /// Card #392 pass 5: `TypeName -> migration { }` blocks (source order) for
+//RS     /// Typed decode's runtime chain-walker (see `Interp::migrations`).
+//RS     pub migrations: HashMap<String, Vec<&'a crate::AST::MigrationDecl>>,
+//RS }
+//RS 
+//RS impl<'a> ProgramInfo<'a> {
+//RS     pub fn empty() -> Self {
+//RS         ProgramInfo {
+//RS             globals: HashMap::new(),
+//RS             methods: HashMap::new(),
+//RS             structs: HashMap::new(),
+//RS             enums: HashMap::new(),
+//RS             computed_fields: HashMap::new(),
+//RS             distinct_ranges: HashMap::new(),
+//RS             distinct_bases: HashMap::new(),
+//RS             core_imports: HashMap::new(),
+//RS             build_facts: jet_foundation::Facts::BuildFactSnapshot::default(),
+//RS             migrations: HashMap::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub fn run_main(
+//RS     main: &Func,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     sink: &mut DevSink,
+//RS     _program: &ProgramInfo,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     // #777: AST tree-walker entry retired — same MirBridge path as REPL/debug.
+//RS     let mut interp = Interp {
+//RS         funcs,
+//RS         error_conversions: &[],
+//RS         base_dir,
+//RS         fuel: DEV_FUEL_BUDGET,
+//RS         sink: Some(sink),
+//RS         checked_nominals: None,
+//RS         core_imports: empty_imports(),
+//RS         debugger: None,
+//RS         runtime_execution: false,
+//RS         depth: 0,
+//RS         cur_func: "main".to_string(),
+//RS         impure_depth: 0,
+//RS         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
+//RS         repl_mode: false,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: None,
+//RS         repl_interruptible: false,
+//RS         embed_inputs: Vec::new(),
+//RS         binding_types: HashMap::new(),
+//RS         globals: empty_globals(),
+//RS         methods: empty_methods(),
+//RS         structs: empty_structs(),
+//RS         computed_fields: empty_computed(),
+//RS         distinct_ranges: empty_distinct(),
+//RS         distinct_bases: empty_distinct_bases(),
+//RS         migrations: empty_migrations(),
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     let mut scope = HashMap::new();
+//RS     match interp.exec_block(&main.body, &mut scope)? {
+//RS         Interpreter::Flow::Return(v) => Ok(v),
+//RS         _ => Ok(CtValue::Unit),
+//RS     }
+//RS }
+//RS 
+//RS /// D-DBG3: whole-program interpretation under the source-level debugger.
+//RS /// Uses the same evaluator and buffered sink as [`run_main`], with a
+//RS /// [`DebugHook`] attached and the runtime effect scope kept open: the driver
+//RS /// is notified before every statement and may pause to run its `(jet)` prompt.
+//RS /// The driver shows only Jet lines/locals — it never sees generated Rust.
+//RS /// Returns the same E2202 (fuel) / E0956 (unsupported) stops, plus any abort
+//RS /// the driver raises (e.g. the user typed `quit`, surfaced as E2204).
+//RS pub fn run_main_debug(
+//RS     main: &Func,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     core_imports: &HashMap<String, String>,
+//RS     sink: &mut DevSink,
+//RS     debugger: &mut dyn DebugHook,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let mut interp = Interp {
+//RS         funcs,
+//RS         error_conversions: &[],
+//RS         base_dir,
+//RS         fuel: DEV_FUEL_BUDGET,
+//RS         sink: Some(sink),
+//RS         checked_nominals: None,
+//RS         core_imports,
+//RS         debugger: Some(debugger),
+//RS         runtime_execution: true,
+//RS         depth: 0,
+//RS         cur_func: "main".to_string(),
+//RS         // Runtime provenance is carried explicitly to the canonical evaluator;
+//RS         // comptime gate depth stays closed in this producer.
+//RS         impure_depth: 0,
+//RS         gates: jet_foundation::Policy::GateSet::default(),
+//RS         repl_mode: false,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: None,
+//RS         repl_interruptible: false,
+//RS         embed_inputs: Vec::new(),
+//RS         binding_types: HashMap::new(),
+//RS         globals: empty_globals(),
+//RS         methods: empty_methods(),
+//RS         structs: empty_structs(),
+//RS         computed_fields: empty_computed(),
+//RS         distinct_ranges: empty_distinct(),
+//RS         distinct_bases: empty_distinct_bases(),
+//RS         migrations: empty_migrations(),
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     let mut scope = HashMap::new();
+//RS     // Keep the whole function in one canonical TIR evaluation. The evaluator
+//RS     // now owns every source-statement boundary, including nested calls and
+//RS     // loop edges, so splitting the block would change program state.
+//RS     match interp.exec_block(&main.body, &mut scope)? {
+//RS         Interpreter::Flow::Return(_) => return Ok(()),
+//RS         Interpreter::Flow::Normal
+//RS         | Interpreter::Flow::Break
+//RS         | Interpreter::Flow::Continue
+//RS         | Interpreter::Flow::BreakLabel(_)
+//RS         | Interpreter::Flow::ContinueLabel(_) => {}
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// REPL variant of `run_main`: uses a caller-supplied fuel cap so the REPL
+//RS /// can enforce D-REPL-FUEL without patching DEV_FUEL_BUDGET. Returns the
+//RS /// same E2202 (dev fuel stop) or E0956 (unsupported) errors; the REPL
+//RS /// intercepts E2202 and upgrades it to E1801 with REPL-specific wording.
+//RS pub fn run_main_with_fuel(
+//RS     main: &Func,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     sink: &mut DevSink,
+//RS     fuel: u64,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let mut interp = Interp {
+//RS         funcs,
+//RS         error_conversions: &[],
+//RS         base_dir,
+//RS         fuel,
+//RS         sink: Some(sink),
+//RS         checked_nominals: None,
+//RS         core_imports: empty_imports(),
+//RS         debugger: None,
+//RS         runtime_execution: true,
+//RS         depth: 0,
+//RS         cur_func: "main".to_string(),
+//RS         impure_depth: 0,
+//RS         gates: jet_foundation::Policy::GateSet::default(),
+//RS         repl_mode: false,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: None,
+//RS         repl_interruptible: false,
+//RS         embed_inputs: Vec::new(),
+//RS         binding_types: HashMap::new(),
+//RS         globals: empty_globals(),
+//RS         methods: empty_methods(),
+//RS         structs: empty_structs(),
+//RS         computed_fields: empty_computed(),
+//RS         distinct_ranges: empty_distinct(),
+//RS         distinct_bases: empty_distinct_bases(),
+//RS         migrations: empty_migrations(),
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     let mut scope = HashMap::new();
+//RS     interp.exec_block(&main.body, &mut scope)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// REPL `:run` transcript path: like `run_main_with_fuel` but with the REPL
+//RS /// sandbox (Tier-2 I/O, accumulated `core_imports`) so materialized sessions
+//RS /// replay the same semantics as interactive inputs.
+//RS pub fn run_repl_main_with_fuel<'a>(
+//RS     main: &Func,
+//RS     funcs: &HashMap<String, &'a Func>,
+//RS     base_dir: &Path,
+//RS     sink: &mut DevSink,
+//RS     fuel: u64,
+//RS     core_imports: &HashMap<String, String>,
+//RS     methods: &HashMap<(String, String), &'a Func>,
+//RS     structs: &HashMap<String, &'a StructDef>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let mut interp = Interp {
+//RS         funcs,
+//RS         error_conversions: &[],
+//RS         base_dir,
+//RS         fuel,
+//RS         sink: Some(sink),
+//RS         checked_nominals: None,
+//RS         core_imports,
+//RS         debugger: None,
+//RS         runtime_execution: true,
+//RS         depth: 0,
+//RS         cur_func: "main".to_string(),
+//RS         impure_depth: 1,
+//RS         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
+//RS         repl_mode: true,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: None,
+//RS         repl_interruptible: false,
+//RS         embed_inputs: Vec::new(),
+//RS         binding_types: HashMap::new(),
+//RS         globals: empty_globals(),
+//RS         // `:run` replays an accumulated session, so it must see the session's
+//RS         // own methods and structs. These were hardcoded empty, which is why a
+//RS         // method call resolved interactively died on replay.
+//RS         methods,
+//RS         structs,
+//RS         computed_fields: empty_computed(),
+//RS         distinct_ranges: empty_distinct(),
+//RS         distinct_bases: empty_distinct_bases(),
+//RS         migrations: empty_migrations(),
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     let mut scope = HashMap::new();
+//RS     interp.exec_block(&main.body, &mut scope)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// REPL per-input step (E2-M18). Executes `stmts` inside a running REPL
+//RS /// session. Differs from `run_main_with_fuel` in two ways:
+//RS ///
+//RS /// 1. The scope is passed in *and mutated* — accumulated bindings survive
+//RS ///    across inputs (D-REPL7: one accumulating module).
+//RS /// 2. If the last statement is a bare `Stmt::Expr` (not `Stmt::Val`), the
+//RS ///    evaluated value is returned so the caller can display
+//RS ///    `x: T = v` (D-REPL16=B).
+//RS ///
+//RS /// The `suppress` flag implements `;` at end of input — the caller strips the
+//RS /// trailing `;` to detect a bare expression and passes `suppress = false`; a
+//RS /// statement ending in `;` passes `suppress = true`.
+//RS ///
+//RS /// D-META-EFFECT1: `core_imports` maps alias → Core module path (e.g. `"math"`
+//RS /// → `"core.math"`) from the session's accumulated `use` declarations, so
+//RS /// effect-approved implemented Core calls (e.g. `math.sqrt(16.0)`) execute
+//RS /// inline instead of raising E0956. Pass `&HashMap::new()` when no imports
+//RS /// are active.
+//RS pub fn run_repl_step(
+//RS     stmts: &[crate::AST::Stmt],
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     sink: &mut DevSink,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     fuel: u64,
+//RS     suppress: bool,
+//RS     core_imports: &HashMap<String, String>,
+//RS     structs: &HashMap<String, &StructDef>,
+//RS     binding_types: &HashMap<String, Type>,
+//RS     authorizer: &mut dyn ReplAuthorizer,
+//RS ) -> Result<Option<CtValue>, Diagnostic> {
+//RS     match run_repl_step_inner(
+//RS         stmts,
+//RS         funcs,
+//RS         base_dir,
+//RS         sink,
+//RS         scope,
+//RS         fuel,
+//RS         suppress,
+//RS         core_imports,
+//RS         structs,
+//RS         binding_types,
+//RS         authorizer,
+//RS         false,
+//RS     ) {
+//RS         Ok(value) => Ok(value),
+//RS         Err(ReplStepError::Diagnostic(d)) => Err(d),
+//RS         Err(ReplStepError::Interrupted) => unreachable!("non-interruptible REPL step interrupted"),
+//RS     }
+//RS }
+//RS 
+//RS /// Raw interactive variant. Ctrl-C is polled at every interpreter burn and
+//RS /// returned as control flow, not rendered as a compiler diagnostic.
+//RS pub fn run_repl_step_interruptible(
+//RS     stmts: &[crate::AST::Stmt],
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     sink: &mut DevSink,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     fuel: u64,
+//RS     suppress: bool,
+//RS     core_imports: &HashMap<String, String>,
+//RS     structs: &HashMap<String, &StructDef>,
+//RS     binding_types: &HashMap<String, Type>,
+//RS     authorizer: &mut dyn ReplAuthorizer,
+//RS ) -> Result<Option<CtValue>, ReplStepError> {
+//RS     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS         run_repl_step_inner(
+//RS             stmts,
+//RS             funcs,
+//RS             base_dir,
+//RS             sink,
+//RS             scope,
+//RS             fuel,
+//RS             suppress,
+//RS             core_imports,
+//RS             structs,
+//RS             binding_types,
+//RS             authorizer,
+//RS             true,
+//RS         )
+//RS     }));
+//RS     match result {
+//RS         Ok(result) => result,
+//RS         Err(payload) if payload.is::<ReplInterrupted>() => Err(ReplStepError::Interrupted),
+//RS         Err(payload) => std::panic::resume_unwind(payload),
+//RS     }
+//RS }
+//RS 
+//RS fn run_repl_step_inner(
+//RS     stmts: &[crate::AST::Stmt],
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     sink: &mut DevSink,
+//RS     scope: &mut HashMap<String, CtValue>,
+//RS     fuel: u64,
+//RS     suppress: bool,
+//RS     core_imports: &HashMap<String, String>,
+//RS     structs: &HashMap<String, &StructDef>,
+//RS     binding_types: &HashMap<String, Type>,
+//RS     authorizer: &mut dyn ReplAuthorizer,
+//RS     interruptible: bool,
+//RS ) -> Result<Option<CtValue>, ReplStepError> {
+//RS     let mut interp = Interp {
+//RS         funcs,
+//RS         error_conversions: &[],
+//RS         base_dir,
+//RS         fuel,
+//RS         sink: Some(sink),
+//RS         checked_nominals: None,
+//RS         core_imports,
+//RS         debugger: None,
+//RS         runtime_execution: false,
+//RS         depth: 0,
+//RS         cur_func: "main".to_string(),
+//RS         // D-REPLCOREEFFECT1=A: only a lexical `#FX` opens this depth.
+//RS         impure_depth: 0,
+//RS         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
+//RS         repl_mode: true,
+//RS         repl_grants: Vec::new(),
+//RS         repl_authorizer: Some(authorizer),
+//RS         repl_interruptible: interruptible,
+//RS         embed_inputs: Vec::new(),
+//RS         // Fresh Interp per turn — seed prior binding types so empty
+//RS         // `data.table`/`data.schema` can still read `Table<T>` / `[T]`.
+//RS         binding_types: binding_types.clone(),
+//RS         globals: empty_globals(),
+//RS         methods: empty_methods(),
+//RS         structs,
+//RS         computed_fields: empty_computed(),
+//RS         distinct_ranges: empty_distinct(),
+//RS         distinct_bases: empty_distinct_bases(),
+//RS         migrations: empty_migrations(),
+//RS         list_write_windows: HashMap::new(),
+//RS         data_pipeline: DataPipeline::DataPipelineState::default(),
+//RS     };
+//RS     // Split: run all statements except the last; then handle the last specially
+//RS     // if it is a bare expression (for display) and not suppressed.
+//RS     let (last, head) = match stmts.split_last() {
+//RS         Some(pair) => pair,
+//RS         None => return Ok(None),
+//RS     };
+//RS     interp
+//RS         .exec_block(head, scope)
+//RS         .map_err(ReplStepError::Diagnostic)?;
+//RS     // Determine if the last statement should produce an echo value.
+//RS     // Case 1: `Stmt::Val` named `__repl_echo__` — the sentinel that `classify`
+//RS     //   injects for bare-expression inputs (e.g. `1 + 2` → `__repl_echo__ :: 1 + 2`).
+//RS     //   Evaluate but don't add to the persistent scope.
+//RS     // Case 2: bare `Stmt::Expr` — retained for forward-compat.
+//RS     let echo_bare = !suppress && matches!(last, crate::AST::Stmt::Expr(_));
+//RS     match last {
+//RS         crate::AST::Stmt::Val(b) if !suppress && b.name == "__repl_echo__" => {
+//RS             let v = interp
+//RS                 .eval(&b.init, scope)
+//RS                 .map_err(ReplStepError::Diagnostic)?;
+//RS             Ok(Some(v))
+//RS         }
+//RS         crate::AST::Stmt::Val(b) => {
+//RS             let v = interp
+//RS                 .eval(&b.init, scope)
+//RS                 .map_err(ReplStepError::Diagnostic)?;
+//RS             if let Some(pat) = &b.pattern {
+//RS                 interp
+//RS                     .bind_pattern(pat, v, scope)
+//RS                     .map_err(ReplStepError::Diagnostic)?;
+//RS             } else {
+//RS                 scope.insert(b.name.clone(), v);
+//RS             }
+//RS             Ok(None)
+//RS         }
+//RS         crate::AST::Stmt::Expr(e) if echo_bare => {
+//RS             let v = interp.eval(e, scope).map_err(ReplStepError::Diagnostic)?;
+//RS             Ok(Some(v))
+//RS         }
+//RS         other => {
+//RS             interp
+//RS                 .exec_stmt(other, scope)
+//RS                 .map_err(ReplStepError::Diagnostic)?;
+//RS             Ok(None)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): run an `@ { … }` block at
+//RS /// build time. Purity-checked (E3401) then tree-walked with fuel cap (E0952).
+//RS /// Pure path only (Stage A); effect tiers wire in c157 (D-CTEFFECT1).
+//RS pub fn run_block_with_imports(
+//RS     stmts: &[crate::AST::Stmt],
+//RS     funcs: &HashMap<String, Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS ) -> Result<HashMap<String, CtValue>, Diagnostic> {
+//RS     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
+//RS     Purity::check_purity_stmts(stmts, &refs, extern_names)?;
+//RS     let (result, _) = with_package_read_context(base_dir, || {
+//RS         let mut data_pipeline = DataPipeline::DataPipelineState::default();
+//RS         MirBridge::eval_block(&mut MirBridge::BlockEvalRequest {
+//RS             data_pipeline: &mut data_pipeline,
+//RS             stmts,
+//RS             funcs: &refs,
+//RS             binding_types: &HashMap::new(),
+//RS             error_conversions: &[],
+//RS             method_traits: empty_method_traits(),
+//RS             methods: empty_methods(),
+//RS             extern_names,
+//RS             base_dir,
+//RS             globals,
+//RS             core_imports,
+//RS             structs: &HashMap::new(),
+//RS             computed_fields: empty_computed(),
+//RS             distinct_ranges: empty_distinct(),
+//RS             distinct_bases: empty_distinct_bases(),
+//RS             unit_families: &[],
+//RS             fuel: FUEL_BUDGET,
+//RS             sink: None,
+//RS             checked_nominals: None,
+//RS             repl_mode: false,
+//RS             repl_authorizer: None,
+//RS             gates: jet_foundation::Policy::GateSet::default(),
+//RS             impure_depth: 0,
+//RS             runtime_execution: false,
+//RS             debugger: None,
+//RS             debug_function: String::new(),
+//RS             debug_depth: 0,
+//RS             embed_inputs: None,
+//RS         })
+//RS     });
+//RS     match result? {
+//RS         MirBridge::StmtOutcome::Done(scope) => Ok(scope),
+//RS         MirBridge::StmtOutcome::Returned { scope, .. } => Ok(scope),
+//RS     }
+//RS }
+//RS 
+//RS /// Add the functions `init` names directly to `roots`; pair with
+//RS /// [`reachable_owned_function_closure`].
+//RS ///
+//RS /// Sema uses this read-only projection to stage only function bodies that a
+//RS /// mandatory comptime construct can execute. The projection performs no
+//RS /// evaluation and therefore does not change optional-fold work or fuel policy.
+//RS pub fn reachable_owned_function_roots<F: std::borrow::Borrow<Func>>(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, F>,
+//RS     roots: &mut std::collections::HashSet<String>,
+//RS ) {
+//RS     Purity::reachable_func_roots(init, funcs, roots)
+//RS }
+//RS 
+//RS /// The canonical call closure used by owned comptime evaluation: `roots` and
+//RS /// every function they reach. One closure over many roots equals the union of
+//RS /// each root's closure.
+//RS pub fn reachable_owned_function_closure<F: std::borrow::Borrow<Func>>(
+//RS     roots: std::collections::HashSet<String>,
+//RS     funcs: &HashMap<String, F>,
+//RS ) -> std::collections::HashSet<String> {
+//RS     Purity::reachable_func_closure(roots, funcs)
+//RS }
+//RS 
+//RS /// Owned-function variant used while sema is mutating function bodies for
+//RS /// local `comptime` bindings. The cloned function map is a snapshot of the
+//RS /// already-parsed program; the interpreter still sees ordinary Jet AST.
+//RS pub fn evaluate_owned(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     evaluate_owned_with_imports(
+//RS         init,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         &HashMap::new(),
+//RS     )
+//RS }
+//RS 
+//RS /// Like `evaluate_owned` but with module aliases for effect-approved Core calls.
+//RS pub fn evaluate_owned_with_imports(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     evaluate_owned_with_imports_opts(
+//RS         init,
+//RS         funcs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         core_imports,
+//RS         jet_foundation::Policy::GateSet::default(),
+//RS         0,
+//RS     )
+//RS }
+//RS 
+//RS /// Like `evaluate_owned_with_imports` but with D-CTEFFECT1 `gates` flag
+//RS /// and `initial_impure_depth`. Pass `initial_impure_depth: 1` when evaluating a
+//RS /// comptime binding inside a `#Impure` block so the interpreter starts with the
+//RS /// gate already open for Tier-2 calls.
+//RS pub fn evaluate_owned_with_imports_opts(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let reachable = Purity::reachable_owned_funcs(init, funcs);
+//RS     let refs: HashMap<String, &Func> = reachable
+//RS         .iter()
+//RS         .map(|(name, function)| (name.clone(), function))
+//RS         .collect();
+//RS     evaluate_with_imports_opts(
+//RS         init,
+//RS         &refs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         core_imports,
+//RS         gates,
+//RS         initial_impure_depth,
+//RS     )
+//RS }
+//RS 
+//RS /// Like [`evaluate_owned_with_imports_opts`] but also returns Tier-1 embed
+//RS /// inputs (D-CTEFFECT1). Used by the sema Checker to collect embed hashes.
+//RS pub fn evaluate_owned_with_imports_opts_collecting(
+//RS     init: &crate::AST::Expr,
+//RS     funcs: &HashMap<String, Func>,
+//RS     extern_names: &HashSet<String>,
+//RS     base_dir: &Path,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     core_imports: &HashMap<String, String>,
+//RS     gates: jet_foundation::Policy::GateSet,
+//RS     initial_impure_depth: usize,
+//RS     mutated: Option<&mut HashMap<String, CtValue>>,
+//RS ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+//RS     let reachable = Purity::reachable_owned_funcs(init, funcs);
+//RS     let refs: HashMap<String, &Func> = reachable
+//RS         .iter()
+//RS         .map(|(name, function)| (name.clone(), function))
+//RS         .collect();
+//RS     evaluate_with_imports_opts_collecting(
+//RS         init,
+//RS         &refs,
+//RS         extern_names,
+//RS         base_dir,
+//RS         globals,
+//RS         core_imports,
+//RS         gates,
+//RS         initial_impure_depth,
+//RS         mutated,
+//RS     )
+//RS }
+//RS fn is_serde_codec_trait(trait_name: Option<&str>) -> bool {
+//RS     matches!(
+//RS         trait_name,
+//RS         Some(crate::Generics::ENCODE | crate::Generics::DECODE)
+//RS     )
+//RS }
+//RS 
+//RS fn insert_serde_codec_ref<'a>(
+//RS     funcs: &mut HashMap<String, &'a Func>,
+//RS     owner: &str,
+//RS     method: &'a Func,
+//RS     generated: bool,
+//RS ) {
+//RS     let key = format!("{owner}::{}", method.name);
+//RS     if generated {
+//RS         funcs.entry(key).or_insert(method);
+//RS     } else {
+//RS         funcs.insert(key, method);
+//RS     }
+//RS }
+//RS 
+//RS /// Add one source method to the evaluator's item context. Serde methods enter
+//RS /// both lookup tables: the AST evaluator resolves them by receiver, while the
+//RS /// TIR bridge uses the owner-qualified key to preserve the trait ABI.
+//RS fn insert_item_method_ref<'a>(
+//RS     funcs: &mut HashMap<String, &'a Func>,
+//RS     methods: &mut HashMap<(String, String), &'a Func>,
+//RS     owner: &str,
+//RS     trait_name: Option<&str>,
+//RS     method: &'a Func,
+//RS     generated: bool,
+//RS ) {
+//RS     let method_key = (owner.to_string(), method.name.clone());
+//RS     if is_serde_codec_trait(trait_name) {
+//RS         insert_serde_codec_ref(funcs, owner, method, generated);
+//RS         if generated {
+//RS             methods.entry(method_key).or_insert(method);
+//RS         } else {
+//RS             methods.insert(method_key, method);
+//RS         }
+//RS     } else {
+//RS         methods.insert(method_key, method);
+// END-PORT-PENDING 2062 crates/jet-comptime/src/Comptime/mod.rs:1-1800
+

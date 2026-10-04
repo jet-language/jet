@@ -1,2211 +1,742 @@
-// PORT-PENDING 0058 crates-jet-foundation-src-collections-slice-1808: crates/jet-foundation/src/Collections.rs:1808-4014
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn result_method_return(ok: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("partial", 0) => Some(Some(Type::Option(Box::new(ok.clone())))),
-//RS         ("notes", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("len", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("clear", 0) => Some(None),
-//RS         ("add" | "replace", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
-//RS         ("try_insert", 2) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Option(Box::new(value.clone()))),
-//RS             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
-//RS         })),
-//RS         ("add_new", 2) => Some(Some(Type::Bool)),
-//RS         ("setdefault", 2) => Some(Some(value.clone())),
-//RS         ("get" | "remove" | "pop", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
-//RS         ("has_key", 1) => Some(Some(Type::Bool)),
-//RS         ("contains_value", 1) => Some(Some(Type::Bool)),
-//RS         ("pop_first", 0) => Some(Some(Type::Option(Box::new(value.clone())))),
-//RS         // D-LISTREMOVE1/F: map projections are lazy Iter views, not eager copies.
-//RS         ("keys", 0) => Some(Some(iter_ty(key.clone()))),
-//RS         ("values", 0) => Some(Some(iter_ty(value.clone()))),
-//RS         // D-MAP-MERGE1=E: merge(other) / merge(other, conflict) → same map type.
-//RS         ("merge", 1 | 2) => Some(Some(Type::Map {
-//RS             key: Box::new(key.clone()),
-//RS             key_span: None,
-//RS             value: Box::new(value.clone()),
-//RS         })),
-//RS         ("update", 1) => Some(None),
-//RS         ("each", 1) => Some(None),
-//RS         // #1477: remaining Map ledger surface.
-//RS         ("copy", 0) => Some(Some(Type::Map {
-//RS             key: Box::new(key.clone()),
-//RS             key_span: None,
-//RS             value: Box::new(value.clone()),
-//RS         })),
-//RS         ("equal", 1) => Some(Some(Type::Bool)),
-//RS         ("first", 0) => Some(Some(Type::Option(Box::new(key.clone())))),
-//RS         ("to_list" | "items", 0) => Some(Some(Type::List(Box::new(Type::Tuple(vec![
-//RS             ("key".to_string(), Box::new(key.clone())),
-//RS             ("value".to_string(), Box::new(value.clone())),
-//RS         ]))))),
-//RS         ("top_n", 1) => Some(Some(Type::List(Box::new(Type::Tuple(vec![
-//RS             ("key".to_string(), Box::new(key.clone())),
-//RS             ("value".to_string(), Box::new(value.clone())),
-//RS         ]))))),
-//RS         ("any" | "all", 1) => Some(Some(Type::Bool)),
-//RS         ("map", 1) => Some(Some(Type::Map {
-//RS             key: Box::new(key.clone()),
-//RS             key_span: None,
-//RS             value: Box::new(Type::Int),
-//RS         })),
-//RS         ("filter" | "flat_map" | "intersection", 1) => Some(Some(Type::Map {
-//RS             key: Box::new(key.clone()),
-//RS             key_span: None,
-//RS             value: Box::new(value.clone()),
-//RS         })),
-//RS         ("fold", 2) => Some(Some(Type::Int)),
-//RS         ("max" | "min", 0) => Some(Some(Type::Option(Box::new(value.clone())))),
-//RS         ("slice", 1) => Some(Some(Type::Map {
-//RS             key: Box::new(key.clone()),
-//RS             key_span: None,
-//RS             value: Box::new(value.clone()),
-//RS         })),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("len", 0) => Some(Some(Type::Int)),
-//RS         ("count_bytes", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("try_push", 1) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Named("Unit".to_string())),
-//RS             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
-//RS         })),
-//RS         (
-//RS             "contains" | "starts_with" | "ends_with" | "startswith" | "endswith",
-//RS             1,
-//RS         ) => Some(Some(Type::Bool)),
-//RS         (
-//RS             "trim"
-//RS                 | "trim_start"
-//RS                 | "trim_end"
-//RS                 | "to_upper"
-//RS                 | "to_lower"
-//RS                 | "to_ascii_lower"
-//RS                 | "to_ascii_upper"
-//RS                 | "to_title"
-//RS                 | "to_string"
-//RS                 | "lower"
-//RS                 | "upper"
-//RS                 | "title"
-//RS                 | "casefold",
-//RS             0,
-//RS         ) => Some(Some(Type::String)),
-//RS         (
-//RS             "is_alphabetic"
-//RS                 | "is_numeric"
-//RS                 | "is_whitespace"
-//RS                 | "is_ascii"
-//RS                 | "isalnum"
-//RS                 | "isalpha"
-//RS                 | "isascii"
-//RS                 | "isdecimal"
-//RS                 | "isdigit"
-//RS                 | "isidentifier"
-//RS                 | "is_lower"
-//RS                 | "islower"
-//RS                 | "isnumeric"
-//RS                 | "isprintable"
-//RS                 | "isspace"
-//RS                 | "istitle"
-//RS                 | "is_upper"
-//RS                 | "isupper",
-//RS             0,
-//RS         ) => Some(Some(Type::Bool)),
-//RS         (
-//RS             "capitalize" | "swapcase" | "copy" | "reverse" | "normalize",
-//RS             0,
-//RS         ) => Some(Some(Type::String)),
-//RS         ("removeprefix" | "removesuffix", 1) => Some(Some(Type::String)),
-//RS         ("center" | "ljust" | "rjust", 2) => Some(Some(Type::String)),
-//RS         ("zfill", 1) => Some(Some(Type::String)),
-//RS         ("strip" | "lstrip" | "rstrip", 0) => Some(Some(Type::String)),
-//RS         ("expandtabs", 1) => Some(Some(Type::String)),
-//RS         ("find" | "rfind", 1) => Some(Some(Type::Int)),
-//RS         ("rindex", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
-//RS         ("partition" | "rpartition", 1) => Some(Some(Type::Tuple(vec![
-//RS             ("head".to_string(), Box::new(Type::String)),
-//RS             ("sep".to_string(), Box::new(Type::String)),
-//RS             ("tail".to_string(), Box::new(Type::String)),
-//RS         ]))),
-//RS         ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
-//RS         ("compare", 1) => Some(Some(Type::Int)),
-//RS         ("equal", 1) => Some(Some(Type::Bool)),
-//RS         ("rsplit", 1) => Some(Some(iter_ty(Type::String))),
-//RS         ("bytes" | "encode", 0) => Some(Some(Type::List(Box::new(u8t())))),
-//RS         ("replace" | "slice", 2) => Some(Some(Type::String)),
-//RS         ("slice", 1) => Some(Some(Type::String)),
-//RS         ("pad_start" | "pad_end", 2) => Some(Some(Type::String)),
-//RS         ("index_of" | "index", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
-//RS         ("count", 1) => Some(Some(Type::Int)),
-//RS         ("split_once" | crate::Syntax::METHOD_CUT_LAST, 1) => Some(Some(Type::Option(Box::new(Type::Tuple(vec![
-//RS             ("before".to_string(), Box::new(Type::String)),
-//RS             ("after".to_string(), Box::new(Type::String)),
-//RS         ]))))),
-//RS         // D-STR-AFTER1: first-occurrence substring split; `sep` absent -> the
-//RS         // whole original string (mirrors `.replace`'s no-match-is-identity).
-//RS         ("after" | "before", 1) => Some(Some(Type::String)),
-//RS         ("split", 1) => Some(Some(iter_ty(Type::String))),
-//RS         // c97/D-STRPARSE1: split text into its lines (mirrors `split`).
-//RS         ("lines" | "splitlines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-//RS         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
-//RS         ("repeat", 1) => Some(Some(Type::String)),
-//RS         // c97/D-STRPARSE1: fallible integer parse. Same `Int !ParseError` result
-//RS         // `Int.parse(s)` returns, so one error type covers text→int.
-//RS         // D-STR-DECLINE1=C: `to_int`/`to_float` are direct String spellings of
-//RS         // the one parse mechanism `Int.parse`/`Float.parse` already run —
-//RS         // same `Int !ParseError` result, reached one call shorter from text.
-//RS         ("parse" | "to_int", 0) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Int),
-//RS             err: Box::new(Type::Named("ParseError".to_string())),
-//RS         })),
-//RS         ("to_float", 0) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Float),
-//RS             err: Box::new(Type::Named("ParseError".to_string())),
-//RS         })),
-//RS         // D-STR-DECLINE1=C: `matches`/`match` route through the one core.regex
-//RS         // engine (`core.regex.compile` + `is_match`/`find`) — same `!String`
-//RS         // bad-pattern error shape `core.regex.compile` already returns.
-//RS         ("matches", 1) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Bool),
-//RS             err: Box::new(Type::String),
-//RS         })),
-//RS         ("match", 1) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Option(Box::new(Type::String))),
-//RS             err: Box::new(Type::String),
-//RS         })),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-DET1: methods on the deterministic injected `Clock` capability.
-//RS /// `clock.now()` reads the clock's current value (ms); `clock.tick(ms)` advances
-//RS /// it by a relative span and returns the new value. Reproducible — the clock
-//RS /// starts from the seed the caller supplied to `Clock.new(seed)` and only moves
-//RS /// via explicit advances.
-//RS ///
-//RS /// D-DET-CAPAPI widens the surface: `clock.advance(to_ms)` sets the clock to an
-//RS /// ABSOLUTE instant (returns the new value); `clock.wait(d: Duration)` advances
-//RS /// by a `Duration` (relative, returns the new value).
-//RS fn clock_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("now", 0) => Some(Some(Type::Int)),
-//RS         ("tick", 1) => Some(Some(Type::Int)),
-//RS         // D-DET-CAPAPI: absolute set + Duration-based advance.
-//RS         ("advance", 1) => Some(Some(Type::Int)),
-//RS         ("wait", 1) => Some(Some(Type::Int)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS /// D-TEST-WORLD1=A: methods on a scoped deterministic execution world.
-//RS fn deterministic_world_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("now", 0) | ("advance", 1) => Some(Some(Type::Int)),
-//RS         ("wait_idle", 0) => Some(None),
-//RS         ("history", 0) => Some(Some(Type::String)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-DET1: methods on the deterministic injected `Rng` capability.
-//RS /// `rng.int(lo, hi)` draws an Int in `[lo, hi]`; `rng.float()` draws a Float in
-//RS /// `[0, 1)`. Reproducible — the stream is fixed by the seed passed to
-//RS /// `random.rng(seed)`, so the same seed yields the same draws on every machine.
-//RS ///
-//RS /// D-DET-CAPAPI/D-RANDOMDIST1 widens the surface to mirror the ambient
-//RS /// `random.*` set: distributions, bytes, sample/weighted choice, and in-place
-//RS /// shuffle. Generic element-aware return types are resolved in the checker
-//RS /// dispatch (Source/Sema/CheckerInfer/calls.rs) — placeholders here keep the
-//RS /// codegen totality path (lower.rs) honest.
-//RS fn rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("int", 2) => Some(Some(Type::Int)),
-//RS         ("float", 0) => Some(Some(Type::Float)),
-//RS         ("float_range", 2) => Some(Some(Type::Float)),
-//RS         // D-DET-CAPAPI: coin draw; D-RANDOMDIST1: probability draw.
-//RS         ("bool", 0) => Some(Some(Type::Bool)),
-//RS         ("bool", 1) => Some(Some(Type::Bool)),
-//RS         ("normal", 2) => Some(Some(Type::Float)),
-//RS         ("exponential", 1) => Some(Some(Type::Float)),
-//RS         ("bytes", 1) => Some(Some(Type::List(Box::new(Type::IntN {
-//RS             signed: false,
-//RS             bits: 8,
-//RS         })))),
-//RS         ("split", 0) => Some(Some(Type::Named(crate::Syntax::RNG_TYPE.to_string()))),
-//RS         // Generic — element type refined in sema. Placeholders (Int) here,
-//RS         // refined by the dispatch.
-//RS         ("pick", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
-//RS         ("weighted_pick", 2) => Some(Some(Type::Option(Box::new(Type::Int)))),
-//RS         ("sample", 2) => Some(Some(Type::List(Box::new(Type::Int)))),
-//RS         ("shuffle", 1) => Some(None),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn history_rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let u64_ty = Type::IntN {
-//RS         signed: false,
-//RS         bits: 64,
-//RS     };
-//RS     match (method, nargs) {
-//RS         ("next_u64", 0) | ("below", 1) => Some(Some(u64_ty)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn fake_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("name" | "email" | "host" | "address", 0) => Some(Some(Type::String)),
-//RS         ("locale", 1) => Some(Some(Type::Named(crate::Syntax::FAKE_TYPE.to_string()))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-SOLVER-LIB1=A: explicit finite solver state. This first Core slice admits
-//RS /// ordinary Bool constraints only; richer domains stay future library work.
-//RS fn solver_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("require", 1) => Some(None),
-//RS         ("failure_count", 0) => Some(Some(Type::Int)),
-//RS         ("status", 0) => Some(Some(Type::String)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-SHAPE-DURATIONCONVERT1=A: one checked whole-unit reader.
-//RS fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         (crate::Syntax::METHOD_DURATION_IN, 1) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Int),
-//RS             err: Box::new(Type::Named(
-//RS                 crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
-//RS             )),
-//RS         })),
-//RS         (crate::Syntax::METHOD_DURATION_IS_ZERO, 0) => Some(Some(Type::Bool)),
-//RS         (crate::Syntax::METHOD_DURATION_TOTAL_SECONDS, 0) => Some(Some(Type::Int)),
-//RS         ("difference", 1) => Some(Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))),
-//RS         ("abs" | "negated", 0) => {
-//RS             Some(Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())))
-//RS         }
-//RS         ("sign", 0) => Some(Some(Type::Int)),
-//RS         ("total_in", 1) => Some(Some(Type::Float)),
-//RS         ("round", 1..=3) => {
-//RS             Some(Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())))
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         // D-CONC-FAIL1=A: every task wait uses the one fallible rail. The
-//RS         // runtime task handle owns the same `TaskFailure` report for joins,
-//RS         // races, and fail-fast group selection.
-//RS         ("join", 0) => Some(Some(Type::Result {
-//RS             ok: Box::new(
-//RS                 args.first()
-//RS                     .cloned()
-//RS                     .unwrap_or_else(|| Type::Named("Unit".to_string())),
-//RS             ),
-//RS             err: Box::new(Type::Named(Syntax::TYPE_TASK_FAILURE.to_string())),
-//RS         })),
-//RS         // D-DETACH1: fire-and-forget — consumes the Task handle, returns unit.
-//RS         (Syntax::TASK_DETACH, 0) => Some(None),
-//RS         // D-COROUTINE1=A: task handle control-plane hooks over the internal coroutine substrate.
-//RS         (Syntax::METHOD_TASK_PAUSE, 0)
-//RS         | (Syntax::METHOD_TASK_PAUSE, 1)
-//RS         | (Syntax::METHOD_TASK_RESUME, 0)
-//RS         | (Syntax::METHOD_TASK_CANCEL, 0) => Some(None),
-//RS         ("trace", 0) => Some(Some(Type::String)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-TUPLE-DESTRUCT1: `Receiver<T>.receive()` — the receive half returned
-//RS /// alongside `Sender<T>` by `channel<T>()`. No `.sender()` method here
-//RS /// (there's no combined "Channel" handle to fetch a sender off of — a second
-//RS /// sender comes from `tx.clone()`, same as any other `Sender<T>`).
-//RS fn receiver_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let t = args.first().cloned().unwrap_or(Type::Int);
-//RS     match (method, nargs) {
-//RS         ("receive", 0) => Some(Some(Type::Result {
-//RS             ok: Box::new(t.clone()),
-//RS             err: Box::new(Type::Named("Closed".to_string())),
-//RS         })),
-//RS         ("try_receive", 0) => Some(Some(Type::Option(Box::new(t)))),
-//RS         ("is_timer", 0)
-//RS         | ("is_interval", 0)
-//RS         | ("is_cancelled", 0)
-//RS         | ("is_ready", 0) => Some(Some(Type::Bool)),
-//RS         ("delay_ms", 0) => Some(Some(Type::Int)),
-//RS         ("close", 0) => Some(None),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn sender_method_return(_args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("send", 1) => Some(None),
-//RS         ("close", 0) => Some(None),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` placeholder gate (see call site note).
-//RS fn pool_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let t = args.first().cloned().unwrap_or(Type::Int);
-//RS     match (method, nargs) {
-//RS         ("add", 1) => Some(Some(Type::Apply {
-//RS             name: "ID".to_string(),
-//RS             args: vec![t],
-//RS         })),
-//RS         ("remove", 1) => Some(Some(Type::Option(Box::new(t)))),
-//RS         ("ids", 0) => Some(Some(Type::List(Box::new(Type::Apply {
-//RS             name: "ID".to_string(),
-//RS             args: vec![t],
-//RS         })))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` placeholder gate (see call site note).
-//RS fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let snapshot = |projection| Type::Apply {
-//RS         name: Syntax::TYPE_SHARED_SNAPSHOT.to_string(),
-//RS         args: vec![inner.clone(), projection],
-//RS     };
-//RS     let revision_error = || Type::Named(Syntax::TYPE_SHARED_REVISION_ERROR.to_string());
-//RS     match (method, nargs) {
-//RS         ("read", 1) | ("edit", 1) => Some(Some(inner.clone())),
-//RS         // D-SHARED-REVISION1=A: the one-argument form is refined by sema
-//RS         // after checking the pure projection's return type.
-//RS         ("capture", 0) => Some(Some(snapshot(inner.clone()))),
-//RS         ("capture", 1) => Some(Some(snapshot(inner.clone()))),
-//RS         ("try_replace", 2) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Bool),
-//RS             err: Box::new(revision_error()),
-//RS         })),
-//RS         ("guard_read", 0) => Some(Some(shared_guard_type(
-//RS             inner.clone(),
-//RS             crate::AST::InternalTag::SharedGuardRead,
-//RS         ))),
-//RS         ("guard_edit", 0) => Some(Some(shared_guard_type(
-//RS             inner.clone(),
-//RS             crate::AST::InternalTag::SharedGuardEdit,
-//RS         ))),
-//RS         // D-SHARED-CYCLE1=C: expert weak edge for intentional cycles.
-//RS         ("downgrade", 0) => Some(Some(Type::Apply {
-//RS             name: Syntax::TYPE_SHARED_WEAK.to_string(),
-//RS             args: vec![inner.clone()],
-//RS         })),
-//RS         ("strong_count", 0) => Some(Some(Type::Int)),
-//RS         // Identity only, like `Rc::ptr_eq`: `==` on `Shared<T>` stays an error.
-//RS         ("same", 1) => Some(Some(Type::Bool)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn shared_snapshot_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs, args) {
-//RS         ("value", 0, [_, projection]) => Some(Some(projection.clone())),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn shared_weak_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("upgrade", 0) => Some(Some(Type::Option(Box::new(Type::Shared(Box::new(
-//RS             inner.clone(),
-//RS         )))))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn shared_guard_type(inner: Type, marker: crate::AST::InternalTag) -> Type {
-//RS     Type::Tagged {
-//RS         marker: crate::AST::TagMarker::Internal(marker),
-//RS         inner: Box::new(Type::Apply {
-//RS             name: Syntax::TYPE_SHARED_GUARD.to_string(),
-//RS             args: vec![inner],
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn shared_guard_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         // Sema refines projection types and reapplies the hidden access tag.
-//RS         ("map", 1) => Some(Some(Type::Apply {
-//RS             name: Syntax::TYPE_SHARED_GUARD.to_string(),
-//RS             args: vec![inner.clone()],
-//RS         })),
-//RS         ("split", 2) => Some(Some(Type::Tuple(vec![
-//RS             (
-//RS                 "first".to_string(),
-//RS                 Box::new(Type::Apply {
-//RS                     name: Syntax::TYPE_SHARED_GUARD.to_string(),
-//RS                     args: vec![inner.clone()],
-//RS                 }),
-//RS             ),
-//RS             (
-//RS                 "second".to_string(),
-//RS                 Box::new(Type::Apply {
-//RS                     name: Syntax::TYPE_SHARED_GUARD.to_string(),
-//RS                     args: vec![inner.clone()],
-//RS                 }),
-//RS             ),
-//RS         ]))),
-//RS         ("wait", 2) => Some(None),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn condition_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("notify_one" | "notify_all", 0) => Some(None),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn cell_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let t = args.first().cloned().unwrap_or(Type::Int);
-//RS     match (method, nargs) {
-//RS         ("get", 0) | ("replace", 1) => Some(Some(t.clone())),
-//RS         ("set", 1) => Some(None),
-//RS         ("get_or_set", 1) => match t {
-//RS             Type::Option(inner) => Some(Some(*inner)),
-//RS             _ => Some(Some(t)),
-//RS         },
-//RS         ("read", 1) | ("edit", 1) => Some(Some(t.clone())),
-//RS         ("guard_read", 0) => Some(Some(Type::Apply {
-//RS             name: "CellReadGuard".to_string(),
-//RS             args: vec![t],
-//RS         })),
-//RS         ("guard_edit", 0) => Some(Some(Type::Apply {
-//RS             name: "CellEditGuard".to_string(),
-//RS             args: vec![t],
-//RS         })),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn cell_guard_method_return(
-//RS     args: &[Type],
-//RS     method: &str,
-//RS     nargs: usize,
-//RS     editable: bool,
-//RS ) -> Option<Option<Type>> {
-//RS     let t = args.first().cloned().unwrap_or(Type::Int);
-//RS     match (method, nargs) {
-//RS         ("get", 0) => Some(Some(t.clone())),
-//RS         ("set", 1) if editable => Some(None),
-//RS         ("read", 1) => Some(Some(t.clone())),
-//RS         ("edit", 1) if editable => Some(Some(t.clone())),
-//RS         ("map", 1) => Some(Some(Type::Apply {
-//RS             name: if editable {
-//RS                 "CellEditGuard".to_string()
-//RS             } else {
-//RS                 "CellReadGuard".to_string()
-//RS             },
-//RS             args: vec![t],
-//RS         })),
-//RS         ("split", 2) => Some(Some(Type::Tuple(vec![
-//RS             (
-//RS                 "first".to_string(),
-//RS                 Box::new(Type::Apply {
-//RS                     name: if editable {
-//RS                         "CellEditGuard".to_string()
-//RS                     } else {
-//RS                         "CellReadGuard".to_string()
-//RS                     },
-//RS                     args: vec![t.clone()],
-//RS                 }),
-//RS             ),
-//RS             (
-//RS                 "second".to_string(),
-//RS                 Box::new(Type::Apply {
-//RS                     name: if editable {
-//RS                         "CellEditGuard".to_string()
-//RS                     } else {
-//RS                         "CellReadGuard".to_string()
-//RS                     },
-//RS                     args: vec![t],
-//RS                 }),
-//RS             ),
-//RS         ]))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-REACT1=B: `Signal<T>` methods. `.get()` reads the current value (and, inside a
-//RS /// derived/effect body, subscribes); `.set(v)` writes a new value and notifies.
-//RS fn signal_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let t = args.first().cloned().unwrap_or(Type::Int);
-//RS     match (method, nargs) {
-//RS         ("get", 0) => Some(Some(t)),
-//RS         ("set", 1) => Some(None),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-REACT1=B: `Derived<T>` methods. `.get()` reads the latest computed value,
-//RS /// recomputing it from its signals when one of them has changed.
-//RS fn derived_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let t = args.first().cloned().unwrap_or(Type::Int);
-//RS     match (method, nargs) {
-//RS         ("get", 0) => Some(Some(t)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn event_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let payload = args.first().cloned().unwrap_or(Type::Int);
-//RS     match (method, nargs) {
-//RS         ("on" | "once", 2) | ("on_priority", 3) => Some(Some(Type::Named(
-//RS             crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
-//RS         ))),
-//RS         ("emit", 1) => Some(Some(Type::Named(
-//RS             crate::Syntax::TYPE_EVENT_TRACE.to_string(),
-//RS         ))),
-//RS         ("trace", 0) => Some(Some(Type::String)),
-//RS         ("listener_count", 0) => Some(Some(Type::Int)),
-//RS         _ => {
-//RS             let _ = payload;
-//RS             None
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn async_event_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let error = args.get(1).cloned().unwrap_or(Type::String);
-//RS     match (method, nargs) {
-//RS         ("on" | "once", 2) | ("on_priority", 3) => Some(Some(Type::Named(
-//RS             crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
-//RS         ))),
-//RS         ("emit_async", 1) => Some(Some(Type::Apply {
-//RS             name: "Task".to_string(),
-//RS             args: vec![Type::Apply {
-//RS                 name: crate::Syntax::TYPE_DISPATCH_REPORT.to_string(),
-//RS                 args: vec![error],
-//RS             }],
-//RS         })),
-//RS         ("close", 0) => Some(None),
-//RS         ("listener_count" | "queued_count" | "running_count" | "blocked_count", 0) => {
-//RS             Some(Some(Type::Int))
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn hook_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let _payload = args.first().cloned().unwrap_or(Type::Int);
-//RS     let result = args.get(1).cloned().unwrap_or(Type::Int);
-//RS     match (method, nargs) {
-//RS         ("on" | "once", 2) | ("on_priority", 3) => Some(Some(Type::Named(
-//RS             crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
-//RS         ))),
-//RS         ("run", 2) => Some(Some(result)),
-//RS         ("trace", 0) => Some(Some(Type::String)),
-//RS         ("listener_count", 0) => Some(Some(Type::Int)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn decision_hook_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let payload = args.first().cloned().unwrap_or(Type::Int);
-//RS     let error = args.get(1).cloned().unwrap_or(Type::String);
-//RS     match (method, nargs) {
-//RS         ("on" | "once", 2) | ("on_priority", 3) => Some(Some(Type::Named(
-//RS             crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
-//RS         ))),
-//RS         ("run", 1) => Some(Some(Type::Apply {
-//RS             name: crate::Syntax::TYPE_HOOK_OUTCOME.to_string(),
-//RS             args: vec![payload, error],
-//RS         })),
-//RS         ("listener_count", 0) => Some(Some(Type::Int)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn subscription_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("unsubscribe", 0) => Some(None),
-//RS         ("is_active", 0) => Some(Some(Type::Bool)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn event_scope_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("cancel", 0) => Some(None),
-//RS         ("active_count", 0) => Some(Some(Type::Int)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn event_trace_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("summary", 0) => Some(Some(Type::String)),
-//RS         ("delivered", 0) | ("queued", 0) | ("dropped", 0) => Some(Some(Type::Int)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn dispatch_report_method_return(
-//RS     args: &[Type],
-//RS     method: &str,
-//RS     nargs: usize,
-//RS ) -> Option<Option<Type>> {
-//RS     let error = args.first().cloned().unwrap_or(Type::String);
-//RS     match (method, nargs) {
-//RS         ("accepted", 0) => Some(Some(Type::Bool)),
-//RS         ("delivered_handlers", 0) => Some(Some(Type::Int)),
-//RS         ("state", 0) => Some(Some(Type::Named(
-//RS             crate::Syntax::TYPE_DISPATCH_STATE.to_string(),
-//RS         ))),
-//RS         ("failures", 0) => Some(Some(Type::List(Box::new(Type::Apply {
-//RS             name: crate::Syntax::TYPE_DISPATCH_FAILURE.to_string(),
-//RS             args: vec![error],
-//RS         })))),
-//RS         ("trace", 0) => Some(Some(Type::Named(
-//RS             crate::Syntax::TYPE_EVENT_TRACE.to_string(),
-//RS         ))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn watch_handle_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("poll", 0) | ("events", 0) => Some(Some(Type::List(Box::new(Type::Named(
-//RS             crate::Syntax::TYPE_WATCH_EVENT.to_string(),
-//RS         ))))),
-//RS         ("on" | "once", 2) => Some(Some(Type::Named(
-//RS             crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
-//RS         ))),
-//RS         ("summary", 0) => Some(Some(Type::String)),
-//RS         ("is_active", 0) => Some(Some(Type::Bool)),
-//RS         ("cancel", 0) => Some(None),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn watch_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("add", 1) => Some(None),
-//RS         ("poll", 0) | ("events", 0) => Some(Some(Type::List(Box::new(Type::Named(
-//RS             crate::Syntax::TYPE_WATCH_EVENT.to_string(),
-//RS         ))))),
-//RS         ("summary", 0) => Some(Some(Type::String)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-COLLBREADTH1=A: `Set<T>` methods (hash-backed unordered set).
-//RS fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let set_of_elem = || Type::Apply {
-//RS         name: "Set".to_string(),
-//RS         args: vec![elem.clone()],
-//RS     };
-//RS     match (method, nargs) {
-//RS         ("len", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("add", 1) => Some(Some(Type::Bool)),
-//RS         ("remove" | "clear", _) => Some(None),
-//RS         ("has", 1) => Some(Some(Type::Bool)),
-//RS         ("union", 1) => Some(Some(set_of_elem())),
-//RS         ("intersection" | "difference" | "symmetric_difference", 1) => Some(Some(set_of_elem())),
-//RS         ("is_subset" | "issubset" | "is_superset" | "issuperset" | "is_disjoint" | "isdisjoint", 1) => Some(Some(Type::Bool)),
-//RS         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
-//RS         // #1478: remaining Set surface (non-closure).
-//RS         ("copy" | "to_set", 0) => Some(Some(set_of_elem())),
-//RS         ("discard" | "update" | "difference_update" | "intersection_update" | "symmetric_difference_update", 1) => Some(None),
-//RS         ("equal", 1) => Some(Some(Type::Bool)),
-//RS         ("capacity", 0) => Some(Some(Type::Int)),
-//RS         ("first", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
-//RS         // #1478: ledger closes on Set's remaining order-agnostic surface.
-//RS         // `values` is the lazy alias of `to_list` (I8, mirrors `Map.values`).
-//RS         ("values", 0) => Some(Some(iter_ty(elem.clone()))),
-//RS         // D-ONCE-VERB1=A: Set.pop/take remove and return a matching value.
-//RS         ("pop" | "take", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
-//RS         // Rust HashSet::replace inserts the value and returns the displaced equal value.
-//RS         ("replace", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
-//RS         ("all", 1) => Some(Some(Type::Bool)),
-//RS         ("each", 1) => Some(None),
-//RS         ("filter", 1) => Some(Some(Type::List(Box::new(elem.clone())))),
-//RS         ("min" | "max", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
-//RS         // `map`/`fold`/`flat_map` placeholders — sema refines from the
-//RS         // closure body's actual return type, same as the List surface.
-//RS         ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
-//RS         ("fold", 2) => Some(Some(Type::Int)),
-//RS         ("flat_map", 1) => Some(Some(iter_ty(Type::Int))),
-//RS         // D-SET-DECLINE1=C: `sort`/`shuffle` turn an unordered Set into an
-//RS         // ordered `List`, the same to-list-then-List machinery `filter`/`map`/
-//RS         // `fold`/`each`/`all`/`min`/`max` already run. Neither mutates the Set.
-//RS         ("sort" | "shuffle", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
-//RS         // #1478: `flatten` declined — E0506 forbids a Set element type that
-//RS         // is itself a List/Set (Set elements must be Hash+Eq), so no legal
-//RS         // `Set<T>` can ever satisfy `flatten`'s nested-container precondition.
-//RS         // `indexof`/`indexed` also declined — a hash Set keeps no stable
-//RS         // position for `index_of`/`indexed` to answer. See the D-SET-DECLINE1
-//RS         // ballot for the full declined-name rationale.
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-ITERTOOLS1=A: `Rank<T>` methods (BTreeSet-backed ordered set).
-//RS fn sorted_set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let set_of_elem = || Type::Apply {
-//RS         name: Syntax::TYPE_RANK.to_string(),
-//RS         args: vec![elem.clone()],
-//RS     };
-//RS     match (method, nargs) {
-//RS         ("len", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("add", 1) => Some(Some(Type::Bool)),
-//RS         ("remove" | "clear", _) => Some(None),
-//RS         ("has", 1) => Some(Some(Type::Bool)),
-//RS         ("union", 1) => Some(Some(set_of_elem())),
-//RS         ("intersection" | "difference" | "symmetric_difference", 1) => Some(Some(set_of_elem())),
-//RS         ("is_subset" | "is_superset" | "is_disjoint", 1) => Some(Some(Type::Bool)),
-//RS         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
-//RS         ("first" | "last", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-ITERTOOLS1=A: `PriorityQueue<T>` methods (BinaryHeap-backed max-heap).
-//RS fn priority_queue_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("len", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("push" | "clear", _) => Some(None),
-//RS         ("pop" | "peek", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
-//RS         // D-LISTREMOVE1/F (criterion c6 on #1481): same value/slot shape as List.remove.
-//RS         ("remove", 1 | 2) => Some(Some(Type::Option(Box::new(elem.clone())))),
-//RS         ("to_sorted_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-ITERTOOLS1=A: `Cache<K,V>` bounded cache methods.
-//RS fn lru_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("len" | "capacity", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("clear", 0) => Some(None),
-//RS         ("add", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
-//RS         ("add_new", 2) => Some(Some(Type::Bool)),
-//RS         ("get" | "remove", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
-//RS         ("has_key", 1) => Some(Some(Type::Bool)),
-//RS         ("keys", 0) => Some(Some(Type::List(Box::new(key.clone())))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-ITERTOOLS1=A: `Bits` methods.
-//RS fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("len" | "count", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("add", 1) => Some(Some(Type::Bool)),
-//RS         ("remove" | "clear", _) => Some(None),
-//RS         ("has", 1) => Some(Some(Type::Bool)),
-//RS         ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Int)))),
-//RS         ("copy", 0) => Some(Some(Type::Named(Syntax::TYPE_BITS.to_string()))),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-ITERTOOLS1=A / #1467: `Bytes` builder + read cursor + string-like.
-//RS fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let bytes = || Type::List(Box::new(u8t()));
-//RS     let buf = || Type::Named(Syntax::TYPE_BYTES.to_string());
-//RS     match (method, nargs) {
-//RS         ("len" | "capacity" | "position", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty" | "eof" | "is_ascii", 0) => Some(Some(Type::Bool)),
-//RS         ("clear" | "rewind" | "flush" | "close" | "shutdown", 0) => Some(None),
-//RS         ("to_bytes" | "get_buffer" | "buffer", 0) => Some(Some(bytes())),
-//RS         ("to_string" | "string", 0) => Some(Some(Type::String)),
-//RS         (
-//RS             "trim" | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
-//RS             | "clone" | "copy",
-//RS             0,
-//RS         ) => Some(Some(buf())),
-//RS         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-//RS         ("first" | "next" | "read_byte", 0) => Some(Some(Type::Option(Box::new(u8t())))),
-//RS         ("read", 0) => Some(Some(Type::Option(Box::new(bytes())))),
-//RS         ("get", 1) => Some(Some(Type::Option(Box::new(u8t())))),
-//RS         ("seek", 1) => Some(None),
-//RS         ("read_bytes", 1) => Some(Some(Type::Option(Box::new(bytes())))),
-//RS         ("read_string", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
-//RS         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
-//RS         ("index_of" | "last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
-//RS         ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
-//RS         ("partition", 1) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::List(Box::new(buf()))),
-//RS             err: Box::new(Type::String),
-//RS         })),
-//RS         ("join", 1) => Some(Some(buf())),
-//RS         ("replace", 2) => Some(Some(buf())),
-//RS         ("equal" | "compare", 1) => Some(Some(if method == "equal" {
-//RS             Type::Bool
-//RS         } else {
-//RS             Type::Int
-//RS         })),
-//RS         ("copy_to" | "write_to", 1) => Some(None),
-//RS         ("parse", 0) => Some(Some(Type::Result {
-//RS             ok: Box::new(Type::Int),
-//RS             err: Box::new(Type::String),
-//RS         })),
-//RS         (
-//RS             "write_u8" | "write_byte" | "write_i8" | "write_u16_le" | "write_u16_be"
-//RS             | "write_i16_le" | "write_i16_be" | "write_u32_le" | "write_u32_be"
-//RS             | "write_i32_le" | "write_i32_be" | "write_u64_le" | "write_u64_be"
-//RS             | "write_i64_le" | "write_i64_be" | "write_f32_le" | "write_f32_be"
-//RS             | "write_f64_le" | "write_f64_be" | "write_bytes" | "write",
-//RS             1,
-//RS         ) => Some(None),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-TAG1: `Tally<T>` methods (counted multiset backed by `HashMap<T, usize>`).
-//RS fn bag_method_return(_elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     match (method, nargs) {
-//RS         ("len", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("add", 1) => Some(Some(Type::Bool)),
-//RS         ("remove", 1) => Some(None),
-//RS         ("has", 1) => Some(Some(Type::Bool)),
-//RS         ("count", 1) => Some(Some(Type::Int)),
-//RS         ("any", 1) => Some(Some(Type::Bool)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-COLLBREADTH1=A: `Queue<T>` methods (ring-buffer double-ended queue).
-//RS fn deque_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-//RS     let deque = || Type::Apply {
-//RS         name: Syntax::TYPE_QUEUE.to_string(),
-//RS         args: vec![elem.clone()],
-//RS     };
-//RS     match (method, nargs) {
-//RS         ("len" | "capacity", 0) => Some(Some(Type::Int)),
-//RS         ("is_empty", 0) => Some(Some(Type::Bool)),
-//RS         ("push_front" | "push_back" | "clear" | "delete" | "reverse", _) => Some(None),
-//RS         ("pop_front" | "pop_back" | "peek_front" | "peek_back", 0) => {
-//RS             Some(Some(Type::Option(Box::new(elem.clone()))))
-//RS         }
-//RS         ("get", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
-//RS         ("contains", 1) => Some(Some(Type::Bool)),
-//RS         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
-//RS         ("join", 1) => Some(Some(Type::String)),
-//RS         ("split", 1) => Some(Some(deque())),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Whether a built-in method mutates its receiver (needs `var` binding).
-//RS pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
-//RS     if let Type::Tagged { inner, .. } = recv_ty {
-//RS         return builtin_method_mutates(inner, method);
-//RS     }
-//RS     match recv_ty {
-//RS         // An ordinary fallible binding exposes its success payload to the
-//RS         // enclosing function. Keep its mutation contract aligned with the
-//RS         // payload table while pre-sema lowering still sees the carrier.
-//RS         Type::Result { ok, .. } => builtin_method_mutates(ok, method),
-//RS         Type::List(_) | Type::FixedList { .. } => matches!(
-//RS             method,
-//RS             "push"
-//RS                 | "append"
-//RS                 | "try_push"
-//RS                 | "try_reserve"
-//RS                 | "pop"
-//RS                 | "insert"
-//RS                 | "remove"
-//RS                 | "extend"
-//RS                 | "reverse"
-//RS                 | "sort"
-//RS                 | "sort_by"
-//RS                 | "sort_desc"
-//RS                 | "sort_by_desc"
-//RS                 | "clear"
-//RS                 | "update_first"
-//RS                 | "split_write"
-//RS                 | "get_disjoint_write"
-//RS                 | "edit_disjoint"
-//RS         ),
-//RS         Type::Map { .. } => matches!(
-//RS             method,
-//RS             "add"
-//RS                 | "replace"
-//RS                 | "try_insert"
-//RS                 | "add_new"
-//RS                 | "setdefault"
-//RS                 | "remove"
-//RS                 | "pop"
-//RS                 | "pop_first"
-//RS                 | "clear"
-//RS                 | "update"
-//RS         ),
-//RS         Type::String => method == "try_push",
-//RS         // D-COLLBREADTH1=A: Set mutating methods.
-//RS         Type::Apply { name, .. } if name == "Set" => {
-//RS             matches!(
-//RS                 method,
-//RS                 "add"
-//RS                     | "remove"
-//RS                     | "discard"
-//RS                     | "update"
-//RS                     | "difference_update"
-//RS                     | "intersection_update"
-//RS                     | "symmetric_difference_update"
-//RS                     | "pop"
-//RS                     | "replace"
-//RS                     | "clear"
-//RS             )
-//RS         }
-//RS         Type::Apply { name, .. } if name == Syntax::TYPE_RANK => {
-//RS             matches!(method, "add" | "remove" | "clear")
-//RS         }
-//RS         Type::Apply { name, .. } if name == Syntax::TYPE_PRIORITY_QUEUE => {
-//RS             matches!(method, "push" | "pop" | "clear")
-//RS         }
-//RS         Type::Apply { name, .. } if name == Syntax::TYPE_LRU => {
-//RS             matches!(method, "add" | "add_new" | "get" | "remove" | "clear")
-//RS         }
-//RS         Type::Named(n) if n == Syntax::TYPE_BITS => {
-//RS             matches!(method, "add" | "remove" | "clear")
-//RS         }
-//RS         Type::Named(n) if n == Syntax::TYPE_BYTES => matches!(
-//RS             method,
-//RS             "write_u8"
-//RS                 | "write_byte"
-//RS                 | "write_i8"
-//RS                 | "write_u16_le"
-//RS                 | "write_u16_be"
-//RS                 | "write_i16_le"
-//RS                 | "write_i16_be"
-//RS                 | "write_u32_le"
-//RS                 | "write_u32_be"
-//RS                 | "write_i32_le"
-//RS                 | "write_i32_be"
-//RS                 | "write_u64_le"
-//RS                 | "write_u64_be"
-//RS                 | "write_i64_le"
-//RS                 | "write_i64_be"
-//RS                 | "write_f32_le"
-//RS                 | "write_f32_be"
-//RS                 | "write_f64_le"
-//RS                 | "write_f64_be"
-//RS                 | "write_bytes"
-//RS                 | "write"
-//RS                 | "write_to"
-//RS                 | "clear"
-//RS                 | "seek"
-//RS                 | "rewind"
-//RS                 | "next"
-//RS                 | "read"
-//RS                 | "read_byte"
-//RS                 | "read_bytes"
-//RS                 | "read_string"
-//RS                 | "flush"
-//RS                 | "close"
-//RS                 | "shutdown"
-//RS                 | "copy_to"
-//RS         ),
-//RS         // D-TAG1: Tally mutating methods.
-//RS         Type::Apply { name, .. } if name == Syntax::TYPE_TALLY => {
-//RS             matches!(method, "add" | "remove" | "clear")
-//RS         }
-//RS         // D-COLLBREADTH1=A: Queue mutating methods.
-//RS         Type::Apply { name, .. } if name == Syntax::TYPE_QUEUE => {
-//RS             matches!(
-//RS                 method,
-//RS                 "push_front"
-//RS                     | "push_back"
-//RS                     | "pop_front"
-//RS                     | "pop_back"
-//RS                     | "clear"
-//RS                     | "delete"
-//RS                     | "reverse"
-//RS                     | "split"
-//RS             )
-//RS         }
-//RS         // D-ITER-RESUME1=A: `next` advances the one-pass source in place.
-//RS         Type::Apply { .. } if is_iter_type(recv_ty) => method == "next",
-//RS         // D-DET1/D-DET-CAPAPI: `clock.tick`/`advance`/`wait` move the clock; every
-//RS         // `rng` draw advances the PRNG stream — these need an edit-access (`&`)
-//RS         // receiver. `clock.now()` / `duration.in(unit)` are pure reads (no `&`).
-//RS         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => {
-//RS             matches!(method, "tick" | "advance" | "wait")
-//RS         }
-//RS         Type::Named(n) if n == crate::Syntax::RNG_TYPE => {
-//RS             matches!(
-//RS                 method,
-//RS                 "int"
-//RS                     | "float"
-//RS                     | "float_range"
-//RS                     | "bool"
-//RS                     | "normal"
-//RS                     | "exponential"
-//RS                     | "bytes"
-//RS                     | "split"
-//RS                     | "pick"
-//RS                     | "weighted_pick"
-//RS                     | "sample"
-//RS                     | "shuffle"
-//RS             )
-//RS         }
-//RS         Type::Named(n) if n == "HistoryRNG" => matches!(method, "next_u64" | "below"),
-//RS         Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
-//RS             matches!(method, "name" | "email" | "host" | "address")
-//RS         }
-//RS         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// Expected argument types for built-in methods (excluding receiver).
-//RS pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type>> {
-//RS     if let Type::Tagged { inner, .. } = recv_ty {
-//RS         return builtin_method_arg_types(inner, method);
-//RS     }
-//RS     if let Some(source_name) = crate::Syntax::numeric_conversion_source(method) {
-//RS         if crate::Numeric::precise_conversion_return(recv_ty, method, 1).is_some() {
-//RS             let source = match source_name {
-//RS                 "Int" => Type::Int,
-//RS                 "Float" => Type::Float,
-//RS                 name if crate::Numeric::is_exact_type_name(name) => {
-//RS                     Type::Named(name.to_string())
-//RS                 }
-//RS                 _ => return None,
-//RS             };
-//RS             return Some(vec![source]);
-//RS         }
-//RS     }
-//RS     if recv_ty.is_numeric() {
-//RS         if matches!(recv_ty, Type::IntN { .. }) && numeric_overflow_method(method, 1).is_some() {
-//RS             return Some(vec![recv_ty.clone()]);
-//RS         }
-//RS         if let Some(source) = crate::Syntax::numeric_conversion_source(method)
-//RS             .and_then(crate::AST::numeric_type_from_name)
-//RS         {
-//RS             return Some(vec![source]);
-//RS         }
-//RS     }
-//RS     if let Type::Apply { name, args } = recv_ty {
-//RS         if name == "Atomic" && args.len() == 1 {
-//RS             return atomic_method_arg_types(&args[0], method);
-//RS         }
-//RS     }
-//RS     match recv_ty {
-//RS         Type::Named(n) if n == Syntax::TYPE_AUTHORITY && matches!(method, "with" | "without") => {
-//RS             Some(vec![Type::String])
-//RS         }
-//RS         Type::Named(n) if n == Syntax::TYPE_ORDERING => match method {
-//RS             "then" => Some(vec![Type::Named(Syntax::TYPE_ORDERING.to_string())]),
-//RS             "reverse" => Some(vec![]),
-//RS             _ => None,
-//RS         },
-//RS         Type::Named(n) if n == Syntax::TYPE_RANGE && method == "contains" => Some(vec![Type::Int]),
-//RS         Type::Named(n) if n == "WrappedVaultKey" && method == "from_bytes" => {
-//RS             Some(vec![Type::List(Box::new(Type::IntN {
-//RS                 signed: false,
-//RS                 bits: 8,
-//RS             }))])
-//RS         }
-//RS         Type::Named(n) if n == "KeyUnlock" && method == "Recipient" => {
-//RS             Some(vec![Type::Named("X25519SecretKey".into())])
-//RS         }
-//RS         Type::Named(n) if n == "KeyUnlock" && method == "Passphrase" => {
-//RS             Some(vec![Type::Named("Secret".into())])
-//RS         }
-//RS         Type::Named(n)
-//RS             if n == crate::Syntax::DURATION_TYPE && method == crate::Syntax::METHOD_DURATION_IN =>
-//RS         {
-//RS             Some(vec![Type::Named(
-//RS                 crate::Syntax::DURATION_UNIT_TYPE.to_string(),
-//RS             )])
-//RS         }
-//RS         Type::Named(n) if n == crate::Syntax::DURATION_TYPE && method == "difference" => {
-//RS             Some(vec![Type::Named(crate::Syntax::DURATION_TYPE.to_string())])
-//RS         }
-//RS         Type::Named(n) if n == crate::Syntax::DURATION_TYPE && method == "total_in" => {
-//RS             Some(vec![Type::String])
-//RS         }
-//RS         Type::Named(n) if n == crate::Syntax::DURATION_TYPE && method == "round" => {
-//RS             Some(vec![Type::String, Type::Int, Type::String])
-//RS         }
-//RS         Type::Named(n) if n == "WrappedVaultKey" => Some(vec![]),
-//RS         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => match method {
-//RS             // D-META-BODY1=A: the typed item block is AST metadata, not a value arg.
-//RS             "generate" => Some(vec![Type::String]),
-//RS             "find" | "embed" => Some(vec![Type::String]),
-//RS             "fetch" => Some(vec![Type::String, Type::String]),
-//RS             "plugin" => Some(vec![Type::String, Type::String]),
-//RS             "action" => Some(vec![
-//RS                 Type::String,
-//RS                 Type::List(Box::new(Type::String)),
-//RS                 Type::List(Box::new(Type::String)),
-//RS                 Type::List(Box::new(Type::String)),
-//RS                 Type::List(Box::new(Type::String)),
-//RS                 Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
-//RS                 Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_PROBE.to_string()))),
-//RS             ]),
-//RS             "legacy" => Some(vec![
-//RS                 Type::String,
-//RS                 Type::String,
-//RS                 Type::List(Box::new(Type::String)),
-//RS                 Type::List(Box::new(Type::String)),
-//RS                 Type::List(Box::new(Type::String)),
-//RS                 Type::List(Box::new(Type::String)),
-//RS             ]),
-//RS             "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
-//RS             | "add_install" | "add_package" | "add_publish" => Some(vec![
-//RS                 Type::String,
-//RS                 Type::List(Box::new(Type::String)),
-//RS                 Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_ACTION.to_string()))),
-//RS             ]),
-//RS             "toolchain" => Some(vec![Type::String, Type::String]),
-//RS             "probe" => Some(vec![Type::String, Type::String, Type::String]),
-//RS             "error" => Some(vec![
-//RS                 Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()),
-//RS                 Type::String,
-//RS                 Type::String,
-//RS                 Type::String,
-//RS                 Type::String,
-//RS             ]),
-//RS             "plan" => Some(vec![Type::Named(Syntax::TYPE_BUILD_TARGET.to_string())]),
-//RS             _ => None,
-//RS         },
-//RS         Type::Named(n) if n == Syntax::TYPE_PROGRAM_INFO => Some(vec![]),
-//RS         Type::Named(n)
-//RS             if n == Syntax::TYPE_TYPE_INFO
-//RS                 && matches!(method, "implements" | "has_method" | "has_marker") =>
-//RS         {
-//RS             Some(vec![Type::String])
-//RS         }
-//RS         Type::Named(n)
-//RS             if matches!(n.as_str(), "FieldInfo" | "MethodInfo") && method == "has_marker" =>
-//RS         {
-//RS             Some(vec![Type::String])
-//RS         }
-//RS         Type::Named(n)
-//RS             if n == "CompilerLexed" && matches!(method, "source" | "tokens" | "diagnostics") =>
-//RS         {
-//RS             Some(vec![])
-//RS         }
-//RS         Type::Named(n)
-//RS             if n == "CompilerSyntaxTree"
-//RS                 && matches!(method, "source" | "items" | "diagnostics") =>
-//RS         {
-//RS             Some(vec![])
-//RS         }
-//RS         Type::Named(n)
-//RS             if n == "CompilerChecked"
-//RS                 && matches!(
-//RS                     method,
-//RS                     "source"
-//RS                         | "syntax"
-//RS                         | "functions"
-//RS                         | "effects"
-//RS                         | "diagnostics"
-//RS                         | "semantic_index"
-//RS                 ) =>
-//RS         {
-//RS             Some(vec![])
-//RS         }
-//RS         Type::Named(n)
-//RS             if n == "CompilerSourceMap" && matches!(method, "sources" | "generated_lines") =>
-//RS         {
-//RS             Some(vec![])
-//RS         }
-//RS         Type::Named(n) if n == "FunctionInfo" && method == "reaches_panic" => Some(vec![]),
-//RS         Type::Named(n) if n == "EffectInfo" && method == "has" => Some(vec![Type::String]),
-//RS         // D-ITERTOOLS1=A: Iter shares list adapter arg types; materializers take none.
-//RS         Type::Apply { name, args }
-//RS             if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
-//RS                 && args.len() == 1
-//RS                 && matches!(method, "to_list" | "collect") =>
-//RS         {
-//RS             Some(vec![])
-//RS         }
-//RS         Type::Apply { name, args }
-//RS             if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
-//RS                 && args.len() == 1 =>
-//RS         {
-//RS             builtin_method_arg_types(&Type::List(Box::new(args[0].clone())), method)
-//RS         }
-//RS         Type::List(inner) => match method {
-//RS             "try_new" => Some(vec![]),
-//RS             "try_with_capacity" => Some(vec![Type::Int]),
-//RS             "push" | "append" | "try_push" | "contains" => Some(vec![(**inner).clone()]),
-//RS             "try_reserve" => Some(vec![Type::Int]),
-//RS             "insert" => Some(vec![Type::Int, (**inner).clone()]),
-//RS             "get" => Some(vec![Type::Int]),
-//RS             "index_of" | "index" => Some(vec![(**inner).clone()]),
-//RS             "remove" => Some(vec![
-//RS                 (**inner).clone(),
-//RS                 Type::Named(Syntax::TYPE_REMOVE_BY.to_string()),
-//RS             ]),
-//RS             "count" => Some(vec![(**inner).clone()]),
-//RS             "extend" | "concat" => Some(vec![Type::List(Box::new((**inner).clone()))]),
-//RS             "split_write" => Some(vec![Type::Int]),
-//RS             "get_disjoint_write" => Some(vec![Type::List(Box::new(Type::Int))]),
-//RS             "edit_disjoint" => Some(vec![
-//RS                 Type::List(Box::new(Type::Int)),
-//RS                 Type::Fn {
-//RS                     params: vec![
-//RS                         Type::Apply {
-//RS                             name: "ViewMut".to_string(),
-//RS                             args: vec![(**inner).clone()],
-//RS                         },
-//RS                         Type::Apply {
-//RS                             name: "ViewMut".to_string(),
-//RS                             args: vec![(**inner).clone()],
-//RS                         },
-//RS                     ],
-//RS                     ret: None,
-//RS                     effect_bound: None,
-//RS                     param_contract: None,
-//RS                 call_metadata: None,
-//RS                     return_view_provenance: None,
-//RS                 },
-//RS             ]),
-//RS             "join" => Some(vec![Type::String]),
-//RS             "map" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None, // sema refines V from closure's actual return
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             // A filter callback may carry the same implicit failure row as a
-//RS             // map callback. Sema refines Bool versus Result<Bool, E> after
-//RS             // checking the open callback.
-//RS             "filter" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None,
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             "find" | "any" | "all" | "count_where"
-//RS             // D-ITER1: closure bool predicates.
-//RS             | "take_while" | "skip_while" | "position" | "partition" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: Some(Box::new(Type::Bool)),
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             "update_first" => Some(vec![
-//RS                 Type::Fn {
-//RS                     params: vec![(**inner).clone()],
-//RS                     ret: Some(Box::new(Type::Bool)),
-//RS                     effect_bound: None, return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 },
-//RS                 (**inner).clone(),
-//RS             ]),
-//RS             "each" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None,
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             // D-ITER1: key-extracting closure methods.
-//RS             "sort_by" | "sort_by_desc" => Some(vec![sort_by_callback_type(inner, false)]),
-//RS             "min_by" | "max_by" | "group_by" | "count_by" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None, // sema refines key type
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             "reduce" | "fold" => Some(vec![
-//RS                 Type::Int, // init — sema refines
-//RS                 Type::Fn {
-//RS                     params: vec![Type::Int, (**inner).clone()],
-//RS                     ret: Some(Box::new(Type::Int)),
-//RS                     effect_bound: None, return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                 call_metadata: None,
-//RS                 },
-//RS             ]),
-//RS             "scan" => Some(vec![
-//RS                 Type::Int, // seed — sema refines
-//RS                 Type::Fn {
-//RS                     params: vec![Type::Int, (**inner).clone()],
-//RS                     ret: Some(Box::new(Type::Int)), // sema refines
-//RS                     effect_bound: None, return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                 call_metadata: None,
-//RS                 },
-//RS             ]),
-//RS             "flat_map" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None, // sema refines the returned list's element type
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS         // D-FAILCOMP1: filter_map(f: fn(T) ?V !E) → [V]; keeps ok, drops err.
-//RS             // ret: None so any Result return is accepted; sema refines V via calls.rs.
-//RS             "filter_map" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None,
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             // D-PARCAPTURE1=D: parallel adapters. `para_fold` separates fresh
-//RS             // worker state, per-item stepping, and deterministic merging.
-//RS             "para_map" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None, // sema refines V from closure body
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             "para_filter" | "para_partition" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: Some(Box::new(Type::Bool)),
-//RS                 effect_bound: None, return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             "para_fold" => Some(vec![
-//RS                 Type::Fn {
-//RS                     params: vec![],
-//RS                     ret: None, // sema refines accumulator from seed factory
-//RS                     effect_bound: None, return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                 call_metadata: None,
-//RS                 },
-//RS                 Type::Fn {
-//RS                     params: vec![Type::Int, (**inner).clone()],
-//RS                     ret: Some(Box::new(Type::Int)), // sema refines
-//RS                     effect_bound: None, return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                 call_metadata: None,
-//RS                 },
-//RS                 Type::Fn {
-//RS                     params: vec![Type::Int, Type::Int],
-//RS                     ret: Some(Box::new(Type::Int)),
-//RS                     effect_bound: None, return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                 call_metadata: None,
-//RS                 },
-//RS             ]),
-//RS             // D-ITER1: non-closure adapters.
-//RS             "take" | "skip" | "step_by" | "chunks" | "windows" | "repeat" | "drop_last" | "split"
-//RS             | "cycle" => {
-//RS                 Some(vec![Type::Int])
-//RS             }
-//RS             "intersperse" | "last_index_of" | "binary_search" => Some(vec![(**inner).clone()]),
-//RS             "replace" => Some(vec![Type::Int, (**inner).clone()]),
-//RS             "compare" | "starts_with" | "ends_with" | "equal" | "union" | "intersection"
-//RS             | "difference" => Some(vec![Type::List(Box::new((**inner).clone()))]),
-//RS             "slice" => Some(vec![Type::Int, Type::Int]),
-//RS             "zip" => Some(vec![]),
-//RS             "dedup"
-//RS             | "indexed"
-//RS             | "indexes"
-//RS             | "sum"
-//RS             | "product"
-//RS             | "min"
-//RS             | "max"
-//RS             | "flatten"
-//RS             | "unzip"
-//RS             | "is_sorted"
-//RS             | "shuffle"
-//RS             | "average"
-//RS             | "to_set"
-//RS             | "copy"
-//RS             | "random"
-//RS             | "min_max"
-//RS             | "counts" => Some(vec![]),
-//RS             "dedup_by" | "is_sorted_by" | "binary_search_by" | "min_max_by" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None,
-//RS                 effect_bound: None,
-//RS                 return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             "chunk_while" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone(), (**inner).clone()],
-//RS                 ret: Some(Box::new(Type::Bool)),
-//RS                 effect_bound: None,
-//RS                 return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             // D-DYNARRAY1: `.view(a..b)` — both range ends are Int (parsed
-//RS             // specially; always arrives as exactly 2 args).
-//RS             "view" => Some(vec![Type::Int, Type::Int]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Map { key, value, .. } => match method {
-//RS             "add" | "try_insert" | "add_new" => Some(vec![(**key).clone(), (**value).clone()]),
-//RS             "get" | "remove" | "pop" | "has_key" => Some(vec![(**key).clone()]),
-//RS             "contains_value" => Some(vec![(**value).clone()]),
-//RS             "merge" | "equal" | "intersection" | "update" => Some(vec![Type::Map {
-//RS                 key: Box::new((**key).clone()),
-//RS                 key_span: None,
-//RS                 value: Box::new((**value).clone()),
-//RS             }]),
-//RS             "slice" => Some(vec![Type::List(Box::new((**key).clone()))]),
-//RS             "top_n" => Some(vec![Type::Int]),
-//RS             "any" | "all" | "filter" => Some(vec![Type::Fn {
-//RS                 params: vec![(**key).clone(), (**value).clone()],
-//RS                 ret: Some(Box::new(Type::Bool)),
-//RS                 effect_bound: None,
-//RS                 return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             "map" | "flat_map" => Some(vec![Type::Fn {
-//RS                 params: vec![(**key).clone(), (**value).clone()],
-//RS                 ret: None,
-//RS                 effect_bound: None,
-//RS                 return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             "fold" => Some(vec![
-//RS                 Type::Int,
-//RS                 Type::Fn {
-//RS                     params: vec![Type::Int, (**key).clone(), (**value).clone()],
-//RS                     ret: Some(Box::new(Type::Int)),
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 },
-//RS             ]),
-//RS             "each" => Some(vec![Type::Fn {
-//RS                 params: vec![(**key).clone(), (**value).clone()],
-//RS                 ret: None,
-//RS                 effect_bound: None,
-//RS                 return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::String => match method {
-//RS             "try_push" => Some(vec![Type::String]),
-//RS             "contains"
-//RS             | "starts_with"
-//RS             | "startswith"
-//RS             | "ends_with"
-//RS             | "endswith"
-//RS             | "split"
-//RS             | "rsplit"
-//RS             | "index_of"
-//RS             | "index"
-//RS             | "rindex"
-//RS             | "count"
-//RS             | "find"
-//RS             | "rfind"
-//RS             | "partition"
-//RS             | "rpartition"
-//RS             | "split_once"
-//RS             | crate::Syntax::METHOD_CUT_LAST
-//RS             | "removeprefix"
-//RS             | "removesuffix"
-//RS             | "after"
-//RS             | "before"
-//RS             | "last_index_of"
-//RS             | "compare"
-//RS             | "equal"
-//RS             | "matches"
-//RS             | "match" => Some(vec![Type::String]),
-//RS             "zfill" => Some(vec![Type::Int]),
-//RS             "center" | "ljust" | "rjust" => Some(vec![Type::Int, Type::String]),
-//RS             "expandtabs" => Some(vec![Type::Int]),
-//RS             "from_bytes" | "from_bytes_lossy" => Some(vec![Type::List(Box::new(u8t()))]),
-//RS             "replace" => Some(vec![Type::String, Type::String]),
-//RS             "pad_start" | "pad_end" => Some(vec![Type::Int, Type::String]),
-//RS             "slice" => Some(vec![Type::Int, Type::Int]),
-//RS             "repeat" => Some(vec![Type::Int]),
-//RS             _ => None,
-//RS         },
-//RS         Type::Int | Type::Float => match method {
-//RS             "parse" => Some(vec![Type::String]),
-//RS             _ if matches!(recv_ty, Type::Int)
-//RS                 && matches!(method, crate::Syntax::METHOD_DIV_EUCLID | crate::Syntax::METHOD_REM_EUCLID) =>
-//RS             {
-//RS                 Some(vec![Type::Int])
-//RS             }
-//RS             _ if matches!(recv_ty, Type::Int) && method == "to_radix" => Some(vec![Type::Int]),
-//RS             _ if matches!(recv_ty, Type::Int) && method == "from_radix" => {
-//RS                 Some(vec![Type::String, Type::Int])
-//RS             }
-//RS             _ => None,
-//RS         },
-//RS         // D-HOLE1: `opt.map(f: T -> R)`. `.zip` isn't listed — it's checked directly
-//RS         // (see `Collections::builtin_method_return`'s `Type::Option` arm comment).
-//RS         Type::Option(inner) => match method {
-//RS             // D-FAIL-CARRIER1=A: the reason a clean absence becomes a failure,
-//RS             // and the note an outcome collects on its way.
-//RS             "or_err" => Some(vec![Type::String]),
-//RS             "map" => Some(vec![Type::Fn {
-//RS                 params: vec![(**inner).clone()],
-//RS                 ret: None, // sema refines R from the closure's actual return
-//RS                 effect_bound: None,
-//RS                 return_view_provenance: None,
-//RS                 param_contract: None,
-//RS                 call_metadata: None,
-//RS             }]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Apply { name, args } if name == "Sender" => match method {
-//RS             "send" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Apply { name, .. } if name == "Task" => Some(vec![]),
-//RS         Type::Apply { name, args } if name == "Cell" => {
-//RS             let t = args.first().cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "set" | "replace" => Some(vec![t.clone()]),
-//RS                 "get_or_set" => {
-//RS                     let value = match t {
-//RS                         Type::Option(inner) => *inner,
-//RS                         other => other,
-//RS                     };
-//RS                     Some(vec![Type::Fn {
-//RS                         params: vec![],
-//RS                         ret: Some(Box::new(value)),
-//RS                         effect_bound: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                         return_view_provenance: None,
-//RS                     }])
-//RS                 }
-//RS                 "read" | "edit" => Some(vec![Type::Fn {
-//RS                     params: vec![t],
-//RS                     ret: None,
-//RS                     effect_bound: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                     return_view_provenance: None,
-//RS                 }]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         Type::Apply { name, args }
-//RS             if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
-//RS         {
-//RS             let t = args.first().cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "set" => Some(vec![t.clone()]),
-//RS                 "read" | "edit" | "map" => Some(vec![Type::Fn {
-//RS                     params: vec![t],
-//RS                     ret: None,
-//RS                     effect_bound: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                     return_view_provenance: None,
-//RS                 }]),
-//RS                 "split" => Some(vec![
-//RS                     Type::Fn {
-//RS                         params: vec![t.clone()],
-//RS                         ret: None,
-//RS                         effect_bound: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                         return_view_provenance: None,
-//RS                     },
-//RS                     Type::Fn {
-//RS                         params: vec![t],
-//RS                         ret: None,
-//RS                         effect_bound: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                         return_view_provenance: None,
-//RS                     },
-//RS                 ]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         Type::Apply { name, args } if name == Syntax::TYPE_RANK => match method {
-//RS             "add" | "remove" | "has" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
-//RS             "union" => Some(vec![Type::Apply {
-//RS                 name: Syntax::TYPE_RANK.to_string(),
-//RS                 args: vec![args.first().cloned().unwrap_or(Type::Int)],
-//RS             }]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Apply { name, args } if name == Syntax::TYPE_PRIORITY_QUEUE => match method {
-//RS             "push" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
-//RS             "remove" => Some(vec![
-//RS                 args.first().cloned().unwrap_or(Type::Int),
-//RS                 Type::Named(Syntax::TYPE_REMOVE_BY.to_string()),
-//RS             ]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => match method {
-//RS             "add" | "add_new" => Some(vec![args[0].clone(), args[1].clone()]),
-//RS             "get" | "remove" | "has_key" => Some(vec![args[0].clone()]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Named(n) if n == Syntax::TYPE_BITS => match method {
-//RS             "add" | "remove" | "has" => Some(vec![Type::Int]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Named(n) if n == Syntax::TYPE_BYTES => match method {
-//RS             "write_bytes" | "write" => Some(vec![Type::List(Box::new(u8t()))]),
-//RS             "write_u8" | "write_byte" => Some(vec![u8t()]),
-//RS             "write_i8" => Some(vec![Type::IntN {
-//RS                 signed: true,
-//RS                 bits: 8,
-//RS             }]),
-//RS             "write_u16_le" | "write_u16_be" => Some(vec![Type::IntN {
-//RS                 signed: false,
-//RS                 bits: 16,
-//RS             }]),
-//RS             "write_i16_le" | "write_i16_be" => Some(vec![Type::IntN {
-//RS                 signed: true,
-//RS                 bits: 16,
-//RS             }]),
-//RS             "write_u32_le" | "write_u32_be" => Some(vec![Type::IntN {
-//RS                 signed: false,
-//RS                 bits: 32,
-//RS             }]),
-//RS             "write_i32_le" | "write_i32_be" => Some(vec![Type::IntN {
-//RS                 signed: true,
-//RS                 bits: 32,
-//RS             }]),
-//RS             "write_u64_le" | "write_u64_be" => Some(vec![Type::IntN {
-//RS                 signed: false,
-//RS                 bits: 64,
-//RS             }]),
-//RS             "write_i64_le" | "write_i64_be" => Some(vec![Type::IntN {
-//RS                 signed: true,
-//RS                 bits: 64,
-//RS             }]),
-//RS             "write_f32_le" | "write_f32_be" => Some(vec![Type::Float32]),
-//RS             "write_f64_le" | "write_f64_be" => Some(vec![Type::Float]),
-//RS             "seek" | "read_bytes" | "read_string" | "get" => Some(vec![Type::Int]),
-//RS             "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "last_index_of" => {
-//RS                 Some(vec![Type::String])
-//RS             }
-//RS             "partition" => Some(vec![Type::Named(Syntax::TYPE_BYTES.to_string())]),
-//RS             "replace" => Some(vec![Type::String, Type::String]),
-//RS             "join" => Some(vec![Type::List(Box::new(Type::String))]),
-//RS             "equal" | "compare" | "copy_to" | "write_to" => {
-//RS                 Some(vec![Type::Named(Syntax::TYPE_BYTES.to_string())])
-//RS             }
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         // D-REACT1=B: `Signal.set(v)` expects a value of the signal's element type.
-//RS         Type::Apply { name, args } if name == crate::Syntax::TYPE_SIGNAL => match method {
-//RS             "set" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Apply { name, .. } if name == crate::Syntax::TYPE_DERIVED => Some(vec![]),
-//RS         Type::Apply { name, .. } if name == crate::Syntax::TYPE_COMPUTED => Some(vec![]),
-//RS         Type::Apply { name, args } if name == crate::Syntax::TYPE_EVENT => {
-//RS             let payload = args.first().cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "on" | "once" => Some(vec![
-//RS                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                     Type::Fn {
-//RS                         params: vec![payload],
-//RS                         ret: None,
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     },
-//RS                 ]),
-//RS                 "on_priority" => Some(vec![
-//RS                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                     Type::Int,
-//RS                     Type::Fn {
-//RS                         params: vec![payload],
-//RS                         ret: None,
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     },
-//RS                 ]),
-//RS                 "emit" => Some(vec![payload]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         Type::Apply { name, args } if name == crate::Syntax::TYPE_ASYNC_EVENT => {
-//RS             let payload = args.first().cloned().unwrap_or(Type::Int);
-//RS             let error = args.get(1).cloned().unwrap_or(Type::String);
-//RS             let handler_ret = Type::Result {
-//RS                 ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-//RS                 err: Box::new(error),
-//RS             };
-//RS             match method {
-//RS                 "on" | "once" => Some(vec![
-//RS                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                     Type::Fn {
-//RS                         params: vec![payload],
-//RS                         ret: Some(Box::new(handler_ret)),
-//RS                         effect_bound: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                         return_view_provenance: None,
-//RS                     },
-//RS                 ]),
-//RS                 "on_priority" => Some(vec![
-//RS                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                     Type::Int,
-//RS                     Type::Fn {
-//RS                         params: vec![payload],
-//RS                         ret: Some(Box::new(handler_ret)),
-//RS                         effect_bound: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                         return_view_provenance: None,
-//RS                     },
-//RS                 ]),
-//RS                 "emit_async" => Some(vec![payload]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         Type::Apply { name, args } if name == crate::Syntax::TYPE_HOOK => {
-//RS             let payload = args.first().cloned().unwrap_or(Type::Int);
-//RS             let result = args.get(1).cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "on" | "once" => Some(vec![
-//RS                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                     Type::Fn {
-//RS                         params: vec![payload],
-//RS                         ret: Some(Box::new(result)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     },
-//RS                 ]),
-//RS                 "on_priority" => Some(vec![
-//RS                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                     Type::Int,
-//RS                     Type::Fn {
-//RS                         params: vec![payload],
-//RS                         ret: Some(Box::new(result)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     },
-//RS                 ]),
-//RS                 "run" => Some(vec![payload, result]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         Type::Apply { name, args } if name == crate::Syntax::TYPE_DECISION_HOOK => {
-//RS             let payload = args.first().cloned().unwrap_or(Type::Int);
-//RS             let error = args.get(1).cloned().unwrap_or(Type::String);
-//RS             let decision = Type::Apply {
-//RS                 name: crate::Syntax::TYPE_HOOK_DECISION.to_string(),
-//RS                 args: vec![payload.clone(), error],
-//RS             };
-//RS             match method {
-//RS                 "on" | "once" => Some(vec![
-//RS                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                     Type::Fn {
-//RS                         params: vec![payload],
-//RS                         ret: Some(Box::new(decision)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     },
-//RS                 ]),
-//RS                 "on_priority" => Some(vec![
-//RS                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                     Type::Int,
-//RS                     Type::Fn {
-//RS                         params: vec![payload],
-//RS                         ret: Some(Box::new(decision)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     },
-//RS                 ]),
-//RS                 "run" => Some(vec![payload]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         Type::Named(n)
-//RS             if n == crate::Syntax::TYPE_EFFECT
-//RS                 || n == crate::Syntax::TYPE_SUBSCRIPTION
-//RS                 || n == crate::Syntax::TYPE_EVENT_SCOPE
-//RS                 || n == crate::Syntax::TYPE_EVENT_TRACE =>
-//RS         {
-//RS             Some(vec![])
-//RS         }
-//RS         Type::Named(n) if n == crate::Syntax::TYPE_WATCH_HANDLE => match method {
-//RS             "on" | "once" => Some(vec![
-//RS                 Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-//RS                 Type::Fn {
-//RS                     params: vec![Type::Named(crate::Syntax::TYPE_WATCH_EVENT.to_string())],
-//RS                     ret: None,
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 },
-//RS             ]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Named(n) if n == crate::Syntax::TYPE_WATCH_SET => match method {
-//RS             "add" => Some(vec![Type::Named(
-//RS                 crate::Syntax::TYPE_WATCH_HANDLE.to_string(),
-//RS             )]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         // D-COLLBREADTH1=A: Set<T> arg types.
-//RS         Type::Apply { name, args } if name == "Set" => {
-//RS             let elem = args.first().cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "add" | "has" | "remove" | "discard" => Some(vec![elem.clone()]),
-//RS                 "equal" => Some(vec![Type::Apply {
-//RS                     name: "Set".to_string(),
-//RS                     args: vec![elem.clone()],
-//RS                 }]),
-//RS                 "union"
-//RS                 | "intersection"
-//RS                 | "difference"
-//RS                 | "symmetric_difference"
-//RS                 | "update"
-//RS                 | "difference_update"
-//RS                 | "intersection_update"
-//RS                 | "symmetric_difference_update"
-//RS                 | "is_subset"
-//RS                 | "issubset"
-//RS                 | "is_superset"
-//RS                 | "issuperset"
-//RS                 | "is_disjoint"
-//RS                 | "isdisjoint" => Some(vec![Type::Apply {
-//RS                     name: "Set".to_string(),
-//RS                     args: vec![elem.clone()],
-//RS                 }]),
-//RS                 "pop" => Some(vec![elem.clone()]),
-//RS                 "filter" => Some(vec![Type::Fn {
-//RS                     params: vec![elem.clone()],
-//RS                     ret: None,
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 }]),
-//RS                 "all" => Some(vec![Type::Fn {
-//RS                     params: vec![elem.clone()],
-//RS                     ret: Some(Box::new(Type::Bool)),
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 }]),
-//RS                 "each" => Some(vec![Type::Fn {
-//RS                     params: vec![elem.clone()],
-//RS                     ret: None,
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 }]),
-//RS                 "map" | "flat_map" => Some(vec![Type::Fn {
-//RS                     params: vec![elem],
-//RS                     ret: None, // sema refines R from the closure's actual return
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 }]),
-//RS                 "fold" => Some(vec![
-//RS                     Type::Int, // init — sema refines
-//RS                     Type::Fn {
-//RS                         params: vec![Type::Int, elem],
-//RS                         ret: Some(Box::new(Type::Int)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     },
-//RS                 ]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         Type::Apply { name, args } if name == Syntax::TYPE_RANK => {
-//RS             let elem = args.first().cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "add" | "has" | "remove" => Some(vec![elem.clone()]),
-//RS                 "union"
-//RS                 | "intersection"
-//RS                 | "difference"
-//RS                 | "symmetric_difference"
-//RS                 | "is_subset"
-//RS                 | "is_superset"
-//RS                 | "is_disjoint" => Some(vec![Type::Apply {
-//RS                     name: Syntax::TYPE_RANK.to_string(),
-//RS                     args: vec![elem],
-//RS                 }]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         // D-TAG1: Tally<T> arg types.
-//RS         Type::Apply { name, args } if name == Syntax::TYPE_TALLY => {
-//RS             let elem = args.first().cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "add" | "remove" | "has" | "count" => Some(vec![elem]),
-//RS                 "any" => Some(vec![Type::Fn {
-//RS                     params: vec![elem],
-//RS                     ret: Some(Box::new(Type::Bool)),
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 }]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         // D-COLLBREADTH1=A: Queue<T> arg types.
-//RS         Type::Apply { name, args } if name == Syntax::TYPE_QUEUE => {
-//RS             let elem = args.first().cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "push_front" | "push_back" | "contains" | "delete" => Some(vec![elem]),
-//RS                 "get" | "split" => Some(vec![Type::Int]),
-//RS                 "join" => Some(vec![Type::String]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         // D-DYNARRAY1: `View<T>` arg types — read-only subset, mirrors `Type::List`.
-//RS         Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
-//RS             let elem = args.first().cloned().unwrap_or(Type::Int);
-//RS             match method {
-//RS                 "get" => Some(vec![Type::Int]),
-//RS                 "contains" | "index_of" => Some(vec![elem]),
-//RS                 "join" => Some(vec![Type::String]),
-//RS                 "fold" => Some(vec![
-//RS                     Type::Int, // init — sema refines
-//RS                     Type::Fn {
-//RS                         params: vec![Type::Int, elem],
-//RS                         ret: Some(Box::new(Type::Int)),
-//RS                         effect_bound: None,
-//RS                         return_view_provenance: None,
-//RS                         param_contract: None,
-//RS                         call_metadata: None,
-//RS                     },
-//RS                 ]),
-//RS                 "map" => Some(vec![Type::Fn {
-//RS                     params: vec![elem],
-//RS                     ret: None, // sema refines R from the closure's actual return
-//RS                     effect_bound: None,
-//RS                     return_view_provenance: None,
-//RS                     param_contract: None,
-//RS                     call_metadata: None,
-//RS                 }]),
-//RS                 _ => Some(vec![]),
-//RS             }
-//RS         }
-//RS         // D-DET1/D-DET-CAPAPI: injected capability method args. `pick`/`shuffle` are
-//RS         // generic ([T]) and handled element-aware in the checker dispatch — they are
-//RS         // NOT routed here.
-//RS         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => match method {
-//RS             "new" => Some(vec![Type::Int]),
-//RS             "tick" | "advance" => Some(vec![Type::Int]),
-//RS             "wait" => Some(vec![Type::Named(crate::Syntax::DURATION_TYPE.to_string())]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Named(n) if n == crate::Syntax::RNG_TYPE => match method {
-//RS             "int" => Some(vec![Type::Int, Type::Int]),
-//RS             "float_range" => Some(vec![Type::Float, Type::Float]),
-//RS             "bool" => Some(vec![Type::Float]),
-//RS             "normal" => Some(vec![Type::Float, Type::Float]),
-//RS             "exponential" => Some(vec![Type::Float]),
-//RS             "bytes" => Some(vec![Type::Int]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Named(n) if n == "HistoryRNG" => match method {
-//RS             "below" => Some(vec![Type::IntN {
-//RS                 signed: false,
-//RS                 bits: 64,
-//RS             }]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Named(n) if n == crate::Syntax::FAKE_TYPE => match method {
-//RS             "locale" => Some(vec![Type::String]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => match method {
-//RS             "new" => Some(vec![Type::Int]),
-//RS             "require" => Some(vec![Type::Bool]),
-//RS             _ => Some(vec![]),
-//RS         },
-//RS         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => Some(vec![]),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Whether receiver convention for a built-in call must be `mut`.
-//RS pub fn builtin_needs_mut_receiver(recv_ty: &Type, method: &str) -> bool {
-//RS     builtin_method_mutates(recv_ty, method)
-//RS }
-//RS 
-//RS /// Generated Rust receiver-borrow form for a builtin call. This is shared by
-//RS /// sema's call-loan timing and TIR lowering so the two cannot drift.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum BuiltinReceiverBorrow {
-//RS     Read,
-//RS     TwoPhaseWrite,
-//RS     EagerWrite,
-//RS     Move,
-//RS }
-//RS 
-//RS pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverBorrow {
-//RS     fn is_list_receiver(ty: &Type) -> bool {
-//RS         match ty {
-//RS             Type::List(_) | Type::FixedList { .. } => true,
-//RS             Type::Tagged { inner, .. } | Type::Result { ok: inner, .. } => {
-//RS                 is_list_receiver(inner)
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     if is_iter_type(recv_ty) {
-//RS         // D-ITER-RESUME1=A / D-CAP-RECEIVER1=D: `next` pulls one item through
-//RS         // `jet_iter_next(&mut it)` and leaves the remainder in the same
-//RS         // source (`&it.next()`); every other one-pass operation takes it.
-//RS         if method == "next" {
-//RS             BuiltinReceiverBorrow::EagerWrite
-//RS         } else {
-//RS             BuiltinReceiverBorrow::Move
-//RS         }
-//RS     } else if !builtin_method_mutates(recv_ty, method) {
-//RS         BuiltinReceiverBorrow::Read
-//RS     } else if (is_list_receiver(recv_ty)
-//RS         && matches!(
-//RS             method,
-//RS             "remove" | "sort_by" | "sort_desc" | "sort_by_desc" | "update_first" | "edit_disjoint"
-//RS         ))
-//RS         || matches!(
-//RS             recv_ty,
-//RS             Type::Named(name)
-//RS                 if name == Syntax::CLOCK_TYPE
-//RS                     || name == Syntax::RNG_TYPE
-//RS                     || name == "HistoryRNG"
-//RS                     || name == Syntax::FAKE_TYPE
-//RS                     || name == Syntax::SOLVER_TYPE
-//RS         )
-//RS     {
-//RS         // TIR lowers these through helpers whose first argument is an explicit
-//RS         // `&mut receiver`. Unlike Rust method-call syntax, that borrow is eager:
-//RS         // it must reject receiver reads while later arguments are evaluated.
-//RS         BuiltinReceiverBorrow::EagerWrite
-//RS     } else {
-//RS         // Ordinary Rust method-call syntax reserves `&mut self`, evaluates
-//RS         // arguments, then activates the exclusive borrow.
-//RS         BuiltinReceiverBorrow::TwoPhaseWrite
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(all(test, debug_assertions))]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn list_mutation_borrows_match_for_growable_and_fixed_lists() {
-//RS         let methods = [
-//RS             ("push", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("append", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("try_push", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("try_reserve", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("pop", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("insert", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("remove", BuiltinReceiverBorrow::EagerWrite),
-//RS             ("extend", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("reverse", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("sort", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("sort_by", BuiltinReceiverBorrow::EagerWrite),
-//RS             ("sort_desc", BuiltinReceiverBorrow::EagerWrite),
-//RS             ("sort_by_desc", BuiltinReceiverBorrow::EagerWrite),
-//RS             ("clear", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("update_first", BuiltinReceiverBorrow::EagerWrite),
-//RS             ("split_write", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("get_disjoint_write", BuiltinReceiverBorrow::TwoPhaseWrite),
-//RS             ("edit_disjoint", BuiltinReceiverBorrow::EagerWrite),
-//RS         ];
-//RS         let list = Type::List(Box::new(Type::Int));
-//RS         let fixed = Type::FixedList {
-//RS             elem: Box::new(Type::Int),
-//RS             len: crate::AST::Measure::literal("length", 3),
-//RS         };
-//RS         let result = Type::Result {
-//RS             ok: Box::new(list.clone()),
-//RS             err: Box::new(Type::Named("Error".to_string())),
-//RS         };
-//RS         for (label, receiver) in [
-//RS             ("List", &list),
-//RS             ("FixedList", &fixed),
-//RS             ("Result<List>", &result),
-//RS         ] {
-//RS             for &(method, expected) in &methods {
-//RS                 assert!(
-//RS                     builtin_method_mutates(receiver, method),
-//RS                     "{label}.{method} is not a mutation"
-//RS                 );
-//RS                 assert_eq!(
-//RS                     builtin_receiver_borrow(receiver, method),
-//RS                     expected,
-//RS                     "{label}.{method} borrow drifted"
-//RS                 );
-//RS             }
-//RS         }
-//RS         let queue_only_methods = [
-//RS             "push_front",
-//RS             "push_back",
-//RS             "pop_front",
-//RS             "pop_back",
-//RS             "peek_front",
-//RS             "peek_back",
-//RS         ];
-//RS         for (label, receiver) in [
-//RS             ("List", &list),
-//RS             ("FixedList", &fixed),
-//RS             ("Result<List>", &result),
-//RS         ] {
-//RS             for method in queue_only_methods {
-//RS                 assert!(
-//RS                     !builtin_method_mutates(receiver, method),
-//RS                     "{label}.{method} unexpectedly mutates"
-//RS                 );
-//RS                 assert_eq!(
-//RS                     builtin_receiver_borrow(receiver, method),
-//RS                     BuiltinReceiverBorrow::Read,
-//RS                     "{label}.{method} borrow drifted"
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0058 crates/jet-foundation/src/Collections.rs:1808-4014
+// Private fragment of JetFoundation.Collections; shared AST and Syntax declarations remain canonical.
+// Gates #4494/#4483/#4499/#4409: not applicable; this slice computes compiler type and borrow facts only.
 
+// Rust: crates/jet-foundation/src/Collections.rs:1808
+fn result_method_return(ok: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("partial", 0) -> Val(Val(Type.Option{inner: ~ok}))
+        ("notes", 0) -> Val(Val(Type.List{element: Type.String}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:1816
+fn map_method_return(key: Type, value: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len", 0) -> Val(Val(Type.Int))
+        ("is_empty", 0) -> Val(Val(Type.Bool))
+        ("clear", 0) | ("update", 1) | ("each", 1) -> Val(None)
+        ("add" | "replace", 2) | ("get" | "remove" | "pop", 1) | ("pop_first", 0) | ("max" | "min", 0) -> Val(Val(Type.Option{inner: ~value}))
+        ("try_insert", 2) -> Val(Val(Type.Result{ok: Type.Option{inner: ~value}, err: Type.Named{name: Syntax.TYPE_ALLOC_ERROR}}))
+        ("add_new", 2) | ("has_key" | "contains_value" | "equal" | "any" | "all", 1) -> Val(Val(Type.Bool))
+        ("setdefault", 2) -> Val(Val(~value))
+        ("keys", 0) -> Val(Val(iter_ty(~key)))
+        ("values", 0) -> Val(Val(iter_ty(~value)))
+        ("merge", 1 | 2) | ("copy", 0) | ("filter" | "flat_map" | "intersection" | "slice", 1) -> Val(Val(Type.Map{key: ~key, key_span: None, value: ~value}))
+        ("first", 0) -> Val(Val(Type.Option{inner: ~key}))
+        ("to_list" | "items", 0) | ("top_n", 1) -> Val(Val(Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: ~key}, TypeTupleField{name: "value", ty: ~value}}}}))
+        ("map", 1) -> Val(Val(Type.Map{key: ~key, key_span: None, value: Type.Int}))
+        ("fold", 2) -> Val(Val(Type.Int))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:1881
+fn string_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len" | "count_bytes", 0) | ("find" | "rfind" | "compare" | "count", 1) -> Val(Val(Type.Int))
+        ("is_empty", 0) -> Val(Val(Type.Bool))
+        ("try_push", 1) -> Val(Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: Syntax.TYPE_ALLOC_ERROR}}))
+        ("contains" | "starts_with" | "ends_with" | "startswith" | "endswith" | "equal", 1) -> Val(Val(Type.Bool))
+        ("trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower" | "to_ascii_lower" | "to_ascii_upper" | "to_title" | "to_string" | "lower" | "upper" | "title" | "casefold", 0) -> Val(Val(Type.String))
+        ("is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii" | "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit" | "isidentifier" | "is_lower" | "islower" | "isnumeric" | "isprintable" | "isspace" | "istitle" | "is_upper" | "isupper", 0) -> Val(Val(Type.Bool))
+        ("capitalize" | "swapcase" | "copy" | "reverse" | "normalize" | "strip" | "lstrip" | "rstrip", 0) -> Val(Val(Type.String))
+        ("removeprefix" | "removesuffix" | "zfill" | "expandtabs" | "slice" | "after" | "before" | "repeat", 1) | ("center" | "ljust" | "rjust" | "replace" | "slice" | "pad_start" | "pad_end", 2) -> Val(Val(Type.String))
+        ("rindex" | "last_index_of" | "index_of" | "index", 1) -> Val(Val(Type.Option{inner: Type.Int}))
+        ("partition" | "rpartition", 1) -> Val(Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "head", ty: Type.String}, TypeTupleField{name: "sep", ty: Type.String}, TypeTupleField{name: "tail", ty: Type.String}}}))
+        ("rsplit" | "split", 1) -> Val(Val(iter_ty(Type.String)))
+        ("bytes" | "encode", 0) -> Val(Val(Type.List{element: u8t()}))
+        ("split_once" | Syntax.METHOD_CUT_LAST, 1) -> Val(Val(Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "before", ty: Type.String}, TypeTupleField{name: "after", ty: Type.String}}}}))
+        ("lines" | "splitlines", 0) -> Val(Val(Type.List{element: Type.String}))
+        ("chars", 0) -> Val(Val(Type.List{element: Type.Char}))
+        ("parse" | "to_int", 0) -> Val(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}))
+        ("to_float", 0) -> Val(Val(Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}))
+        ("matches", 1) -> Val(Val(Type.Result{ok: Type.Bool, err: Type.String}))
+        ("match", 1) -> Val(Val(Type.Result{ok: Type.Option{inner: Type.String}, err: Type.String}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2006
+fn clock_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("now", 0) | ("tick" | "advance" | "wait", 1) -> Val(Val(Type.Int)) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2017
+fn deterministic_world_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("now", 0) | ("advance", 1) -> Val(Val(Type.Int)) ("wait_idle", 0) -> Val(None) ("history", 0) -> Val(Val(Type.String)) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2036
+fn rng_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("int", 2) -> Val(Val(Type.Int))
+        ("float", 0) | ("float_range" | "normal", 2) | ("exponential", 1) -> Val(Val(Type.Float))
+        ("bool", 0 | 1) -> Val(Val(Type.Bool))
+        ("bytes", 1) -> Val(Val(Type.List{element: Type.IntN{signed: false, bits: 8}}))
+        ("split", 0) -> Val(Val(Type.Named{name: Syntax.RNG_TYPE}))
+        // Rust's generic placeholder is refined by sema dispatch, not here.
+        ("pick", 1) | ("weighted_pick", 2) -> Val(Val(Type.Option{inner: Type.Int}))
+        ("sample", 2) -> Val(Val(Type.List{element: Type.Int}))
+        ("shuffle", 1) -> Val(None)
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2061
+fn history_rng_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("next_u64", 0) | ("below", 1) -> Val(Val(Type.IntN{signed: false, bits: 64})) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2072
+fn fake_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("name" | "email" | "host" | "address", 0) -> Val(Val(Type.String)) ("locale", 1) -> Val(Val(Type.Named{name: Syntax.FAKE_TYPE})) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2082
+fn solver_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("require", 1) -> Val(None) ("failure_count", 0) -> Val(Val(Type.Int)) ("status", 0) -> Val(Val(Type.String)) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2092
+fn duration_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        (Syntax.METHOD_DURATION_IN, 1) -> Val(Val(Type.Result{ok: Type.Int, err: Type.Named{name: Syntax.DURATION_RANGE_ERROR_TYPE}}))
+        (Syntax.METHOD_DURATION_IS_ZERO, 0) -> Val(Val(Type.Bool))
+        (Syntax.METHOD_DURATION_TOTAL_SECONDS | "sign", 0) -> Val(Val(Type.Int))
+        ("difference", 1) | ("abs" | "negated", 0) -> Val(Val(Type.Named{name: Syntax.DURATION_TYPE}))
+        ("total_in", 1) -> Val(Val(Type.Float))
+        ("round", count) if count >= 1 && count <= 3 -> Val(Val(Type.Named{name: Syntax.DURATION_TYPE}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2115
+fn task_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("join", 0) -> Val(Val(Type.Result{ok: args.first() ?? Type.Named{name: "Unit"}, err: Type.Named{name: Syntax.TYPE_TASK_FAILURE}}))
+        (Syntax.TASK_DETACH | Syntax.METHOD_TASK_PAUSE | Syntax.METHOD_TASK_RESUME | Syntax.METHOD_TASK_CANCEL, 0) | (Syntax.METHOD_TASK_PAUSE, 1) -> Val(None)
+        ("trace", 0) -> Val(Val(Type.String))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2144
+fn receiver_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    t := args.first() ?? Type.Int
+    if (method, nargs) == {
+        ("receive", 0) -> Val(Val(Type.Result{ok: ~t, err: Type.Named{name: "Closed"}}))
+        ("try_receive", 0) -> Val(Val(Type.Option{inner: ^t}))
+        ("is_timer" | "is_interval" | "is_cancelled" | "is_ready", 0) -> Val(Val(Type.Bool))
+        ("delay_ms", 0) -> Val(Val(Type.Int))
+        ("close", 0) -> Val(None)
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2162
+fn sender_method_return(_args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("send", 1) | ("close", 0) -> Val(None) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2171
+fn pool_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    t := args.first() ?? Type.Int
+    if (method, nargs) == {
+        ("add", 1) -> Val(Val(Type.Apply{name: "ID", args: [Type]{^t}}))
+        ("remove", 1) -> Val(Val(Type.Option{inner: ^t}))
+        ("ids", 0) -> Val(Val(Type.List{element: Type.Apply{name: "ID", args: [Type]{^t}}}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2188
+fn shared_method_return(inner: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("read" | "edit", 1) -> Val(Val(~inner))
+        ("capture", 0 | 1) -> Val(Val(Type.Apply{name: Syntax.TYPE_SHARED_SNAPSHOT, args: [Type]{~inner, ~inner}}))
+        ("try_replace", 2) -> Val(Val(Type.Result{ok: Type.Bool, err: Type.Named{name: Syntax.TYPE_SHARED_REVISION_ERROR}}))
+        ("guard_read", 0) -> Val(Val(shared_guard_type(~inner, InternalTag.SharedGuardRead)))
+        ("guard_edit", 0) -> Val(Val(shared_guard_type(~inner, InternalTag.SharedGuardEdit)))
+        ("downgrade", 0) -> Val(Val(Type.Apply{name: Syntax.TYPE_SHARED_WEAK, args: [Type]{~inner}}))
+        ("strong_count", 0) -> Val(Val(Type.Int))
+        ("same", 1) -> Val(Val(Type.Bool))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2224
+fn shared_snapshot_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if method == "value" && nargs == 0 && args.len() == 2 -> return Val(Val(~args[1]))
+    None
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2231
+fn shared_weak_method_return(inner: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("upgrade", 0) -> Val(Val(Type.Option{inner: Type.Shared{inner: ~inner}})) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2240
+fn shared_guard_type(inner: Type, marker: InternalTag) -> Type Never! {
+    Type.Tagged{marker: TagMarker.Internal{internal_tag: marker}, inner: Type.Apply{name: Syntax.TYPE_SHARED_GUARD, args: [Type]{^inner}}}
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2250
+fn shared_guard_method_return(inner: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("map", 1) -> Val(Val(Type.Apply{name: Syntax.TYPE_SHARED_GUARD, args: [Type]{~inner}}))
+        ("split", 2) -> Val(Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "first", ty: Type.Apply{name: Syntax.TYPE_SHARED_GUARD, args: [Type]{~inner}}}, TypeTupleField{name: "second", ty: Type.Apply{name: Syntax.TYPE_SHARED_GUARD, args: [Type]{~inner}}}}}))
+        ("wait", 2) -> Val(None)
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2278
+fn condition_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("notify_one" | "notify_all", 0) -> Val(None) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2285
+fn cell_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    t := args.first() ?? Type.Int
+    if (method, nargs) == {
+        ("get", 0) | ("replace" | "read" | "edit", 1) -> Val(Val(~t))
+        ("set", 1) -> Val(None)
+        ("get_or_set", 1) -> if t == { .Option(inner) -> Val(Val(~inner)) else -> Val(Val(^t)) }
+        ("guard_read", 0) -> Val(Val(Type.Apply{name: "CellReadGuard", args: [Type]{^t}}))
+        ("guard_edit", 0) -> Val(Val(Type.Apply{name: "CellEditGuard", args: [Type]{^t}}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2307
+fn cell_guard_method_return(args: [Type], method: String, nargs: Int, editable: Bool) -> Type?? Never! {
+    t := args.first() ?? Type.Int
+    if (method, nargs) == {
+        ("get", 0) | ("read", 1) -> Val(Val(~t))
+        ("set", 1) if editable -> Val(None)
+        ("edit", 1) if editable -> Val(Val(~t))
+        ("map", 1) -> Val(Val(Type.Apply{name: if editable -> "CellEditGuard" else -> "CellReadGuard", args: [Type]{^t}}))
+        ("split", 2) -> Val(Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "first", ty: Type.Apply{name: if editable -> "CellEditGuard" else -> "CellReadGuard", args: [Type]{~t}}}, TypeTupleField{name: "second", ty: Type.Apply{name: if editable -> "CellEditGuard" else -> "CellReadGuard", args: [Type]{^t}}}}}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2357
+fn signal_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("get", 0) -> Val(Val(args.first() ?? Type.Int)) ("set", 1) -> Val(None) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2368
+fn derived_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("get", 0) -> Val(Val(args.first() ?? Type.Int)) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2376
+fn event_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("on" | "once", 2) | ("on_priority", 3) -> Val(Val(Type.Named{name: Syntax.TYPE_SUBSCRIPTION}))
+        ("emit", 1) -> Val(Val(Type.Named{name: Syntax.TYPE_EVENT_TRACE}))
+        ("trace", 0) -> Val(Val(Type.String))
+        ("listener_count", 0) -> Val(Val(Type.Int))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2394
+fn async_event_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    error := args.get(1) ?? Type.String
+    if (method, nargs) == {
+        ("on" | "once", 2) | ("on_priority", 3) -> Val(Val(Type.Named{name: Syntax.TYPE_SUBSCRIPTION}))
+        ("emit_async", 1) -> Val(Val(Type.Apply{name: "Task", args: [Type]{Type.Apply{name: Syntax.TYPE_DISPATCH_REPORT, args: [Type]{^error}}}}))
+        ("close", 0) -> Val(None)
+        ("listener_count" | "queued_count" | "running_count" | "blocked_count", 0) -> Val(Val(Type.Int))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2415
+fn hook_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("on" | "once", 2) | ("on_priority", 3) -> Val(Val(Type.Named{name: Syntax.TYPE_SUBSCRIPTION}))
+        ("run", 2) -> Val(Val(args.get(1) ?? Type.Int))
+        ("trace", 0) -> Val(Val(Type.String))
+        ("listener_count", 0) -> Val(Val(Type.Int))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2429
+fn decision_hook_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("on" | "once", 2) | ("on_priority", 3) -> Val(Val(Type.Named{name: Syntax.TYPE_SUBSCRIPTION}))
+        ("run", 1) -> Val(Val(Type.Apply{name: Syntax.TYPE_HOOK_OUTCOME, args: [Type]{args.first() ?? Type.Int, args.get(1) ?? Type.String}}))
+        ("listener_count", 0) -> Val(Val(Type.Int))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2445
+fn subscription_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("unsubscribe", 0) -> Val(None) ("is_active", 0) -> Val(Val(Type.Bool)) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2453
+fn event_scope_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("cancel", 0) -> Val(None) ("active_count", 0) -> Val(Val(Type.Int)) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2461
+fn event_trace_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("summary", 0) -> Val(Val(Type.String)) ("delivered" | "queued" | "dropped", 0) -> Val(Val(Type.Int)) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2469
+fn dispatch_report_method_return(args: [Type], method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("accepted", 0) -> Val(Val(Type.Bool))
+        ("delivered_handlers", 0) -> Val(Val(Type.Int))
+        ("state", 0) -> Val(Val(Type.Named{name: Syntax.TYPE_DISPATCH_STATE}))
+        ("failures", 0) -> Val(Val(Type.List{element: Type.Apply{name: Syntax.TYPE_DISPATCH_FAILURE, args: [Type]{args.first() ?? Type.String}}}))
+        ("trace", 0) -> Val(Val(Type.Named{name: Syntax.TYPE_EVENT_TRACE}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2492
+fn watch_handle_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("poll" | "events", 0) -> Val(Val(Type.List{element: Type.Named{name: Syntax.TYPE_WATCH_EVENT}}))
+        ("on" | "once", 2) -> Val(Val(Type.Named{name: Syntax.TYPE_SUBSCRIPTION}))
+        ("summary", 0) -> Val(Val(Type.String))
+        ("is_active", 0) -> Val(Val(Type.Bool))
+        ("cancel", 0) -> Val(None)
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2507
+fn watch_set_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("add", 1) -> Val(None)
+        ("poll" | "events", 0) -> Val(Val(Type.List{element: Type.Named{name: Syntax.TYPE_WATCH_EVENT}}))
+        ("summary", 0) -> Val(Val(Type.String))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2519
+fn set_method_return(elem: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len" | "capacity", 0) | ("fold", 2) -> Val(Val(Type.Int))
+        ("is_empty", 0) | ("add" | "has" | "is_subset" | "issubset" | "is_superset" | "issuperset" | "is_disjoint" | "isdisjoint" | "equal" | "all", 1) -> Val(Val(Type.Bool))
+        ("remove" | "clear", _) | ("discard" | "update" | "difference_update" | "intersection_update" | "symmetric_difference_update" | "each", 1) -> Val(None)
+        ("union" | "intersection" | "difference" | "symmetric_difference", 1) | ("copy" | "to_set", 0) -> Val(Val(Type.Apply{name: "Set", args: [Type]{~elem}}))
+        ("to_list" | "sort" | "shuffle", 0) | ("filter", 1) -> Val(Val(Type.List{element: ~elem}))
+        ("first" | "min" | "max", 0) | ("pop" | "take" | "replace", 1) -> Val(Val(Type.Option{inner: ~elem}))
+        ("values", 0) -> Val(Val(iter_ty(~elem)))
+        ("map", 1) -> Val(Val(Type.List{element: Type.Int}))
+        ("flat_map", 1) -> Val(Val(iter_ty(Type.Int)))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2571
+fn sorted_set_method_return(elem: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len", 0) -> Val(Val(Type.Int))
+        ("is_empty", 0) | ("add" | "has" | "is_subset" | "is_superset" | "is_disjoint", 1) -> Val(Val(Type.Bool))
+        ("remove" | "clear", _) -> Val(None)
+        ("union" | "intersection" | "difference" | "symmetric_difference", 1) -> Val(Val(Type.Apply{name: Syntax.TYPE_RANK, args: [Type]{~elem}}))
+        ("to_list", 0) -> Val(Val(Type.List{element: ~elem}))
+        ("first" | "last", 0) -> Val(Val(Type.Option{inner: ~elem}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2592
+fn priority_queue_method_return(elem: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len", 0) -> Val(Val(Type.Int))
+        ("is_empty", 0) -> Val(Val(Type.Bool))
+        ("push" | "clear", _) -> Val(None)
+        ("pop" | "peek", 0) | ("remove", 1 | 2) -> Val(Val(Type.Option{inner: ~elem}))
+        ("to_sorted_list", 0) -> Val(Val(Type.List{element: ~elem}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2606
+fn lru_method_return(key: Type, value: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len" | "capacity", 0) -> Val(Val(Type.Int))
+        ("is_empty", 0) | ("add_new", 2) | ("has_key", 1) -> Val(Val(Type.Bool))
+        ("clear", 0) -> Val(None)
+        ("add", 2) | ("get" | "remove", 1) -> Val(Val(Type.Option{inner: ~value}))
+        ("keys", 0) -> Val(Val(Type.List{element: ~key}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2621
+fn bit_set_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len" | "count", 0) -> Val(Val(Type.Int))
+        ("is_empty", 0) | ("add" | "has", 1) -> Val(Val(Type.Bool))
+        ("remove" | "clear", _) -> Val(None)
+        ("to_list", 0) -> Val(Val(Type.List{element: Type.Int}))
+        ("copy", 0) -> Val(Val(Type.Named{name: Syntax.TYPE_BITS}))
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2635
+fn byte_buffer_method_return(method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len" | "capacity" | "position", 0) -> Val(Val(Type.Int))
+        ("is_empty" | "eof" | "is_ascii", 0) | ("contains" | "starts_with" | "ends_with", 1) -> Val(Val(Type.Bool))
+        ("clear" | "rewind" | "flush" | "close" | "shutdown", 0) | ("seek" | "copy_to" | "write_to", 1) -> Val(None)
+        ("to_bytes" | "get_buffer" | "buffer", 0) -> Val(Val(Type.List{element: u8t()}))
+        ("to_string" | "string", 0) -> Val(Val(Type.String))
+        ("trim" | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title" | "clone" | "copy", 0) | ("join", 1) | ("replace", 2) -> Val(Val(Type.Named{name: Syntax.TYPE_BYTES}))
+        ("lines", 0) | ("split", 1) -> Val(Val(Type.List{element: Type.String}))
+        ("first" | "next" | "read_byte", 0) | ("get", 1) -> Val(Val(Type.Option{inner: u8t()}))
+        ("read", 0) | ("read_bytes", 1) -> Val(Val(Type.Option{inner: Type.List{element: u8t()}}))
+        ("read_string", 1) -> Val(Val(Type.Option{inner: Type.String}))
+        ("index_of" | "last_index_of", 1) -> Val(Val(Type.Option{inner: Type.Int}))
+        ("partition", 1) -> Val(Val(Type.Result{ok: Type.List{element: Type.Named{name: Syntax.TYPE_BYTES}}, err: Type.String}))
+        ("equal", 1) -> Val(Val(Type.Bool))
+        ("compare", 1) -> Val(Val(Type.Int))
+        ("parse", 0) -> Val(Val(Type.Result{ok: Type.Int, err: Type.String}))
+        ("write_u8" | "write_byte" | "write_i8" | "write_u16_le" | "write_u16_be" | "write_i16_le" | "write_i16_be" | "write_u32_le" | "write_u32_be" | "write_i32_le" | "write_i32_be" | "write_u64_le" | "write_u64_be" | "write_i64_le" | "write_i64_be" | "write_f32_le" | "write_f32_be" | "write_f64_le" | "write_f64_be" | "write_bytes" | "write", 1) -> Val(None)
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2688
+fn bag_method_return(_elem: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == { ("len", 0) | ("count", 1) -> Val(Val(Type.Int)) ("is_empty", 0) | ("add" | "has" | "any", 1) -> Val(Val(Type.Bool)) ("remove", 1) -> Val(None) else -> None }
+}
+// Rust: crates/jet-foundation/src/Collections.rs:2702
+fn deque_method_return(elem: Type, method: String, nargs: Int) -> Type?? Never! {
+    if (method, nargs) == {
+        ("len" | "capacity", 0) -> Val(Val(Type.Int))
+        ("is_empty", 0) | ("contains", 1) -> Val(Val(Type.Bool))
+        ("push_front" | "push_back" | "clear" | "delete" | "reverse", _) -> Val(None)
+        ("pop_front" | "pop_back" | "peek_front" | "peek_back", 0) | ("get", 1) -> Val(Val(Type.Option{inner: ~elem}))
+        ("to_list", 0) -> Val(Val(Type.List{element: ~elem}))
+        ("join", 1) -> Val(Val(Type.String))
+        ("split", 1) -> Val(Val(Type.Apply{name: Syntax.TYPE_QUEUE, args: [Type]{~elem}}))
+        else -> None
+    }
+}
+
+// Rust: crates/jet-foundation/src/Collections.rs:2724
+pub fn builtin_method_mutates(recv_ty: Type, method: String) -> Bool Never! {
+    if recv_ty == {
+        .Tagged(_, inner) | .Result(inner, _) -> builtin_method_mutates(inner, method)
+        .List(_) | .FixedList(_, _) -> if method == { "push" | "append" | "try_push" | "try_reserve" | "pop" | "insert" | "remove" | "extend" | "reverse" | "sort" | "sort_by" | "sort_desc" | "sort_by_desc" | "clear" | "update_first" | "split_write" | "get_disjoint_write" | "edit_disjoint" -> true else -> false }
+        .Map(_, _, _) -> if method == { "add" | "replace" | "try_insert" | "add_new" | "setdefault" | "remove" | "pop" | "pop_first" | "clear" | "update" -> true else -> false }
+        .String -> method == "try_push"
+        .Apply(name, _) if name == "Set" -> if method == { "add" | "remove" | "discard" | "update" | "difference_update" | "intersection_update" | "symmetric_difference_update" | "pop" | "replace" | "clear" -> true else -> false }
+        .Apply(name, _) if name == Syntax.TYPE_RANK -> if method == { "add" | "remove" | "clear" -> true else -> false }
+        .Apply(name, _) if name == Syntax.TYPE_PRIORITY_QUEUE -> if method == { "push" | "pop" | "clear" -> true else -> false }
+        .Apply(name, _) if name == Syntax.TYPE_LRU -> if method == { "add" | "add_new" | "get" | "remove" | "clear" -> true else -> false }
+        .Named(name) if name == Syntax.TYPE_BITS -> if method == { "add" | "remove" | "clear" -> true else -> false }
+        .Named(name) if name == Syntax.TYPE_BYTES -> if method == { "write_u8" | "write_byte" | "write_i8" | "write_u16_le" | "write_u16_be" | "write_i16_le" | "write_i16_be" | "write_u32_le" | "write_u32_be" | "write_i32_le" | "write_i32_be" | "write_u64_le" | "write_u64_be" | "write_i64_le" | "write_i64_be" | "write_f32_le" | "write_f32_be" | "write_f64_le" | "write_f64_be" | "write_bytes" | "write" | "write_to" | "clear" | "seek" | "rewind" | "next" | "read" | "read_byte" | "read_bytes" | "read_string" | "flush" | "close" | "shutdown" | "copy_to" -> true else -> false }
+        .Apply(name, _) if name == Syntax.TYPE_TALLY -> if method == { "add" | "remove" | "clear" -> true else -> false }
+        .Apply(name, _) if name == Syntax.TYPE_QUEUE -> if method == { "push_front" | "push_back" | "pop_front" | "pop_back" | "clear" | "delete" | "reverse" | "split" -> true else -> false }
+        .Apply(_, _) if is_iter_type(recv_ty) -> method == "next"
+        .Named(name) if name == Syntax.CLOCK_TYPE -> if method == { "tick" | "advance" | "wait" -> true else -> false }
+        .Named(name) if name == Syntax.RNG_TYPE -> if method == { "int" | "float" | "float_range" | "bool" | "normal" | "exponential" | "bytes" | "split" | "pick" | "weighted_pick" | "sample" | "shuffle" -> true else -> false }
+        .Named("HistoryRNG") -> if method == { "next_u64" | "below" -> true else -> false }
+        .Named(name) if name == Syntax.FAKE_TYPE -> if method == { "name" | "email" | "host" | "address" -> true else -> false }
+        .Named(name) if name == Syntax.SOLVER_TYPE -> method == "require"
+        else -> false
+    }
+}
+
+// Rust: crates/jet-foundation/src/Collections.rs:2886
+pub fn builtin_method_arg_types(recv_ty: Type, method: String) -> [Type]? Never! {
+    if recv_ty == .Tagged(_, inner) -> return builtin_method_arg_types(inner, method)
+    if Syntax.numeric_conversion_source(method) == .Val(source_name) {
+        if Numeric.precise_conversion_return(recv_ty, method, 1) == .Val(_) {
+            source := if source_name == {
+                "Int" -> Type.Int
+                "Float" -> Type.Float
+                name if Numeric.is_exact_type_name(name) -> Type.Named{name: ~name}
+                else -> return None
+            }
+            return Val([Type]{^source})
+        }
+    }
+    if recv_ty.is_numeric() {
+        if recv_ty == .IntN(_, _) && numeric_overflow_method(method, 1) == .Val(_) -> return Val([Type]{~recv_ty})
+        if Syntax.numeric_conversion_source(method) == .Val(source_name) {
+            if AST.numeric_type_from_name(source_name) == .Val(source) -> return Val([Type]{^source})
+        }
+    }
+    if recv_ty == .Apply(name, args) {
+        if name == "Atomic" && args.len() == 1 -> return atomic_method_arg_types(args[0], method)
+    }
+    if recv_ty == {
+        .Named(n) if n == Syntax.TYPE_AUTHORITY && (method == "with" || method == "without") -> Val([Type]{Type.String})
+        .Named(n) if n == Syntax.TYPE_ORDERING -> if method == {
+            "then" -> Val([Type]{Type.Named{name: Syntax.TYPE_ORDERING}})
+            "reverse" -> Val([Type]{})
+            else -> None
+        }
+        .Named(n) if n == Syntax.TYPE_RANGE && method == "contains" -> Val([Type]{Type.Int})
+        .Named("WrappedVaultKey") if method == "from_bytes" -> Val([Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}})
+        .Named("KeyUnlock") if method == "Recipient" -> Val([Type]{Type.Named{name: "X25519SecretKey"}})
+        .Named("KeyUnlock") if method == "Passphrase" -> Val([Type]{Type.Named{name: "Secret"}})
+        .Named(n) if n == Syntax.DURATION_TYPE && method == Syntax.METHOD_DURATION_IN -> Val([Type]{Type.Named{name: Syntax.DURATION_UNIT_TYPE}})
+        .Named(n) if n == Syntax.DURATION_TYPE && method == "difference" -> Val([Type]{Type.Named{name: Syntax.DURATION_TYPE}})
+        .Named(n) if n == Syntax.DURATION_TYPE && method == "total_in" -> Val([Type]{Type.String})
+        .Named(n) if n == Syntax.DURATION_TYPE && method == "round" -> Val([Type]{Type.String, Type.Int, Type.String})
+        .Named("WrappedVaultKey") -> Val([Type]{})
+        .Named(n) if n == Syntax.TYPE_BUILD_CONTEXT -> if method == {
+            "generate" | "find" | "embed" -> Val([Type]{Type.String})
+            "fetch" | "plugin" -> Val([Type]{Type.String, Type.String})
+            "action" -> Val([Type]{Type.String, Type.List{element: Type.String}, Type.List{element: Type.String}, Type.List{element: Type.String}, Type.List{element: Type.String}, Type.Named{name: Syntax.TYPE_BUILD_TOOLCHAIN}, Type.List{element: Type.Named{name: Syntax.TYPE_BUILD_PROBE}}})
+            "legacy" -> Val([Type]{Type.String, Type.String, Type.List{element: Type.String}, Type.List{element: Type.String}, Type.List{element: Type.String}, Type.List{element: Type.String}})
+            "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish" -> Val([Type]{Type.String, Type.List{element: Type.String}, Type.List{element: Type.Named{name: Syntax.TYPE_BUILD_ACTION}}})
+            "toolchain" -> Val([Type]{Type.String, Type.String})
+            "probe" -> Val([Type]{Type.String, Type.String, Type.String})
+            "error" -> Val([Type]{Type.Named{name: Syntax.TYPE_SOURCE_SPAN}, Type.String, Type.String, Type.String, Type.String})
+            "plan" -> Val([Type]{Type.Named{name: Syntax.TYPE_BUILD_TARGET}})
+            else -> None
+        }
+        .Named(n) if n == Syntax.TYPE_PROGRAM_INFO -> Val([Type]{})
+        .Named(n) if n == Syntax.TYPE_TYPE_INFO && (method == "implements" || method == "has_method" || method == "has_marker") -> Val([Type]{Type.String})
+        .Named("FieldInfo" | "MethodInfo") if method == "has_marker" -> Val([Type]{Type.String})
+        .Named("CompilerLexed") if method == "source" || method == "tokens" || method == "diagnostics" -> Val([Type]{})
+        .Named("CompilerSyntaxTree") if method == "source" || method == "items" || method == "diagnostics" -> Val([Type]{})
+        .Named("CompilerChecked") if method == "source" || method == "syntax" || method == "functions" || method == "effects" || method == "diagnostics" || method == "semantic_index" -> Val([Type]{})
+        .Named("CompilerSourceMap") if method == "sources" || method == "generated_lines" -> Val([Type]{})
+        .Named("FunctionInfo") if method == "reaches_panic" -> Val([Type]{})
+        .Named("EffectInfo") if method == "has" -> Val([Type]{Type.String})
+        .Apply(name, args) if (name == Syntax.TYPE_ITER || name == Syntax.TYPE_VIEW_ITER) && args.len() == 1 -> {
+            if method == "to_list" || method == "collect" -> return Val([Type]{})
+            builtin_method_arg_types(Type.List{element: ~args[0]}, method)
+        }
+        .List(inner) -> if method == {
+            "try_new" -> Val([Type]{})
+            "try_with_capacity" | "try_reserve" | "get" | "split_write" -> Val([Type]{Type.Int})
+            "push" | "append" | "try_push" | "contains" | "index_of" | "index" | "count" -> Val([Type]{~inner})
+            "insert" -> Val([Type]{Type.Int, ~inner})
+            "remove" -> Val([Type]{~inner, Type.Named{name: Syntax.TYPE_REMOVE_BY}})
+            "extend" | "concat" -> Val([Type]{Type.List{element: ~inner}})
+            "get_disjoint_write" -> Val([Type]{Type.List{element: Type.Int}})
+            "edit_disjoint" -> Val([Type]{Type.List{element: Type.Int}, sema_collection_fn([Type]{Type.Apply{name: "ViewMut", args: [Type]{~inner}}, Type.Apply{name: "ViewMut", args: [Type]{~inner}}}, None)})
+            "join" -> Val([Type]{Type.String})
+            // Open callback returns preserve sema refinement and implicit failure rows.
+            "map" | "filter" | "each" | "min_by" | "max_by" | "group_by" | "count_by" | "flat_map" | "filter_map" | "para_map" | "dedup_by" | "is_sorted_by" | "binary_search_by" | "min_max_by" -> Val([Type]{sema_collection_fn([Type]{~inner}, None)})
+            "find" | "any" | "all" | "count_where" | "take_while" | "skip_while" | "position" | "partition" | "para_filter" | "para_partition" -> Val([Type]{sema_collection_fn([Type]{~inner}, Val(Type.Bool))})
+            "update_first" -> Val([Type]{sema_collection_fn([Type]{~inner}, Val(Type.Bool)), ~inner})
+            "sort_by" | "sort_by_desc" -> Val([Type]{sort_by_callback_type(inner, false)})
+            "reduce" | "fold" | "scan" -> Val([Type]{Type.Int, sema_collection_fn([Type]{Type.Int, ~inner}, Val(Type.Int))})
+            "para_fold" -> Val([Type]{sema_collection_fn([Type]{}, None), sema_collection_fn([Type]{Type.Int, ~inner}, Val(Type.Int)), sema_collection_fn([Type]{Type.Int, Type.Int}, Val(Type.Int))})
+            "take" | "skip" | "step_by" | "chunks" | "windows" | "repeat" | "drop_last" | "split" | "cycle" -> Val([Type]{Type.Int})
+            "intersperse" | "last_index_of" | "binary_search" -> Val([Type]{~inner})
+            "replace" -> Val([Type]{Type.Int, ~inner})
+            "compare" | "starts_with" | "ends_with" | "equal" | "union" | "intersection" | "difference" -> Val([Type]{Type.List{element: ~inner}})
+            "slice" | "view" -> Val([Type]{Type.Int, Type.Int})
+            "zip" | "dedup" | "indexed" | "indexes" | "sum" | "product" | "min" | "max" | "flatten" | "unzip" | "is_sorted" | "shuffle" | "average" | "to_set" | "copy" | "random" | "min_max" | "counts" -> Val([Type]{})
+            "chunk_while" -> Val([Type]{sema_collection_fn([Type]{~inner, ~inner}, Val(Type.Bool))})
+            else -> Val([Type]{})
+        }
+        .Map(key, _, value) -> if method == {
+            "add" | "try_insert" | "add_new" -> Val([Type]{~key, ~value})
+            "get" | "remove" | "pop" | "has_key" -> Val([Type]{~key})
+            "contains_value" -> Val([Type]{~value})
+            "merge" | "equal" | "intersection" | "update" -> Val([Type]{Type.Map{key: ~key, key_span: None, value: ~value}})
+            "slice" -> Val([Type]{Type.List{element: ~key}})
+            "top_n" -> Val([Type]{Type.Int})
+            "any" | "all" | "filter" -> Val([Type]{sema_collection_fn([Type]{~key, ~value}, Val(Type.Bool))})
+            "map" | "flat_map" | "each" -> Val([Type]{sema_collection_fn([Type]{~key, ~value}, None)})
+            "fold" -> Val([Type]{Type.Int, sema_collection_fn([Type]{Type.Int, ~key, ~value}, Val(Type.Int))})
+            else -> Val([Type]{})
+        }
+        .String -> if method == {
+            "try_push" | "contains" | "starts_with" | "startswith" | "ends_with" | "endswith" | "split" | "rsplit" | "index_of" | "index" | "rindex" | "count" | "find" | "rfind" | "partition" | "rpartition" | "split_once" | Syntax.METHOD_CUT_LAST | "removeprefix" | "removesuffix" | "after" | "before" | "last_index_of" | "compare" | "equal" | "matches" | "match" -> Val([Type]{Type.String})
+            "zfill" | "expandtabs" | "repeat" -> Val([Type]{Type.Int})
+            "center" | "ljust" | "rjust" | "pad_start" | "pad_end" -> Val([Type]{Type.Int, Type.String})
+            "from_bytes" | "from_bytes_lossy" -> Val([Type]{Type.List{element: u8t()}})
+            "replace" -> Val([Type]{Type.String, Type.String})
+            "slice" -> Val([Type]{Type.Int, Type.Int})
+            else -> None
+        }
+        .Int | .Float -> if method == {
+            "parse" -> Val([Type]{Type.String})
+            Syntax.METHOD_DIV_EUCLID | Syntax.METHOD_REM_EUCLID | "to_radix" if recv_ty == Type.Int -> Val([Type]{Type.Int})
+            "from_radix" if recv_ty == Type.Int -> Val([Type]{Type.String, Type.Int})
+            else -> None
+        }
+        .Option(inner) -> if method == {
+            "or_err" -> Val([Type]{Type.String})
+            "map" -> Val([Type]{sema_collection_fn([Type]{~inner}, None)})
+            else -> Val([Type]{})
+        }
+        .Apply("Sender", args) -> if method == { "send" -> Val([Type]{args.first() ?? Type.Int}) else -> Val([Type]{}) }
+        .Apply("Task", _) -> Val([Type]{})
+        .Apply("Cell", args) -> {
+            t := args.first() ?? Type.Int
+            if method == {
+                "set" | "replace" -> Val([Type]{~t})
+                "get_or_set" -> {
+                    value := if t == { .Option(inner) -> ~inner else -> ^t }
+                    Val([Type]{sema_collection_fn([Type]{}, Val(^value))})
+                }
+                "read" | "edit" -> Val([Type]{sema_collection_fn([Type]{^t}, None)})
+                else -> Val([Type]{})
+            }
+        }
+        .Apply("CellReadGuard" | "CellEditGuard", args) -> {
+            t := args.first() ?? Type.Int
+            if method == {
+                "set" -> Val([Type]{~t})
+                "read" | "edit" | "map" -> Val([Type]{sema_collection_fn([Type]{^t}, None)})
+                "split" -> Val([Type]{sema_collection_fn([Type]{~t}, None), sema_collection_fn([Type]{^t}, None)})
+                else -> Val([Type]{})
+            }
+        }
+        // Preserve Rust arm order: this Rank arm precedes the later wider arm.
+        .Apply(name, args) if name == Syntax.TYPE_RANK -> if method == {
+            "add" | "remove" | "has" -> Val([Type]{args.first() ?? Type.Int})
+            "union" -> Val([Type]{Type.Apply{name: Syntax.TYPE_RANK, args: [Type]{args.first() ?? Type.Int}}})
+            else -> Val([Type]{})
+        }
+        .Apply(name, args) if name == Syntax.TYPE_PRIORITY_QUEUE -> if method == {
+            "push" -> Val([Type]{args.first() ?? Type.Int})
+            "remove" -> Val([Type]{args.first() ?? Type.Int, Type.Named{name: Syntax.TYPE_REMOVE_BY}})
+            else -> Val([Type]{})
+        }
+        .Apply(name, args) if name == Syntax.TYPE_LRU && args.len() >= 2 -> if method == {
+            "add" | "add_new" -> Val([Type]{~args[0], ~args[1]})
+            "get" | "remove" | "has_key" -> Val([Type]{~args[0]})
+            else -> Val([Type]{})
+        }
+        .Named(n) if n == Syntax.TYPE_BITS -> if method == { "add" | "remove" | "has" -> Val([Type]{Type.Int}) else -> Val([Type]{}) }
+        .Named(n) if n == Syntax.TYPE_BYTES -> if method == {
+            "write_bytes" | "write" -> Val([Type]{Type.List{element: u8t()}})
+            "write_u8" | "write_byte" -> Val([Type]{u8t()})
+            "write_i8" -> Val([Type]{Type.IntN{signed: true, bits: 8}})
+            "write_u16_le" | "write_u16_be" -> Val([Type]{Type.IntN{signed: false, bits: 16}})
+            "write_i16_le" | "write_i16_be" -> Val([Type]{Type.IntN{signed: true, bits: 16}})
+            "write_u32_le" | "write_u32_be" -> Val([Type]{Type.IntN{signed: false, bits: 32}})
+            "write_i32_le" | "write_i32_be" -> Val([Type]{Type.IntN{signed: true, bits: 32}})
+            "write_u64_le" | "write_u64_be" -> Val([Type]{Type.IntN{signed: false, bits: 64}})
+            "write_i64_le" | "write_i64_be" -> Val([Type]{Type.IntN{signed: true, bits: 64}})
+            "write_f32_le" | "write_f32_be" -> Val([Type]{Type.Float32})
+            "write_f64_le" | "write_f64_be" -> Val([Type]{Type.Float})
+            "seek" | "read_bytes" | "read_string" | "get" -> Val([Type]{Type.Int})
+            "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "last_index_of" -> Val([Type]{Type.String})
+            "partition" | "equal" | "compare" | "copy_to" | "write_to" -> Val([Type]{Type.Named{name: Syntax.TYPE_BYTES}})
+            "replace" -> Val([Type]{Type.String, Type.String})
+            "join" -> Val([Type]{Type.List{element: Type.String}})
+            else -> Val([Type]{})
+        }
+        .Apply(name, args) if name == Syntax.TYPE_SIGNAL -> if method == { "set" -> Val([Type]{args.first() ?? Type.Int}) else -> Val([Type]{}) }
+        .Apply(name, _) if name == Syntax.TYPE_DERIVED -> Val([Type]{})
+        .Apply(name, _) if name == Syntax.TYPE_COMPUTED -> Val([Type]{})
+        .Apply(name, args) if name == Syntax.TYPE_EVENT -> {
+            payload := args.first() ?? Type.Int
+            if method == {
+                "on" | "once" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, sema_collection_fn([Type]{^payload}, None)})
+                "on_priority" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, Type.Int, sema_collection_fn([Type]{^payload}, None)})
+                "emit" -> Val([Type]{^payload})
+                else -> Val([Type]{})
+            }
+        }
+        .Apply(name, args) if name == Syntax.TYPE_ASYNC_EVENT -> {
+            payload := args.first() ?? Type.Int
+            error := args.get(1) ?? Type.String
+            handler_ret := Type.Result{ok: Type.Named{name: Syntax.INTERNAL_UNIT_TYPE}, err: ^error}
+            if method == {
+                "on" | "once" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, sema_collection_fn([Type]{^payload}, Val(^handler_ret))})
+                "on_priority" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, Type.Int, sema_collection_fn([Type]{^payload}, Val(^handler_ret))})
+                "emit_async" -> Val([Type]{^payload})
+                else -> Val([Type]{})
+            }
+        }
+        .Apply(name, args) if name == Syntax.TYPE_HOOK -> {
+            payload := args.first() ?? Type.Int
+            result := args.get(1) ?? Type.Int
+            if method == {
+                "on" | "once" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, sema_collection_fn([Type]{^payload}, Val(^result))})
+                "on_priority" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, Type.Int, sema_collection_fn([Type]{^payload}, Val(^result))})
+                "run" -> Val([Type]{^payload, ^result})
+                else -> Val([Type]{})
+            }
+        }
+        .Apply(name, args) if name == Syntax.TYPE_DECISION_HOOK -> {
+            payload := args.first() ?? Type.Int
+            error := args.get(1) ?? Type.String
+            decision := Type.Apply{name: Syntax.TYPE_HOOK_DECISION, args: [Type]{~payload, ^error}}
+            if method == {
+                "on" | "once" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, sema_collection_fn([Type]{^payload}, Val(^decision))})
+                "on_priority" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, Type.Int, sema_collection_fn([Type]{^payload}, Val(^decision))})
+                "run" -> Val([Type]{^payload})
+                else -> Val([Type]{})
+            }
+        }
+        .Named(n) if n == Syntax.TYPE_EFFECT || n == Syntax.TYPE_SUBSCRIPTION || n == Syntax.TYPE_EVENT_SCOPE || n == Syntax.TYPE_EVENT_TRACE -> Val([Type]{})
+        .Named(n) if n == Syntax.TYPE_WATCH_HANDLE -> if method == {
+            "on" | "once" -> Val([Type]{Type.Named{name: Syntax.TYPE_EVENT_SCOPE}, sema_collection_fn([Type]{Type.Named{name: Syntax.TYPE_WATCH_EVENT}}, None)})
+            else -> Val([Type]{})
+        }
+        .Named(n) if n == Syntax.TYPE_WATCH_SET -> if method == {
+            "add" -> Val([Type]{Type.Named{name: Syntax.TYPE_WATCH_HANDLE}})
+            else -> Val([Type]{})
+        }
+        .Apply("Set", args) -> {
+            elem := args.first() ?? Type.Int
+            if method == {
+                "add" | "has" | "remove" | "discard" | "pop" -> Val([Type]{~elem})
+                "equal" | "union" | "intersection" | "difference" | "symmetric_difference" | "update" | "difference_update" | "intersection_update" | "symmetric_difference_update" | "is_subset" | "issubset" | "is_superset" | "issuperset" | "is_disjoint" | "isdisjoint" -> Val([Type]{Type.Apply{name: "Set", args: [Type]{~elem}}})
+                "filter" | "each" | "map" | "flat_map" -> Val([Type]{sema_collection_fn([Type]{~elem}, None)})
+                "all" -> Val([Type]{sema_collection_fn([Type]{~elem}, Val(Type.Bool))})
+                "fold" -> Val([Type]{Type.Int, sema_collection_fn([Type]{Type.Int, ~elem}, Val(Type.Int))})
+                else -> Val([Type]{})
+            }
+        }
+        .Apply(name, args) if name == Syntax.TYPE_RANK -> {
+            elem := args.first() ?? Type.Int
+            if method == {
+                "add" | "has" | "remove" -> Val([Type]{~elem})
+                "union" | "intersection" | "difference" | "symmetric_difference" | "is_subset" | "is_superset" | "is_disjoint" -> Val([Type]{Type.Apply{name: Syntax.TYPE_RANK, args: [Type]{^elem}}})
+                else -> Val([Type]{})
+            }
+        }
+        .Apply(name, args) if name == Syntax.TYPE_TALLY -> {
+            elem := args.first() ?? Type.Int
+            if method == {
+                "add" | "remove" | "has" | "count" -> Val([Type]{^elem})
+                "any" -> Val([Type]{sema_collection_fn([Type]{^elem}, Val(Type.Bool))})
+                else -> Val([Type]{})
+            }
+        }
+        .Apply(name, args) if name == Syntax.TYPE_QUEUE -> {
+            elem := args.first() ?? Type.Int
+            if method == {
+                "push_front" | "push_back" | "contains" | "delete" -> Val([Type]{^elem})
+                "get" | "split" -> Val([Type]{Type.Int})
+                "join" -> Val([Type]{Type.String})
+                else -> Val([Type]{})
+            }
+        }
+        .Apply("View" | "ViewMut", args) -> {
+            elem := args.first() ?? Type.Int
+            if method == {
+                "get" -> Val([Type]{Type.Int})
+                "contains" | "index_of" -> Val([Type]{^elem})
+                "join" -> Val([Type]{Type.String})
+                "fold" -> Val([Type]{Type.Int, sema_collection_fn([Type]{Type.Int, ^elem}, Val(Type.Int))})
+                "map" -> Val([Type]{sema_collection_fn([Type]{^elem}, None)})
+                else -> Val([Type]{})
+            }
+        }
+        .Named(n) if n == Syntax.CLOCK_TYPE -> if method == {
+            "new" | "tick" | "advance" -> Val([Type]{Type.Int})
+            "wait" -> Val([Type]{Type.Named{name: Syntax.DURATION_TYPE}})
+            else -> Val([Type]{})
+        }
+        .Named(n) if n == Syntax.RNG_TYPE -> if method == {
+            "int" -> Val([Type]{Type.Int, Type.Int})
+            "float_range" | "normal" -> Val([Type]{Type.Float, Type.Float})
+            "bool" | "exponential" -> Val([Type]{Type.Float})
+            "bytes" -> Val([Type]{Type.Int})
+            else -> Val([Type]{})
+        }
+        .Named("HistoryRNG") -> if method == { "below" -> Val([Type]{Type.IntN{signed: false, bits: 64}}) else -> Val([Type]{}) }
+        .Named(n) if n == Syntax.FAKE_TYPE -> if method == { "locale" -> Val([Type]{Type.String}) else -> Val([Type]{}) }
+        .Named(n) if n == Syntax.SOLVER_TYPE -> if method == { "new" -> Val([Type]{Type.Int}) "require" -> Val([Type]{Type.Bool}) else -> Val([Type]{}) }
+        .Named(n) if n == Syntax.DURATION_TYPE -> Val([Type]{})
+        else -> None
+    }
+}
+
+// Rust: crates/jet-foundation/src/Collections.rs:3874
+pub fn builtin_needs_mut_receiver(recv_ty: Type, method: String) -> Bool Never! {
+    builtin_method_mutates(recv_ty, method)
+}
+// Rust: crates/jet-foundation/src/Collections.rs:3881
+pub enum BuiltinReceiverBorrow { Read TwoPhaseWrite EagerWrite Move }
+// Rust: crates/jet-foundation/src/Collections.rs:3888
+pub fn builtin_receiver_borrow(recv_ty: Type, method: String) -> BuiltinReceiverBorrow Never! {
+    // Rust: crates/jet-foundation/src/Collections.rs:3889
+    fn is_list_receiver(ty: Type) -> Bool Never! {
+        if ty == {
+            .List(_) | .FixedList(_, _) -> true
+            .Tagged(_, inner) | .Result(inner, _) -> is_list_receiver(inner)
+            else -> false
+        }
+    }
+    if is_iter_type(recv_ty) -> return if method == "next" -> BuiltinReceiverBorrow.EagerWrite else -> BuiltinReceiverBorrow.Move
+    if !builtin_method_mutates(recv_ty, method) -> return BuiltinReceiverBorrow.Read
+    eager_list := is_list_receiver(recv_ty) && if method == { "remove" | "sort_by" | "sort_desc" | "sort_by_desc" | "update_first" | "edit_disjoint" -> true else -> false }
+    eager_capability := if recv_ty == { .Named(name) -> name == Syntax.CLOCK_TYPE || name == Syntax.RNG_TYPE || name == "HistoryRNG" || name == Syntax.FAKE_TYPE || name == Syntax.SOLVER_TYPE else -> false }
+    // Helper first-argument writes activate immediately; ordinary method writes reserve first.
+    if eager_list || eager_capability -> BuiltinReceiverBorrow.EagerWrite else -> BuiltinReceiverBorrow.TwoPhaseWrite
+}

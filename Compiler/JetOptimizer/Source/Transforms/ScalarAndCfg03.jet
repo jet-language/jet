@@ -934,8 +934,8 @@ fn scalar_counted_shape(function: MIRFunction, positions: [U64:Int], header: MIR
     }
     constants :: mir_pass_collect_scalar_constants(function)
     step :: scalar_int_constant(constants, advance_row.step) ?? return None
-    seen_start := [U64:Bool]{}
-    seen_end := [U64:Bool]{}
+    seen_start := [MIRValueID:Bool]{} // GATE #4499 exact-ID set carrier.
+    seen_end := [MIRValueID:Bool]{}
     if step <= 0 || !end_is_invariant || value_depends_on_place(function, start, cursor_place, &seen_start) || value_depends_on_place(function, end, cursor_place, &seen_end) || !scalar_cursor_references_are_clean(function, header, cursor_value, blocks, advance_row.block, advance_row.write, cursor_place) -> return None
     body_cursor :: scalar_loop_cursor_value(function, blocks, advance_row.block, cursor_place) ?? cursor_value
     Val(CanonicalLoopShape{form: .Counted, cursor: Val(body_cursor), cursor_place: Val(cursor_place), range: Val(CanonicalLoopRange{start: start, end: end, step: Val(advance_row.step), exclusive: exclusive}), body: then_target, exit: Val(else_target), advance: Val(advance_row.block), blocks: blocks})

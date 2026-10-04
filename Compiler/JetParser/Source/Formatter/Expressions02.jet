@@ -1,0 +1,1804 @@
+// PORT-PENDING 2066 crates-jet-parser-src-formatter-expressions-slice-1: crates/jet-parser/src/Formatter/Expressions.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use crate::AST::{
+//RS     AccessConvention, BinOp, Call, CallArg, EnumLitArg, Expr, ForKind, OrFallback, Pattern, Stmt,
+//RS     StrPart, Type, UnOp,
+//RS };
+//RS 
+//RS impl<'a> Fmt<'a> {
+//RS     /// D-FMT-SIMPLIFY1=A / R3: a direct returned struct literal already has its
+//RS     /// type from the function contract, so its `Type.` head is redundant.
+//RS     fn struct_lit_head_is_redundant(
+//RS         &self,
+//RS         type_name: &str,
+//RS         type_args: &[Type],
+//RS         import_ns: Option<&str>,
+//RS     ) -> bool {
+//RS         let Some(expected) = self.expected_return_type.as_ref() else {
+//RS             return false;
+//RS         };
+//RS         let name = import_ns
+//RS             .map(|ns| format!("{ns}.{type_name}"))
+//RS             .unwrap_or_else(|| type_name.to_string());
+//RS         match expected {
+//RS             Type::Named(expected) => type_args.is_empty() && expected == &name,
+//RS             Type::Apply {
+//RS                 name: expected,
+//RS                 args,
+//RS             } => expected == &name && args == type_args,
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-FMT1: render an `if`-expression chain with a shared `inline` decision.
+//RS     /// `expr` must be `Expr::If`.
+//RS     fn fmt_if_expr(&mut self, expr: &Expr, inline: bool) {
+//RS         let Expr::If {
+//RS             cond,
+//RS             then_body,
+//RS             then_value,
+//RS             else_body,
+//RS             else_value,
+//RS             ..
+//RS         } = expr
+//RS         else {
+//RS             unreachable!("fmt_if_expr called on non-if expression");
+//RS         };
+//RS         self.write("if ");
+//RS         self.fmt_cond(cond);
+//RS         self.write(" ");
+//RS         self.write(Syntax::OP_UNIFIED_ARROW);
+//RS         self.write(" ");
+//RS         if then_body.is_empty() && !self.value_was_braced(then_value) {
+//RS             self.fmt_expr(then_value, Prec::OrFallback);
+//RS         } else {
+//RS             self.fmt_value_block(then_body, then_value, inline);
+//RS         }
+//RS         if else_body.is_empty() && matches!(else_value.as_ref(), Expr::If { .. }) {
+//RS             self.write(" else ");
+//RS             self.fmt_if_expr(else_value, inline);
+//RS         } else if else_body.is_empty() && !self.value_was_braced(else_value) {
+//RS             self.write(" else ");
+//RS             self.write(Syntax::OP_UNIFIED_ARROW);
+//RS             self.write(" ");
+//RS             self.fmt_expr(else_value, Prec::OrFallback);
+//RS         } else {
+//RS             self.write(" else ");
+//RS             self.write(Syntax::OP_UNIFIED_ARROW);
+//RS             self.write(" ");
+//RS             self.fmt_value_block(else_body, else_value, inline);
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-RESULT-DECON2=B: recover the compact two-arm surface from the same
+//RS     /// nested `Expr::If`/`PatternTest` shape used by ordinary value dispatch.
+//RS     fn result_handler_parts<'b>(
+//RS         &self,
+//RS         expr: &'b Expr,
+//RS     ) -> Option<(
+//RS         &'b Expr,
+//RS         &'b str,
+//RS         &'b [Stmt],
+//RS         &'b Expr,
+//RS         &'b str,
+//RS         &'b [Stmt],
+//RS         &'b Expr,
+//RS     )> {
+//RS         let Expr::If {
+//RS             cond,
+//RS             then_body,
+//RS             then_value,
+//RS             else_value,
+//RS             ..
+//RS         } = expr
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         let Expr::PatternTest {
+//RS             subject,
+//RS             pattern: Pattern::Ok { binding, .. },
+//RS             ..
+//RS         } = cond.as_ref()
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         let Expr::If {
+//RS             cond: err_cond,
+//RS             then_body: err_body,
+//RS             then_value: err_value,
+//RS             else_value: terminal,
+//RS             ..
+//RS         } = else_value.as_ref()
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         let Expr::PatternTest {
+//RS             pattern:
+//RS                 Pattern::Err {
+//RS                     binding: err_binding,
+//RS                     ..
+//RS                 },
+//RS             ..
+//RS         } = err_cond.as_ref()
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         if !matches!(terminal.as_ref(), Expr::NoElse(_)) {
+//RS             return None;
+//RS         }
+//RS         let start = Self::expr_start(expr);
+//RS         let source = self.src.get(start..expr.span().end)?;
+//RS         let question = source.find('?')?;
+//RS         if !source[question + 1..].contains('!') {
+//RS             return None;
+//RS         }
+//RS         Some((
+//RS             subject.as_ref(),
+//RS             binding,
+//RS             then_body,
+//RS             then_value,
+//RS             err_binding,
+//RS             err_body,
+//RS             err_value,
+//RS         ))
+//RS     }
+//RS 
+//RS     fn result_handler_branch_inlineable(&self, body: &[Stmt], value: &Expr) -> bool {
+//RS         if !body.is_empty()
+//RS             || matches!(value, Expr::If { .. } | Expr::NoElse(_))
+//RS             || self.value_was_braced(value)
+//RS         {
+//RS             return false;
+//RS         }
+//RS         let start = Self::expr_start(value);
+//RS         let end = value.span().end;
+//RS         self.src
+//RS             .get(start..end)
+//RS             .is_some_and(|text| !text.contains('\n') && !self.span_has_comment(start, end))
+//RS     }
+//RS 
+//RS     fn result_handler_compact_source(&self, expr: &Expr) -> bool {
+//RS         let start = Self::expr_start(expr);
+//RS         let end = self.result_handler_source_end(expr);
+//RS         self.src
+//RS             .get(start..end)
+//RS             .is_some_and(|_| !self.span_has_comment(start, end))
+//RS     }
+//RS 
+//RS     fn is_result_handler_source(&self, expr: &Expr) -> bool {
+//RS         self.result_handler_parts(expr).is_some()
+//RS     }
+//RS 
+//RS     fn result_handler_branch_start(&self, pattern_end: usize) -> usize {
+//RS         self.source_toks
+//RS             .iter()
+//RS             .find(|token| {
+//RS                 token.span.start >= pattern_end
+//RS                     && matches!(&token.kind, TokKind::UnifiedArrow | TokKind::LambdaArrow)
+//RS             })
+//RS             .map_or(pattern_end, |token| token.span.end)
+//RS     }
+//RS 
+//RS     fn result_handler_branch_end(&self, branch_start: usize, fallback: usize) -> usize {
+//RS         let Some((first, _)) = self.source_toks.iter().enumerate().find(|(_, token)| {
+//RS             token.span.start >= branch_start
+//RS                 && !matches!(
+//RS                     &token.kind,
+//RS                     TokKind::LineComment(_) | TokKind::BlockComment(_)
+//RS                 )
+//RS         }) else {
+//RS             return self.result_handler_comments_end(fallback);
+//RS         };
+//RS         if !matches!(&self.source_toks[first].kind, TokKind::LBrace) {
+//RS             return self.result_handler_comments_end(fallback);
+//RS         }
+//RS         let mut depth = 0usize;
+//RS         for token in &self.source_toks[first..] {
+//RS             match &token.kind {
+//RS                 TokKind::LBrace => depth += 1,
+//RS                 TokKind::RBrace if depth == 1 => {
+//RS                     return self.result_handler_comments_end(token.span.end);
+//RS                 }
+//RS                 TokKind::RBrace => depth -= 1,
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         self.result_handler_comments_end(fallback)
+//RS     }
+//RS 
+//RS     fn result_handler_comments_end(&self, mut end: usize) -> usize {
+//RS         loop {
+//RS             let Some(comment) = self.comments.iter().find(|comment| {
+//RS                 comment.span.start >= end
+//RS                     && line_of(self.src, comment.span.start) == line_of(self.src, end)
+//RS             }) else {
+//RS                 return end;
+//RS             };
+//RS             end = comment.span.end;
+//RS         }
+//RS     }
+//RS 
+//RS     fn result_handler_source_end(&self, expr: &Expr) -> usize {
+//RS         let Expr::If { else_value, .. } = expr else {
+//RS             return expr.span().end;
+//RS         };
+//RS         let Expr::If { cond, .. } = else_value.as_ref() else {
+//RS             return expr.span().end;
+//RS         };
+//RS         let branch_start = self.result_handler_branch_start(cond.span().end);
+//RS         self.result_handler_branch_end(branch_start, expr.span().end)
+//RS     }
+//RS 
+//RS     fn emit_result_handler_comments(&mut self, start: usize, end: usize) {
+//RS         while self.comment_i < self.comments.len() {
+//RS             let (text, span) = {
+//RS                 let comment = &self.comments[self.comment_i];
+//RS                 (comment.text.clone(), comment.span)
+//RS             };
+//RS             if span.start < start || span.start >= end {
+//RS                 break;
+//RS             }
+//RS             self.emit_comment_line(&text);
+//RS             self.comment_i += 1;
+//RS         }
+//RS     }
+//RS 
+//RS     fn fmt_result_handler_branch(
+//RS         &mut self,
+//RS         body: &[Stmt],
+//RS         value: &Expr,
+//RS         expanded: bool,
+//RS         branch_start: usize,
+//RS         branch_end: usize,
+//RS     ) {
+//RS         if !expanded && self.result_handler_branch_inlineable(body, value) {
+//RS             self.write(" ");
+//RS             self.fmt_expr(value, Prec::OrFallback);
+//RS             return;
+//RS         }
+//RS         self.write(" {");
+//RS         self.newline();
+//RS         self.with_indent(|f| {
+//RS             f.with_trailing_comment_limit(branch_end, |f| {
+//RS                 f.fmt_block_stmts(body);
+//RS                 if !body.is_empty() {
+//RS                     f.newline();
+//RS                 }
+//RS                 if matches!(value, Expr::NoElse(_)) {
+//RS                     f.emit_result_handler_comments(branch_start, branch_end);
+//RS                 } else {
+//RS                     let value_start = Self::expr_start(value);
+//RS                     f.emit_result_handler_comments(branch_start, value_start);
+//RS                     f.fmt_expr(value, Prec::OrFallback);
+//RS                     // Keep same-line branch comments beside their value. Any
+//RS                     // comments on following lines are emitted inside this arm.
+//RS                     f.emit_trailing(value.span().end);
+//RS                     f.emit_result_handler_comments(value.span().end, branch_end);
+//RS                 }
+//RS             });
+//RS         });
+//RS         if self.at_line_start {
+//RS             self.write("}");
+//RS         } else {
+//RS             self.end_block();
+//RS         }
+//RS     }
+//RS 
+//RS     fn fmt_result_handler_expr(&mut self, expr: &Expr) {
+//RS         let Some((subject, ok_binding, ok_body, ok_value, err_binding, err_body, err_value)) =
+//RS             self.result_handler_parts(expr)
+//RS         else {
+//RS             unreachable!("result handler formatter called for another if shape");
+//RS         };
+//RS         let (ok_pattern_end, err_pattern_end, err_branch_end) = match expr {
+//RS             Expr::If {
+//RS                 cond, else_value, ..
+//RS             } => match else_value.as_ref() {
+//RS                 Expr::If { cond: err_cond, .. } => (
+//RS                     cond.span().end,
+//RS                     err_cond.span().end,
+//RS                     self.result_handler_branch_end(
+//RS                         self.result_handler_branch_start(err_cond.span().end),
+//RS                         expr.span().end,
+//RS                     ),
+//RS                 ),
+//RS                 _ => unreachable!("result handler formatter called for another if shape"),
+//RS             },
+//RS             _ => unreachable!("result handler formatter called for another if shape"),
+//RS         };
+//RS         let ok_branch_start = self.result_handler_branch_start(ok_pattern_end);
+//RS         let err_branch_start = self.result_handler_branch_start(err_pattern_end);
+//RS         let ok_branch_end = match expr {
+//RS             Expr::If { else_value, .. } => match else_value.as_ref() {
+//RS                 Expr::If { cond, .. } => cond.span().start,
+//RS                 _ => unreachable!("result handler formatter called for another if shape"),
+//RS             },
+//RS             _ => unreachable!("result handler formatter called for another if shape"),
+//RS         };
+//RS         let compact = self.result_handler_compact_source(expr)
+//RS             && self.result_handler_branch_inlineable(ok_body, ok_value)
+//RS             && self.result_handler_branch_inlineable(err_body, err_value);
+//RS         if compact {
+//RS             let saved_out = self.out.len();
+//RS             let saved_col = self.col;
+//RS             let saved_line_start = self.at_line_start;
+//RS             let saved_pending_blank = self.pending_blank;
+//RS             let saved_comment_i = self.comment_i;
+//RS             self.fmt_expr(subject, Prec::OrFallback);
+//RS             self.write(" ? ");
+//RS             self.write(ok_binding);
+//RS             self.write(" ");
+//RS             self.write(Syntax::OP_UNIFIED_ARROW);
+//RS             self.fmt_result_handler_branch(
+//RS                 ok_body,
+//RS                 ok_value,
+//RS                 false,
+//RS                 ok_branch_start,
+//RS                 ok_branch_end,
+//RS             );
+//RS             self.write(" ! ");
+//RS             self.write(err_binding);
+//RS             self.write(" ");
+//RS             self.write(Syntax::OP_UNIFIED_ARROW);
+//RS             self.fmt_result_handler_branch(
+//RS                 err_body,
+//RS                 err_value,
+//RS                 false,
+//RS                 err_branch_start,
+//RS                 err_branch_end,
+//RS             );
+//RS             if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
+//RS                 return;
+//RS             }
+//RS             self.out.truncate(saved_out);
+//RS             self.col = saved_col;
+//RS             self.at_line_start = saved_line_start;
+//RS             self.pending_blank = saved_pending_blank;
+//RS             self.comment_i = saved_comment_i;
+//RS         }
+//RS         self.fmt_expr(subject, Prec::OrFallback);
+//RS         self.write(" ? ");
+//RS         self.write(ok_binding);
+//RS         self.write(" ");
+//RS         self.write(Syntax::OP_UNIFIED_ARROW);
+//RS         self.fmt_result_handler_branch(ok_body, ok_value, true, ok_branch_start, ok_branch_end);
+//RS         self.newline();
+//RS         self.write("! ");
+//RS         self.write(err_binding);
+//RS         self.write(" ");
+//RS         self.write(Syntax::OP_UNIFIED_ARROW);
+//RS         self.fmt_result_handler_branch(err_body, err_value, true, err_branch_start, err_branch_end);
+//RS     }
+//RS 
+//RS     /// The offset of an expression's first source byte.
+//RS     ///
+//RS     /// `Expr::span` is a diagnostic *anchor*, not an extent: `Expr::Field`
+//RS     /// carries the member name's span, `Expr::MethodCall` the method name's,
+//RS     /// `Expr::CallValue` the argument parens'. Asking which token precedes an
+//RS     /// expression therefore has to start from its real left edge — descend the
+//RS     /// leftmost operand until a node whose own span already leads. `min` keeps
+//RS     /// the answer right for the nodes whose span does cover their operand.
+//RS     pub(super) fn expr_start(expr: &Expr) -> usize {
+//RS         let own = expr.span().start;
+//RS         let leftmost = match expr {
+//RS             Expr::Field(base, ..)
+//RS             | Expr::MemberSpread { base, .. }
+//RS             | Expr::OptField { base, .. }
+//RS             | Expr::Index { base, .. }
+//RS             | Expr::Slice { base, .. } => Some(base.as_ref()),
+//RS             Expr::MethodCall { receiver, .. } => Some(receiver.as_ref()),
+//RS             Expr::CallValue { callee, .. } => Some(callee.as_ref()),
+//RS             Expr::Binary(_, lhs, _, _) => Some(lhs.as_ref()),
+//RS             Expr::CompareChain { operands, .. } => operands.first(),
+//RS             Expr::Range { start, .. } => Some(start.as_ref()),
+//RS             Expr::Deref(inner, _) | Expr::Try(inner, ..) => Some(inner.as_ref()),
+//RS             Expr::OrFallback { value, .. } => Some(value.as_ref()),
+//RS             Expr::PatternTest { subject, .. } => Some(subject.as_ref()),
+//RS             _ => None,
+//RS         };
+//RS         leftmost.map_or(own, |child| own.min(Self::expr_start(child)))
+//RS     }
+//RS 
+//RS     /// D-TIME-IN1=C: the lexer keeps `in` reserved for source loops. The
+//RS     /// postfix parser stores a dot-member keyword as ordinary member text, so
+//RS     /// every postfix spelling is emitted verbatim here.
+//RS     fn write_postfix_member(&mut self, member: &str) {
+//RS         self.write(member);
+//RS     }
+//RS 
+//RS     /// True when the author wrote this value inside its own `{ … }`. It is the
+//RS     /// discriminator between `-> value` and `-> { value }`, and between
+//RS     /// `task expr` and `task { expr }`: both spellings of each pair fold to the
+//RS     /// same node, so the source token before the value's left edge is the only
+//RS     /// surviving evidence of the authored braces.
+//RS     fn value_was_braced(&self, value: &Expr) -> bool {
+//RS         let start = Self::expr_start(value);
+//RS         self.source_toks
+//RS             .iter()
+//RS             .rev()
+//RS             .find(|token| {
+//RS                 token.span.end <= start
+//RS                     && !matches!(
+//RS                         token.kind,
+//RS                         TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi
+//RS                     )
+//RS             })
+//RS             .is_some_and(|token| matches!(token.kind, TokKind::LBrace))
+//RS     }
+//RS 
+//RS     fn is_guard_expr(&self, expr: &Expr) -> bool {
+//RS         let Expr::If { span, .. } = expr else {
+//RS             return false;
+//RS         };
+//RS         let Some(text) = self.src.get(span.start..span.end) else {
+//RS             return false;
+//RS         };
+//RS         let Some(rest) = text.strip_prefix(Syntax::KW_IF) else {
+//RS             return false;
+//RS         };
+//RS         let rest = rest.trim_start();
+//RS         if rest.starts_with('{') {
+//RS             return true;
+//RS         }
+//RS         // D-IFDIST1: `if subject OP { … }` value tables share the guard surface.
+//RS         self.dispatch_value_head(expr).is_some()
+//RS     }
+//RS 
+//RS     /// Recover `(subject, table_op)` from a nested value-dispatch `Expr::If` chain.
+//RS     fn dispatch_value_head<'b>(&self, expr: &'b Expr) -> Option<(&'b Expr, BinOp)> {
+//RS         let Expr::If { cond, span, .. } = expr else {
+//RS             return None;
+//RS         };
+//RS         let text = self.src.get(span.start..span.end)?;
+//RS         let rest = text.strip_prefix(Syntax::KW_IF)?.trim_start();
+//RS         if rest.starts_with('{') {
+//RS             return None;
+//RS         }
+//RS         let table_op = Self::cmp_op_before_brace(rest)?;
+//RS         match cond.as_ref() {
+//RS             Expr::Binary(op, lhs, _, _) if *op == table_op => Some((lhs.as_ref(), table_op)),
+//RS             // A table arm may start with `"a" | "b"`. Parsing lowers that
+//RS             // head to an Or of comparisons; retain the table surface only
+//RS             // when every alternative compares the same subject.
+//RS             Expr::Binary(BinOp::Or, ..) => {
+//RS                 let mut first = cond.as_ref();
+//RS                 while let Expr::Binary(BinOp::Or, lhs, ..) = first {
+//RS                     first = lhs;
+//RS                 }
+//RS                 let Expr::Binary(op, subject, ..) = first else {
+//RS                     return None;
+//RS                 };
+//RS                 (*op == table_op && self.is_all_value_alts(subject, table_op, cond))
+//RS                     .then_some((subject.as_ref(), table_op))
+//RS             }
+//RS             // Card #1440: a pattern-headed value table (`if d == { .North -> … }`)
+//RS             // desugars its first arm to a PatternTest; the table subject is the
+//RS             // test's subject. Pattern heads are `==`-only (E0366).
+//RS             Expr::PatternTest { subject, .. } if table_op == BinOp::Eq => {
+//RS                 Some((subject.as_ref(), table_op))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn cmp_op_before_brace(rest: &str) -> Option<BinOp> {
+//RS         let brace = rest.find('{')?;
+//RS         let between = rest[..brace].trim_end();
+//RS         if between.ends_with("==") {
+//RS             Some(BinOp::Eq)
+//RS         } else if between.ends_with("!=") {
+//RS             Some(BinOp::Ne)
+//RS         } else if between.ends_with("<=") {
+//RS             Some(BinOp::Le)
+//RS         } else if between.ends_with(">=") {
+//RS             Some(BinOp::Ge)
+//RS         } else if between.ends_with('<') {
+//RS             Some(BinOp::Lt)
+//RS         } else if between.ends_with('>') {
+//RS             Some(BinOp::Gt)
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS     fn fmt_guard_expr(&mut self, expr: &Expr) {
+//RS         let Expr::If { span, .. } = expr else {
+//RS             unreachable!()
+//RS         };
+//RS         let table_span = *span;
+//RS         if let Some((subject, table_op)) = self.dispatch_value_head(expr) {
+//RS             self.write(Syntax::KW_IF);
+//RS             self.write(" ");
+//RS             self.fmt_expr(subject, Prec::OrFallback);
+//RS             self.write(" ");
+//RS             self.write(table_op.spell());
+//RS             self.write(" {");
+//RS             self.newline();
+//RS             self.with_indent(|f| {
+//RS                 let mut arm = expr;
+//RS                 loop {
+//RS                     let Expr::If {
+//RS                         cond,
+//RS                         then_body,
+//RS                         then_value,
+//RS                         else_body,
+//RS                         else_value,
+//RS                         span,
+//RS                     } = arm
+//RS                     else {
+//RS                         unreachable!()
+//RS                     };
+//RS                     f.fmt_dispatch_value_cond(subject, table_op, cond);
+//RS                     f.write(" ");
+//RS                     f.write(Syntax::OP_UNIFIED_ARROW);
+//RS                     f.write(" ");
+//RS                     if then_body.is_empty() {
+//RS                         f.fmt_expr(then_value, Prec::OrFallback);
+//RS                     } else {
+//RS                         f.fmt_value_block(then_body, then_value, false);
+//RS                     }
+//RS                     // Card #1440: an exhaustive all-pattern table has no `else`
+//RS                     // arm — the chain ends in the synthesized NoElse marker.
+//RS                     if else_body.is_empty() && matches!(else_value.as_ref(), Expr::NoElse(_)) {
+//RS                         break;
+//RS                     }
+//RS                     f.newline();
+//RS                     if else_body.is_empty()
+//RS                         && matches!(else_value.as_ref(), Expr::If { span: next, .. } if *next == *span && *span == table_span)
+//RS                     {
+//RS                         arm = else_value;
+//RS                         continue;
+//RS                     }
+//RS                     f.write(Syntax::KW_ELSE);
+//RS                     f.write(" ");
+//RS                     f.write(Syntax::OP_UNIFIED_ARROW);
+//RS                     f.write(" ");
+//RS                     if else_body.is_empty() {
+//RS                         f.fmt_expr(else_value, Prec::OrFallback);
+//RS                     } else {
+//RS                         f.fmt_value_block(else_body, else_value, false);
+//RS                     }
+//RS                     break;
+//RS                 }
+//RS             });
+//RS             self.end_block();
+//RS             return;
+//RS         }
+//RS         self.write(Syntax::KW_IF);
+//RS         self.write(" {");
+//RS         self.newline();
+//RS         self.with_indent(|f| {
+//RS             let mut arm = expr;
+//RS             loop {
+//RS                 let Expr::If {
+//RS                     cond,
+//RS                     then_body,
+//RS                     then_value,
+//RS                     else_body,
+//RS                     else_value,
+//RS                     span,
+//RS                 } = arm
+//RS                 else {
+//RS                     unreachable!()
+//RS                 };
+//RS                 if !f.fmt_readiness_head(cond) {
+//RS                     f.fmt_expr(cond, Prec::OrFallback);
+//RS                 }
+//RS                 f.write(" ");
+//RS                 f.write(Syntax::OP_UNIFIED_ARROW);
+//RS                 f.write(" ");
+//RS                 if then_body.is_empty() {
+//RS                     f.fmt_expr(then_value, Prec::OrFallback);
+//RS                 } else {
+//RS                     f.fmt_value_block(then_body, then_value, false);
+//RS                 }
+//RS                 f.newline();
+//RS                 if else_body.is_empty()
+//RS                     && matches!(else_value.as_ref(), Expr::If { span: next, .. } if *next == *span && *span == table_span)
+//RS                 {
+//RS                     arm = else_value;
+//RS                     continue;
+//RS                 }
+//RS                 f.write(Syntax::KW_ELSE);
+//RS                 f.write(" ");
+//RS                 f.write(Syntax::OP_UNIFIED_ARROW);
+//RS                 f.write(" ");
+//RS                 if else_body.is_empty() {
+//RS                     f.fmt_expr(else_value, Prec::OrFallback);
+//RS                 } else {
+//RS                     f.fmt_value_block(else_body, else_value, false);
+//RS                 }
+//RS                 break;
+//RS             }
+//RS         });
+//RS         self.end_block();
+//RS     }
+//RS 
+//RS     /// Print a value-dispatch arm head, stripping `subject table_op` atoms.
+//RS     fn fmt_dispatch_value_cond(&mut self, subject: &Expr, table_op: BinOp, cond: &Expr) {
+//RS         if self.is_all_value_alts(subject, table_op, cond) {
+//RS             self.fmt_value_alts(subject, table_op, cond);
+//RS             return;
+//RS         }
+//RS         match cond {
+//RS             Expr::Binary(op @ (BinOp::And | BinOp::Or), lhs, rhs, _) => {
+//RS                 self.fmt_dispatch_value_operand(subject, table_op, lhs);
+//RS                 self.write(" ");
+//RS                 self.write(op.spell());
+//RS                 self.write(" ");
+//RS                 self.fmt_dispatch_value_operand(subject, table_op, rhs);
+//RS             }
+//RS             Expr::Binary(op, lhs, rhs, _)
+//RS                 if *op == table_op && self.same_dispatch_subject(lhs, subject) =>
+//RS             {
+//RS                 self.fmt_expr(rhs, Prec::Cmp);
+//RS             }
+//RS             // Card #1440: a pattern arm head renders as its bare pattern — the
+//RS             // subject and `==` live on the table head line.
+//RS             Expr::PatternTest {
+//RS                 subject: s,
+//RS                 pattern,
+//RS                 ..
+//RS             } if table_op == BinOp::Eq && self.same_dispatch_subject(s, subject) => {
+//RS                 self.fmt_pattern(pattern);
+//RS             }
+//RS             _ => self.fmt_expr(cond, Prec::OrFallback),
+//RS         }
+//RS     }
+//RS 
+//RS     fn fmt_dispatch_value_operand(&mut self, subject: &Expr, table_op: BinOp, expr: &Expr) {
+//RS         let grouped = self.expr_was_parenthesized(expr);
+//RS         if grouped {
+//RS             self.write("(");
+//RS         }
+//RS         self.fmt_dispatch_value_cond(subject, table_op, expr);
+//RS         if grouped {
+//RS             self.write(")");
+//RS         }
+//RS     }
+//RS 
+//RS     fn expr_was_parenthesized(&self, expr: &Expr) -> bool {
+//RS         if !matches!(expr, Expr::Binary(BinOp::And | BinOp::Or, ..)) {
+//RS             return false;
+//RS         }
+//RS         let end = expr.span().end;
+//RS         let next_index = self.source_toks.iter().position(|token| {
+//RS             token.span.start >= end
+//RS                 && !matches!(
+//RS                     token.kind,
+//RS                     TokKind::LineComment(_) | TokKind::BlockComment(_)
+//RS                 )
+//RS         });
+//RS         let grouped = next_index
+//RS             .filter(|&index| matches!(self.source_toks[index].kind, TokKind::RParen))
+//RS             .is_some_and(|index| {
+//RS                 let mut depth = 1;
+//RS                 for token in self.source_toks[..index].iter().rev() {
+//RS                     if matches!(
+//RS                         token.kind,
+//RS                         TokKind::LineComment(_) | TokKind::BlockComment(_)
+//RS                     ) {
+//RS                         continue;
+//RS                     }
+//RS                     match token.kind {
+//RS                         TokKind::RParen => depth += 1,
+//RS                         TokKind::LParen => {
+//RS                             depth -= 1;
+//RS                             if depth == 0 {
+//RS                                 return true;
+//RS                             }
+//RS                         }
+//RS                         _ => {}
+//RS                     }
+//RS                 }
+//RS                 false
+//RS             });
+//RS         grouped
+//RS     }
+//RS 
+//RS     fn is_all_value_alts(&self, subject: &Expr, table_op: BinOp, e: &Expr) -> bool {
+//RS         match e {
+//RS             Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+//RS                 self.is_value_alt_leaf(subject, table_op, lhs)
+//RS                     && self.is_value_alt_leaf(subject, table_op, rhs)
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn is_value_alt_leaf(&self, subject: &Expr, table_op: BinOp, e: &Expr) -> bool {
+//RS         match e {
+//RS             Expr::Binary(op, lhs, _, _) if *op == table_op => {
+//RS                 self.same_dispatch_subject(lhs, subject)
+//RS             }
+//RS             Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+//RS                 self.is_value_alt_leaf(subject, table_op, lhs)
+//RS                     && self.is_value_alt_leaf(subject, table_op, rhs)
+//RS             }
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn fmt_value_alts(&mut self, subject: &Expr, table_op: BinOp, e: &Expr) {
+//RS         match e {
+//RS             Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+//RS                 self.fmt_value_alts(subject, table_op, lhs);
+//RS                 self.write(" | ");
+//RS                 self.fmt_value_alts(subject, table_op, rhs);
+//RS             }
+//RS             Expr::Binary(op, _, rhs, _) if *op == table_op => {
+//RS                 self.fmt_expr(rhs, Prec::Cmp);
+//RS             }
+//RS             _ => unreachable!("is_all_value_alts should guard this path"),
+//RS         }
+//RS     }
+//RS 
+//RS     /// True when `a` denotes the dispatch subject: either the `it` placeholder
+//RS     /// or an expression with byte-for-byte the same source text as `subject`.
+//RS     ///
+//RS     /// The slice has to begin at `expr_start`, never at `span().start`: an
+//RS     /// anchor span cuts the receiver off the front, so an arm head `other.code`
+//RS     /// and a bare `code` subject both read as `code` — and the arm then prints
+//RS     /// with its `other.` deleted, because a matching subject is elided from the
+//RS     /// table. The right edge is still the anchor's end, which truncates a call's
+//RS     /// argument list, so two heads differing only inside those parens still
+//RS     /// compare equal.
+//RS     fn same_dispatch_subject(&self, a: &Expr, subject: &Expr) -> bool {
+//RS         if let Expr::Ident(name, _) = a {
+//RS             if name == Syntax::KW_IT {
+//RS                 return true;
+//RS             }
+//RS         }
+//RS         if a.span() == subject.span() {
+//RS             return true;
+//RS         }
+//RS         let a_src = self.src.get(Self::expr_start(a)..a.span().end);
+//RS         let subj_src = self.src.get(Self::expr_start(subject)..subject.span().end);
+//RS         matches!((a_src, subj_src), (Some(x), Some(y)) if x == y)
+//RS     }
+//RS 
+//RS     /// D-FMT1: every branch of an `if`-expression chain is inline-eligible (gates
+//RS     /// a–d, author wrote each on one line). A nested `else if` recurses.
+//RS     fn if_expr_chain_inlineable(&self, expr: &Expr) -> bool {
+//RS         let Expr::If {
+//RS             then_body,
+//RS             then_value,
+//RS             else_body,
+//RS             else_value,
+//RS             ..
+//RS         } = expr
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         if !self.value_block_inlineable(then_body, then_value) {
+//RS             return false;
+//RS         }
+//RS         if else_body.is_empty() && matches!(else_value.as_ref(), Expr::If { .. }) {
+//RS             self.if_expr_chain_inlineable(else_value)
+//RS         } else {
+//RS             self.value_block_inlineable(else_body, else_value)
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn fmt_type(&mut self, ty: &Type) {
+//RS         self.fmt_type_at(ty, None);
+//RS     }
+//RS 
+//RS     pub(super) fn fmt_type_at(&mut self, ty: &Type, source: Option<crate::Diagnostics::Span>) {
+//RS         match ty {
+//RS             Type::Int => self.write(Syntax::TYPE_INT),
+//RS             Type::Float => self.write(Syntax::TYPE_FLOAT),
+//RS             Type::IntN { signed, bits } => self.write(&crate::AST::int_spelling(*signed, *bits)),
+//RS             Type::InlineRange { base, lo, hi } => {
+//RS                 self.fmt_type(base);
+//RS                 self.write("(");
+//RS                 self.write(&lo.to_string());
+//RS                 self.write("..");
+//RS                 self.write(&hi.to_string());
+//RS                 self.write(")");
+//RS             }
+//RS             Type::Float32 => self.write("F32"),
+//RS             Type::Bool => self.write(Syntax::TYPE_BOOL),
+//RS             Type::String => self.write(Syntax::TYPE_STRING),
+//RS             Type::Char => self.write(Syntax::TYPE_CHAR),
+//RS             Type::List(inner) => {
+//RS                 self.write("[");
+//RS                 self.fmt_type(inner);
+//RS                 self.write("]");
+//RS             }
+//RS             Type::Map { key, value, .. } => {
+//RS                 self.write("[");
+//RS                 self.fmt_type(key);
+//RS                 self.write(":");
+//RS                 self.fmt_type(value);
+//RS                 self.write("]");
+//RS             }
+//RS             Type::Shared(inner) => {
+//RS                 self.write("Shared<");
+//RS                 self.fmt_type(inner);
+//RS                 self.write(">");
+//RS             }
+//RS             Type::Option(inner) => {
+//RS                 // D-TYPE-SUFFIX1=A: the optional mark follows the type it
+//RS                 // marks; a union, function, contract, or tagged type is
+//RS                 // grouped so the mark covers the whole type.
+//RS                 self.fmt_marked_type(inner);
+//RS                 self.write(Syntax::TYPE_OPTION_MARK);
+//RS             }
+//RS             Type::Result { ok, err } => {
+//RS                 if Self::is_unit_type(ok) {
+//RS                     self.fmt_error_contract(err);
+//RS                 } else {
+//RS                     self.fmt_marked_type(ok);
+//RS                     self.write(" ");
+//RS                     self.fmt_error_contract(err);
+//RS                 }
+//RS             }
+//RS             Type::Fn {
+//RS                 params,
+//RS                 ret,
+//RS                 effect_bound,
+//RS                 param_contract,
+//RS                 return_view_provenance,
+//RS                 ..
+//RS             } => {
+//RS                 self.write("fn(");
+//RS                 // D-APILABEL1=A: reprint the declared call contract — the
+//RS                 // labels and the `/` and `*` zone separators — so a function
+//RS                 // type round-trips with its identity intact.
+//RS                 let contract = param_contract.as_deref().unwrap_or(&[]);
+//RS                 enum Entry<'a> {
+//RS                     Param(usize, &'a Type),
+//RS                     Zone(&'static str),
+//RS                 }
+//RS                 let mut entries = Vec::with_capacity(params.len() + 2);
+//RS                 let mut star_done = false;
+//RS                 for (index, param) in params.iter().enumerate() {
+//RS                     let zone = contract.get(index).map(|(_, zone)| *zone);
+//RS                     if zone == Some(crate::AST::ParamZone::LabelOnly) && !star_done {
+//RS                         star_done = true;
+//RS                         entries.push(Entry::Zone(Syntax::PARAM_ZONE_LABEL_ONLY));
+//RS                     }
+//RS                     entries.push(Entry::Param(index, param));
+//RS                     let last_positional_only =
+//RS                         zone == Some(crate::AST::ParamZone::PositionalOnly)
+//RS                             && contract.get(index + 1).is_none_or(|(_, next)| {
+//RS                                 *next != crate::AST::ParamZone::PositionalOnly
+//RS                             });
+//RS                     if last_positional_only {
+//RS                         entries.push(Entry::Zone(Syntax::PARAM_ZONE_POSITIONAL_ONLY));
+//RS                     }
+//RS                 }
+//RS                 let param_source = source.and_then(|span| {
+//RS                     self.source_list_span_after(span.start, super::SourceDelimiter::Paren)
+//RS                 });
+//RS                 let item_spans = param_source.map(|source| self.source_list_item_spans(source));
+//RS                 let fallback_span = source.unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0));
+//RS                 let indexed = entries.iter().enumerate().collect::<Vec<_>>();
+//RS                 self.fmt_comma_items(
+//RS                     &indexed,
+//RS                     param_source,
+//RS                     |(entry_index, _)| {
+//RS                         item_spans
+//RS                             .as_ref()
+//RS                             .and_then(|spans| spans.get(*entry_index).copied())
+//RS                             .unwrap_or(fallback_span)
+//RS                     },
+//RS                     |f, (_, entry)| match entry {
+//RS                         Entry::Param(index, ty) => {
+//RS                             if let Some((label, _)) = contract.get(*index) {
+//RS                                 if !label.is_empty() {
+//RS                                     f.write(label);
+//RS                                     f.write(": ");
+//RS                                 }
+//RS                             }
+//RS                             f.fmt_type(ty);
+//RS                         }
+//RS                         Entry::Zone(zone) => f.write(zone),
+//RS                     },
+//RS                 );
+//RS                 self.write(")");
+//RS                 if let Some(bound) = effect_bound {
+//RS                     self.write(" ");
+//RS                     self.write(Syntax::EFFECT_ARROW_OPEN);
+//RS                     self.fmt_comma_items(
+//RS                         bound,
+//RS                         source.and_then(|span| self.source_effect_row_span_after(span.start)),
+//RS                         |(_, span)| *span,
+//RS                         |f, (name, _)| f.write(name),
+//RS                     );
+//RS                     self.write(Syntax::EFFECT_ARROW_CLOSE);
+//RS                     if let Some(r) = ret {
+//RS                         if Self::is_unit_fallible_type(r) {
+//RS                             self.fmt_unit_fallible_return(r);
+//RS                         } else {
+//RS                             self.write(" ");
+//RS                             self.fmt_type(r);
+//RS                         }
+//RS                     }
+//RS                 } else if let Some(r) = ret {
+//RS                     if Self::is_unit_fallible_type(r) {
+//RS                         self.fmt_unit_fallible_return(r);
+//RS                     } else {
+//RS                         self.write(" -> ");
+//RS                         self.fmt_type(r);
+//RS                     }
+//RS                 }
+//RS                 if let Some(map) = return_view_provenance {
+//RS                     // Function types do not retain surface parameter names; emit
+//RS                     // the parser's synthetic `_N` owners so `from` round-trips.
+//RS                     let synthetic: Vec<crate::AST::Param> = params
+//RS                         .iter()
+//RS                         .enumerate()
+//RS                         .map(|(index, ty)| crate::AST::Param {
+//RS                             convention: crate::AST::AccessConvention::Read,
+//RS                             root: false,
+//RS                             name: format!("_{index}"),
+//RS                             name_span: crate::Diagnostics::Span::new(0, 0),
+//RS                             ty: ty.clone(),
+//RS                             ty_span: crate::Diagnostics::Span::new(0, 0),
+//RS                             default: None,
+//RS                             variadic: false,
+//RS                             variadic_bound_list: None,
+//RS                             declared_view_from_names: None,
+//RS                             public_label: None,
+//RS                             zone: crate::AST::ParamZone::Either,
+//RS                         })
+//RS                         .collect();
+//RS                     // Reuse Items helper via a local reprint of the empty-path form.
+//RS                     if map.len() == 1 {
+//RS                         if let Some((path, provenance)) = map.iter().next() {
+//RS                             if path.is_empty() {
+//RS                                 self.write(" ");
+//RS                                 self.write(crate::Syntax::VIEW_FROM);
+//RS                                 self.write(" ");
+//RS                                 for (i, source_path) in provenance.sources.iter().enumerate() {
+//RS                                     if i > 0 {
+//RS                                         self.write(" | ");
+//RS                                     }
+//RS                                     match &source_path.source {
+//RS                                         crate::AST::ViewSource::Receiver => {
+//RS                                             self.write(crate::Syntax::KW_SELF)
+//RS                                         }
+//RS                                         crate::AST::ViewSource::Parameter(index) => {
+//RS                                             if let Some(param) = synthetic.get(*index) {
+//RS                                                 self.write(&param.name);
+//RS                                             }
+//RS                                         }
+//RS                                         crate::AST::ViewSource::Static { module_path, name } => {
+//RS                                             self.write(crate::Syntax::VIEW_FROM_STATIC);
+//RS                                             self.write(".");
+//RS                                             if !module_path.is_empty() {
+//RS                                                 self.write(module_path);
+//RS                                                 self.write(".");
+//RS                                             }
+//RS                                             self.write(name);
+//RS                                         }
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     let _ = synthetic;
+//RS                 }
+//RS             }
+//RS             Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE => self.write(Syntax::TYPE_UNIT),
+//RS             Type::Named(n) => self.write(n),
+//RS             // D-CAP9: the raw-pointer type renders as the canonical `*T`, never
+//RS             // the deprecated `Ptr<T>` alias.
+//RS             Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
+//RS                 self.write("*");
+//RS                 self.fmt_type(&args[0]);
+//RS             }
+//RS             Type::Apply { name, args } => {
+//RS                 self.write(name);
+//RS                 self.write("<");
+//RS                 let list_source =
+//RS                     source.and_then(|span| self.source_list_span_after(span.start, super::SourceDelimiter::Angle));
+//RS                 let item_spans = list_source.map(|source| self.source_list_item_spans(source));
+//RS                 let indexed = args.iter().enumerate().collect::<Vec<_>>();
+//RS                 let fallback_span =
+//RS                     source.unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0));
+//RS                 self.fmt_comma_items(
+//RS                     &indexed,
+//RS                     list_source,
+//RS                     |(index, _)| item_spans
+//RS                         .as_ref()
+//RS                         .and_then(|spans| spans.get(*index).copied())
+//RS                         .unwrap_or(fallback_span),
+//RS                     |f, (_, arg)| f.fmt_type(arg),
+//RS                 );
+//RS                 self.write(">");
+//RS             }
+//RS             // D-QUANTITY-TYPE1=A: `Type::Quantity` is sema-synthesized (card
+//RS             // #1662) from the source-written `Quantity<Base, Dim>` bound
+//RS             // constructor; the formatter only ever sees pre-sema AST, so this
+//RS             // arm exists solely for match exhaustiveness.
+//RS             Type::Quantity { base, dimension } => {
+//RS                 self.write(Syntax::BOUND_QUANTITY);
+//RS                 self.write("<");
+//RS                 self.fmt_type(base);
+//RS                 self.write(", ");
+//RS                 self.write(&dimension.display_name());
+//RS                 self.write(">");
+//RS             }
+//RS             // D-TYPE2-MEASURE1=A: shape arguments round-trip through the
+//RS             // shared measure representation.
+//RS             Type::Measure(measure) => self.write(&measure.expression()),
+//RS             Type::TraitObject(t) => {
+//RS                 // Only the parser's `dyn`/`Box<dyn>` teaching-error recovery paths
+//RS                 // ever construct this AST-facing arm with more than a formatting
+//RS                 // concern in mind, and those are always single-name; join
+//RS                 // defensively rather than assume (never emit "" silently, I2).
+//RS                 self.write(&t.join(" + "));
+//RS             }
+//RS             Type::Tuple(fields) => {
+//RS                 self.write("(");
+//RS                 let list_source =
+//RS                     source.and_then(|span| self.source_list_span_after(span.start, super::SourceDelimiter::Paren));
+//RS                 let item_spans = list_source.map(|source| self.source_list_item_spans(source));
+//RS                 let indexed = fields.iter().enumerate().collect::<Vec<_>>();
+//RS                 let fallback_span =
+//RS                     source.unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0));
+//RS                 self.fmt_comma_items(
+//RS                     &indexed,
+//RS                     list_source,
+//RS                     |(index, _)| item_spans
+//RS                         .as_ref()
+//RS                         .and_then(|spans| spans.get(*index).copied())
+//RS                         .unwrap_or(fallback_span),
+//RS                     |f, (_, (name, ty))| {
+//RS                         f.write(name);
+//RS                         f.write(": ");
+//RS                         f.fmt_type(ty);
+//RS                     },
+//RS                 );
+//RS                 self.write(")");
+//RS             }
+//RS             Type::FixedList { elem, len } => {
+//RS                 self.write("[");
+//RS                 self.fmt_type(elem);
+//RS                 self.write("#");
+//RS                 self.write(&len.expression());
+//RS                 self.write("]");
+//RS             }
+//RS             // D-QUAL4=A: `#TagName Type` — prefix value-tag.
+//RS             Type::Tagged { marker, inner } => {
+//RS                 self.write(crate::Syntax::RULE_PREFIX);
+//RS                 // Only a parsed, user-written D-QUAL4 tag ever reaches the
+//RS                 // formatter — no parser path constructs an internal marker.
+//RS                 self.write(&marker.to_string());
+//RS                 self.write(" ");
+//RS                 self.fmt_type(inner);
+//RS             }
+//RS             // D-UNIONTYPE1=A: `A | B | …` (canonical order).
+//RS             Type::Union(members) => {
+//RS                 for (i, m) in members.iter().enumerate() {
+//RS                     if i > 0 {
+//RS                         self.write(" ");
+//RS                         self.write(Syntax::TYPE_UNION_SEP);
+//RS                         self.write(" ");
+//RS                     }
+//RS                     self.fmt_type(m);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn is_unit_fallible_type(ty: &Type) -> bool {
+//RS         matches!(
+//RS             ty,
+//RS             Type::Result { ok, .. }
+//RS                 if Self::is_unit_type(ok)
+//RS         )
+//RS     }
+//RS 
+//RS     fn is_unit_type(ty: &Type) -> bool {
+//RS         matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+//RS     }
+//RS 
+//RS     /// D-TYPE-SUFFIX1=A: a type written before a suffix mark, grouped when
+//RS     /// the mark would otherwise bind to its last member.
+//RS     fn fmt_marked_type(&mut self, ty: &Type) {
+//RS         if matches!(
+//RS             ty,
+//RS             Type::Union(_) | Type::Fn { .. } | Type::Result { .. } | Type::Tagged { .. }
+//RS         ) {
+//RS             self.write("(");
+//RS             self.fmt_type(ty);
+//RS             self.write(")");
+//RS         } else {
+//RS             self.fmt_type(ty);
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-TYPE-SUFFIX1=A: the error contract `E!` / `(E1 | E2)!`.
+//RS     fn fmt_error_contract(&mut self, err: &Type) {
+//RS         self.fmt_marked_type(err);
+//RS         self.write(Syntax::TYPE_FALLIBLE_MARK);
+//RS     }
+//RS 
+//RS 
+//RS     pub(super) fn fmt_unit_fallible_return(&mut self, ty: &Type) {
+//RS         self.write(" ");
+//RS         self.fmt_type(ty);
+//RS     }
+//RS 
+//RS     pub(super) fn fmt_return_type(&mut self, ty: &Type) {
+//RS         // D-TYPE-SUFFIX1=A: optional success is `T?` and the error contract
+//RS         // follows its type (`E!`); an omitted contract is the default domain.
+//RS         self.fmt_type(ty);
+//RS     }
+//RS 
+//RS 
+//RS     fn fmt_named_struct_head(
+//RS         &mut self,
+//RS         type_name: &str,
+//RS         type_args: &[Type],
+//RS         import_ns: Option<&str>,
+//RS         source_span: Option<crate::Diagnostics::Span>,
+//RS     ) {
+//RS         if let Some(ns) = import_ns {
+//RS             self.write(ns);
+//RS             self.write(".");
+//RS         }
+//RS         self.write(type_name);
+//RS         if !type_args.is_empty() {
+//RS             self.write("<");
+//RS             let source = source_span.and_then(|span| {
+//RS                 self.source_list_span_after(span.start, super::SourceDelimiter::Angle)
+//RS             });
+//RS             let item_spans = source.map(|source| self.source_list_item_spans(source));
+//RS             let indexed = type_args.iter().enumerate().collect::<Vec<_>>();
+//RS             let fallback_span =
+//RS                 source_span.unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0));
+//RS             self.fmt_comma_items(
+//RS                 &indexed,
+//RS                 source,
+//RS                 |(index, _)| item_spans
+//RS                     .as_ref()
+//RS                     .and_then(|spans| spans.get(*index).copied())
+//RS                     .unwrap_or(fallback_span),
+//RS                 |f, (_, arg)| f.fmt_type(arg),
+//RS             );
+//RS             self.write(">");
+//RS         }
+//RS     }
+//RS 
+//RS     fn fmt_struct_lit_body(
+//RS         &mut self,
+//RS         fields: &[(String, crate::Diagnostics::Span, Expr)],
+//RS         span: crate::Diagnostics::Span,
+//RS     ) {
+//RS         self.write("{");
+//RS         let multiline = self.source_span_multiline(span);
+//RS         if multiline {
+//RS             self.newline();
+//RS             self.indent += 1;
+//RS         }
+//RS         for (i, (name, name_span, expr)) in fields.iter().enumerate() {
+//RS             if i > 0 {
+//RS                 if multiline {
+//RS                     self.newline();
+//RS                 } else {
+//RS                     self.write(", ");
+//RS                 }
+//RS             }
+//RS             if multiline {
+//RS                 self.emit_leading(name_span.start);
+//RS             }
+//RS             self.write(name);
+//RS             self.write(": ");
+//RS             if multiline {
+//RS                 self.emit_leading(expr.span().start);
+//RS             }
+//RS             self.fmt_expr(expr, Prec::OrFallback);
+//RS             if multiline {
+//RS                 self.write(",");
+//RS             }
+//RS             if multiline {
+//RS                 self.emit_trailing(expr.span().end);
+//RS             }
+//RS         }
+//RS         if multiline {
+//RS             self.emit_leading(span.end);
+//RS             self.indent -= 1;
+//RS             if !self.at_line_start {
+//RS                 self.newline();
+//RS             }
+//RS         }
+//RS         self.write("}");
+//RS     }
+//RS 
+//RS     pub(super) fn fmt_expr(&mut self, expr: &Expr, prec: Prec) {
+//RS         match expr {
+//RS             // S68 (D-SG2): `if` used as a value.
+//RS             Expr::If { .. } => {
+//RS                 if self.is_result_handler_source(expr) {
+//RS                     self.fmt_result_handler_expr(expr);
+//RS                     return;
+//RS                 }
+//RS                 if self.is_guard_expr(expr) {
+//RS                     self.fmt_guard_expr(expr);
+//RS                     return;
+//RS                 }
+//RS                 // D-FMT1: the whole if-expression chain shares one line shape —
+//RS                 // inline only when every branch is inline-eligible.
+//RS                 let inline = self.if_expr_chain_inlineable(expr);
+//RS                 if inline {
+//RS                     let saved_out = self.out.len();
+//RS                     let saved_col = self.col;
+//RS                     let saved_line_start = self.at_line_start;
+//RS                     let saved_pending_blank = self.pending_blank;
+//RS                     let saved_comment_i = self.comment_i;
+//RS                     self.fmt_if_expr(expr, true);
+//RS                     // A later branch can cross MAX_WIDTH even when every
+//RS                     // source branch was authored inline. Never leave a mixed
+//RS                     // inline/expanded chain: roll back and expand all branches
+//RS                     // so the first pass is already byte-stable.
+//RS                     if self.out[saved_out..].contains('\n') {
+//RS                         self.out.truncate(saved_out);
+//RS                         self.col = saved_col;
+//RS                         self.at_line_start = saved_line_start;
+//RS                         self.pending_blank = saved_pending_blank;
+//RS                         self.comment_i = saved_comment_i;
+//RS                         self.fmt_if_expr(expr, false);
+//RS                     }
+//RS                 } else {
+//RS                     self.fmt_if_expr(expr, false);
+//RS                 }
+//RS             }
+//RS             Expr::Str(parts, span) => {
+//RS                 // D-RAWSTR1=A: source spans identify raw ordinary strings; the
+//RS                 // AST stays the shared `Expr::Str` node.
+//RS                 if self.src.get(span.start..span.end).is_some_and(|s| s.starts_with('`')) {
+//RS                     self.fmt_str_raw(parts);
+//RS                 } else if self.src.get(span.start..span.start + 3) == Some("\"\"\"") {
+//RS                     self.fmt_str_multiline(parts);
+//RS                 } else {
+//RS                     self.fmt_str(parts);
+//RS                 }
+//RS             }
+//RS             // D-SHIFT1 (c7shift): `cursor.take_pattern("…")`'s pattern-literal
+//RS             // argument — same rendering as a `Pattern::StrMatch` (D-PARSESTR1).
+//RS             Expr::StrMatchLit(parts, span) => {
+//RS                 self.fmt_str_match_parts(parts, self.is_typed_head_body(*span));
+//RS             }
+//RS             // D-BINPAT1 (card #506 follow-up): `reader.take_pattern([U8]{"…"})`'s
+//RS             // pattern-literal argument — same rendering as a
+//RS             // `Pattern::BinMatch` (byte-mode sibling of the arm above).
+//RS             Expr::BinMatchLit(parts, _) => {
+//RS                 self.fmt_bin_match_parts(parts);
+//RS             }
+//RS             // S34/S67: keep the author's radix (`0x2a`/`0o17`/`0b1010`),
+//RS             // digit separators (`1_000_000`), and hex-digit case. The AST
+//RS             // stores only the value, so fmt was rewriting every hex/octal/
+//RS             // binary literal to decimal — destroying ratified spelling (same
+//RS             // failure class as a dropped token). Re-emit the original source
+//RS             // slice, but only when it round-trips to the same value: some
+//RS             // Int nodes are synthesized with a borrowed nearby span whose
+//RS             // text isn't a number at all.
+//RS             Expr::Int(n, span, _, raw) => {
+//RS                 let text = int_literal_spelling(self.src, *span, *n, raw.as_deref());
+//RS                 self.write(&text);
+//RS             }
+//RS             Expr::Float(v, span, _, raw) => {
+//RS                 let text = float_literal_spelling(self.src, *span, *v, raw.as_deref());
+//RS                 self.write(&text);
+//RS             }
+//RS             // D-UNITLIT1: `500ms` — no space between the number and the suffix.
+//RS             Expr::UnitLit { raw, suffix, .. } => {
+//RS                 self.write(raw);
+//RS                 self.write(suffix);
+//RS             }
+//RS             Expr::Bool(b, _) => self.write(if *b { "true" } else { "false" }),
+//RS             Expr::Unit(_) => self.write("()"),
+//RS             Expr::Char(c, _) => self.write(&fmt_char(*c)),
+//RS             Expr::ListLit(elems, span) => {
+//RS                 // Plain formatting preserves explicit constructor heads. The
+//RS                 // L0523 typed-list rewrite is an explicit safe fix, not a
+//RS                 // formatter rewrite.
+//RS                 self.write("[");
+//RS                 if self.source_span_multiline(*span) {
+//RS                     self.newline();
+//RS                     self.with_indent(|f| {
+//RS                         for (i, e) in elems.iter().enumerate() {
+//RS                             if i > 0 {
+//RS                                 f.newline();
+//RS                             }
+//RS                             f.emit_leading(e.span().start);
+//RS                             f.fmt_expr(e, Prec::OrFallback);
+//RS                             f.write(",");
+//RS                             f.emit_trailing(e.span().end);
+//RS                         }
+//RS                         f.emit_leading(span.end);
+//RS                     });
+//RS                     if !self.at_line_start {
+//RS                         self.newline();
+//RS                     }
+//RS                 } else {
+//RS                     for (i, e) in elems.iter().enumerate() {
+//RS                         if i > 0 {
+//RS                             self.write(", ");
+//RS                         }
+//RS                         self.fmt_expr(e, Prec::OrFallback);
+//RS                     }
+//RS                 }
+//RS                 self.write("]");
+//RS             }
+//RS             // D-SPREAD1=A: re-emit member spread sugar.
+//RS             Expr::MemberSpread {
+//RS                 base,
+//RS                 members,
+//RS                 span,
+//RS                 ..
+//RS             } => {
+//RS                 self.fmt_expr(base, Prec::Postfix);
+//RS                 self.write(".[");
+//RS                 let source = self
+//RS                     .source_list_span_after(base.span().end, super::SourceDelimiter::Bracket)
+//RS                     .filter(|(list_span, _)| list_span.end <= span.end);
+//RS                 let indexed = members.iter().enumerate().collect::<Vec<_>>();
+//RS                 let fallback_span = *span;
+//RS                 self.fmt_comma_items(
+//RS                     &indexed,
+//RS                     source,
+//RS                     |(index, _)| indexed
+//RS                         .get(*index)
+//RS                         .and_then(|(_, (_, member_span))| Some(*member_span))
+//RS                         .unwrap_or(fallback_span),
+//RS                     |f, (_, (name, _))| f.write(name),
+//RS                 );
+//RS                 self.write("]");
+//RS             }
+//RS             Expr::TupleLit(fields, span, _) => {
+//RS                 self.write("(");
+//RS                 if self.source_span_multiline(*span) {
+//RS                     self.newline();
+//RS                     self.with_indent(|f| {
+//RS                         for (i, (name, e)) in fields.iter().enumerate() {
+//RS                             if i > 0 {
+//RS                                 f.newline();
+//RS                             }
+//RS                             let field_start = if i == 0 {
+//RS                                 span.start
+//RS                             } else {
+//RS                                 fields[i - 1].1.span().end
+//RS                             };
+//RS                             let colon = f
+//RS                                 .src
+//RS                                 .get(field_start..e.span().start)
+//RS                                 .and_then(|source| source.rfind(':'))
+//RS                                 .map_or(e.span().start, |offset| field_start + offset);
+//RS                             f.emit_leading(colon);
+//RS                             f.write(name);
+//RS                             f.write(": ");
+//RS                             f.emit_leading(e.span().start);
+//RS                             f.fmt_expr(e, Prec::OrFallback);
+//RS                             f.write(",");
+//RS                             f.emit_trailing(e.span().end);
+//RS                         }
+//RS                     });
+//RS                     if !self.at_line_start {
+//RS                         self.newline();
+//RS                     }
+//RS                 } else {
+//RS                     for (i, (name, e)) in fields.iter().enumerate() {
+//RS                         if i > 0 {
+//RS                             self.write(", ");
+//RS                         }
+//RS                         self.write(name);
+//RS                         self.write(": ");
+//RS                         self.fmt_expr(e, Prec::OrFallback);
+//RS                     }
+//RS                 }
+//RS                 self.write(")");
+//RS             }
+//RS             Expr::MapLit(pairs, span) => {
+//RS                 // D-EMPTYLIT1: an empty map is spelled `[]`, same as an empty
+//RS                 // list — sema (not the formatter) is the only thing that
+//RS                 // knows an empty `MapLit` node came from that shared spelling.
+//RS                 self.write("[");
+//RS                 if self.source_span_multiline(*span) {
+//RS                     self.newline();
+//RS                     self.with_indent(|f| {
+//RS                         for (i, (k, v)) in pairs.iter().enumerate() {
+//RS                             if i > 0 {
+//RS                                 f.newline();
+//RS                             }
+//RS                             f.emit_leading(k.span().start);
+//RS                             f.fmt_expr(k, Prec::OrFallback);
+//RS                             f.write(": ");
+//RS                             f.emit_leading(v.span().start);
+//RS                             f.fmt_expr(v, Prec::OrFallback);
+//RS                             f.write(",");
+//RS                             f.emit_trailing(v.span().end);
+//RS                         }
+//RS                         f.emit_leading(span.end);
+//RS                     });
+//RS                     if !self.at_line_start {
+//RS                         self.newline();
+//RS                     }
+//RS                 } else {
+//RS                     for (i, (k, v)) in pairs.iter().enumerate() {
+//RS                         if i > 0 {
+//RS                             self.write(", ");
+//RS                         }
+//RS                         self.fmt_expr(k, Prec::OrFallback);
+//RS                         self.write(": ");
+//RS                         self.fmt_expr(v, Prec::OrFallback);
+//RS                     }
+//RS                 }
+//RS                 self.write("]");
+//RS             }
+//RS             Expr::Index { base, index, .. } => {
+//RS                 self.fmt_expr(base, Prec::Postfix);
+//RS                 self.write("[");
+//RS                 if let Expr::Ident(name, _) = index.as_ref() {
+//RS                     if let Some(field) = Syntax::layout_selector_name(name) {
+//RS                         self.write(".");
+//RS                         self.write(field);
+//RS                     } else {
+//RS                         self.fmt_expr(index, Prec::OrFallback);
+//RS                     }
+//RS                 } else {
+//RS                     self.fmt_expr(index, Prec::OrFallback);
+//RS                 }
+//RS                 self.write("]");
+//RS             }
+//RS             Expr::Slice {
+//RS                 base,
+//RS                 start,
+//RS                 end,
+//RS                 range,
+//RS                 ..
+//RS             } => {
+//RS                 self.fmt_expr(base, Prec::Postfix);
+//RS                 self.write("[");
+//RS                 if let Some(range) = range {
+//RS                     self.fmt_expr(range, Prec::OrFallback);
+//RS                 } else {
+//RS                     self.fmt_expr(start, Prec::OrFallback);
+//RS                     self.write("..");
+//RS                     self.fmt_expr(end, Prec::OrFallback);
+//RS                 }
+//RS                 self.write("]");
+//RS             }
+//RS             Expr::Range {
+//RS                 start,
+//RS                 end,
+//RS                 exclusive,
+//RS                 ..
+//RS             } => {
+//RS                 let wrap = prec > Prec::Range;
+//RS                 if wrap {
+//RS                     self.write("(");
+//RS                 }
+//RS                 self.fmt_expr(start, Prec::Or);
+//RS                 self.write(if *exclusive { "..<" } else { ".." });
+//RS                 self.fmt_expr(end, Prec::Or);
+//RS                 if wrap {
+//RS                     self.write(")");
+//RS                 }
+//RS             }
+//RS             Expr::Ident(name, _) => self.write(name),
+//RS             Expr::Call(c) => self.fmt_call(c),
+//RS             Expr::Unary(op, inner, _) => {
+//RS                 let inner_prec = Prec::Unary;
+//RS                 // Wrap only when the surrounding slot binds tighter than this
+//RS                 // operator (e.g. a unary expr used as a `.method()` receiver).
+//RS                 if prec > inner_prec {
+//RS                     self.write("(");
+//RS                 }
+//RS                 match op {
+//RS                     UnOp::Neg => self.write("-"),
+//RS                     UnOp::Not => self.write("!"),
+//RS                 }
+//RS                 self.fmt_expr(inner, inner_prec);
+//RS                 if prec > inner_prec {
+//RS                     self.write(")");
+//RS                 }
+//RS             }
+//RS             Expr::Binary(op, lhs, rhs, _) => {
+//RS                 let op_prec = Prec::of_bin(*op);
+//RS                 // D-EXPSEM1=A: `^` is right-associative, so its operand slots
+//RS                 // mirror the left-associative ones — the base parses at postfix
+//RS                 // level and the exponent runs back through unary.
+//RS                 let (lhs_prec, rhs_prec) = if *op == BinOp::Pow {
+//RS                     (Prec::Postfix, Prec::Unary)
+//RS                 } else {
+//RS                     (op_prec, op_prec.add_rhs())
+//RS                 };
+//RS                 // E0082 (D-ARMHEAD-PAREN1 amendment): an `&&` operand of `||`
+//RS                 // always prints with its grouping parentheses.
+//RS                 let and_under_or = |child: &Expr, slot: Prec| {
+//RS                     if *op == BinOp::Or && matches!(child, Expr::Binary(BinOp::And, ..)) {
+//RS                         Prec::of_bin(BinOp::And).add_rhs()
+//RS                     } else {
+//RS                         slot
+//RS                     }
+//RS                 };
+//RS                 let (lhs_prec, rhs_prec) = (and_under_or(lhs, lhs_prec), and_under_or(rhs, rhs_prec));
+//RS                 // Wrap only when the surrounding slot binds tighter than this
+//RS                 // operator (e.g. `(a + b).method()`, `(a + b) * c`); equal-prec
+//RS                 // right-hand nesting is handled by `add_rhs` on the rhs slot.
+//RS                 if prec > op_prec {
+//RS                     self.write("(");
+//RS                 }
+//RS                 self.fmt_expr(lhs, lhs_prec);
+//RS                 self.write(" ");
+//RS                 self.write(op.spell());
+//RS                 self.write(" ");
+//RS                 self.fmt_expr(rhs, rhs_prec);
+//RS                 if prec > op_prec {
+//RS                     self.write(")");
+//RS                 }
+//RS             }
+//RS             // D-CHAINCMP1: `0 <= sev < 10` — same-direction relational chain.
+//RS             // Single spaces around each operator, no parens between pairs
+//RS             // (chain reads left to right at uniform precedence).
+//RS             Expr::CompareChain { operands, ops, .. } => {
+//RS                 let op_prec = Prec::of_bin(ops[0]);
+//RS                 if prec > op_prec {
+//RS                     self.write("(");
+//RS                 }
+//RS                 self.fmt_expr(&operands[0], op_prec);
+//RS                 for (op, operand) in ops.iter().zip(operands.iter().skip(1)) {
+//RS                     self.write(" ");
+//RS                     self.write(op.spell());
+//RS                     self.write(" ");
+//RS                     self.fmt_expr(operand, op_prec.add_rhs());
+//RS                 }
+//RS                 if prec > op_prec {
+//RS                     self.write(")");
+//RS                 }
+//RS             }
+//RS             // D-CAP9: postfix `p.*` deref.
+//RS             Expr::Deref(inner, _) => {
+//RS                 self.fmt_expr(inner, Prec::Postfix);
+//RS                 self.write(".*");
+//RS             }
+//RS             // D-CAP9: prefix `*x` raw-pointer-of.
+//RS             Expr::RawOf(inner, _) => {
+//RS                 self.write("*");
+//RS                 self.fmt_expr(inner, Prec::Unary);
+//RS             }
+//RS             // D-SHAPE-COPY1=A (supersedes D-CAP2/S4): prefix `~x` — the one copy
+//RS             // sigil.
+//RS             Expr::Copy(inner, _) => {
+//RS                 self.write(Syntax::SIGIL_COPY);
+//RS                 self.fmt_expr(inner, Prec::Unary);
+//RS             }
+//RS             Expr::Place(inner, access, _) => {
+//RS                 match access {
+//RS                     crate::AST::PlaceAccess::Write => self.write(Syntax::SIGIL_WRITE),
+//RS                     // D-CAP-RECEIVER1=D: the take mark on a consumed receiver.
+//RS                     crate::AST::PlaceAccess::Take => self.write(Syntax::SIGIL_MOVE),
+//RS                     crate::AST::PlaceAccess::Read => {}
+//RS                 }
+//RS                 self.fmt_expr(inner, Prec::Unary);
+//RS             }
+//RS             Expr::Field(base, field, span) => {
+//RS                 self.fmt_expr(base, Prec::Postfix);
+//RS                 // S69 (D-SG3): keep an author-placed break before `.field`.
+//RS                 if self.chain_break_between(base.span().end, span.end) {
+//RS                     // The receiver's own trailing comment (e.g. `.step()  // note`)
+//RS                     // stays on its line, before we break to this step.
+//RS                     self.emit_trailing(base.span().end);
+//RS                     self.with_indent(|f| {
+//RS                         f.newline();
+//RS                         f.write(".");
+//RS                         f.write_postfix_member(field);
+//RS                     });
+//RS                 } else {
+//RS                     self.write(".");
+//RS                     self.write_postfix_member(field);
+//RS                 }
+//RS             }
+//RS             Expr::OptField { base, member, .. } => {
+//RS                 self.fmt_expr(base, Prec::Postfix);
+//RS                 self.write("?.");
+//RS                 self.write_postfix_member(member);
+//RS             }
+//RS             Expr::MethodCall {
+//RS                 receiver,
+//RS                 method,
+//RS                 method_span,
+//RS                 owner_type_args,
+//RS                 type_args,
+//RS                 args,
+//RS                 ..
+//RS             } => {
+//RS                 // D-CONC-SHARE1=A: `shared expr` is the only source spelling
+//RS                 // that builds this node (the `Shared.new(x)` call is retired),
+//RS                 // so print the prefix form back.
+//RS                 if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::TYPE_SHARED)
+//RS                     && method == "new"
+//RS                     && args.len() == 1
+//RS                 {
+//RS                     self.write(Syntax::KW_SHARED);
+//RS                     self.write(" ");
+//RS                     self.fmt_expr(&args[0].expr, Prec::Unary);
+//RS                     return;
+//RS                 }
+//RS                 if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
+//RS                     && self.fmt_task_surface_method(method, args)
+//RS                 {
+//RS                     return;
+//RS                 }
+//RS                 self.fmt_expr(receiver, Prec::Postfix);
+//RS                 self.fmt_call_type_args(owner_type_args, receiver.span().end);
+//RS                 // S69 (D-SG3): keep an author-placed break before `.method(...)`.
+//RS                 if self.chain_break_between(receiver.span().end, method_span.start) {
+//RS                     // The receiver's own trailing comment (e.g. `.step()  // note`)
+//RS                     // stays on its line, before we break to this step.
+//RS                     self.emit_trailing(receiver.span().end);
+//RS                     self.with_indent(|f| {
+//RS                         f.newline();
+//RS                         f.write(".");
+//RS                         f.write_postfix_member(method);
+//RS                         f.fmt_call_type_args(type_args, method_span.end);
+//RS                         f.fmt_method_args(method, args, Some(method_span.end));
+//RS                     });
+//RS                 } else {
+//RS                     self.write(".");
+//RS                     self.write_postfix_member(method);
+//RS                     self.fmt_call_type_args(type_args, method_span.end);
+//RS                     self.fmt_method_args(method, args, Some(method_span.end));
+//RS                 }
+//RS             }
+//RS             Expr::StructLit {
+//RS                 type_name,
+//RS                 type_args,
+//RS                 import_ns,
+//RS                 fields,
+//RS                 inferred,
+//RS                 span,
+//RS                 ..
+//RS             } => {
+//RS                 // D-FAIL-ERROR1=A: sema stores the constructor as a private
+//RS                 // three-field value, but source has one canonical call shape.
+//RS                 if type_name == Syntax::TYPE_ERR {
+//RS                     self.write(Syntax::LIT_ERR);
+//RS                     self.write("(");
+//RS                     let source =
+//RS                         self.source_list_span_after(span.start, super::SourceDelimiter::Paren);
+//RS                     let multiline =
+//RS                         source.is_some_and(|(list_span, _)| self.source_span_multiline(list_span));
+//RS                     if multiline {
+//RS                         self.newline();
+//RS                     }
+//RS                     let mut first = true;
+//RS                     if let Some((_, _, message)) =
+//RS                         fields.iter().find(|(name, ..)| name == "message")
+//RS                     {
+//RS                         self.fmt_expr(message, Prec::OrFallback);
+//RS                         if multiline {
+//RS                             self.write(",");
+//RS                             self.emit_trailing(message.span().end);
+//RS                         }
+//RS                         first = false;
+//RS                     }
+//RS                     for label in ["code", "cause"] {
+//RS                         if let Some((_, _, Expr::Present(value, _))) =
+//RS                             fields.iter().find(|(name, ..)| name == label)
+//RS                         {
+//RS                             if !first {
+//RS                                 if multiline {
+//RS                                     self.newline();
+//RS                                 } else {
+//RS                                     self.write(", ");
+//RS                                 }
+//RS                             }
+//RS                             self.write(label);
+//RS                             self.write(": ");
+//RS                             self.fmt_expr(value, Prec::OrFallback);
+//RS                             if multiline {
+//RS                                 self.write(",");
+//RS                                 self.emit_trailing(value.span().end);
+//RS                             }
+//RS                             first = false;
+//RS                         }
+//RS                     }
+//RS                     if multiline && !self.at_line_start {
+//RS                         self.newline();
+//RS                     }
+//RS                     self.write(")");
+//RS                     return;
+//RS                 }
+//RS                 // D-LIT-DOT1: emit `Type{ … }` (named) or `{ … }` (inferred).
+//RS                 // The formatter is also the auto-fixer for E0320: any old `Type { … }`
+//RS                 // (recovered with `inferred: false`) is re-emitted in the new form.
+//RS                 let inferred = *inferred
+//RS                     || (self.simplify
+//RS                         && self.struct_lit_head_is_redundant(
+//RS                             type_name,
+//RS                             type_args,
+//RS                             import_ns.as_deref(),
+//RS                         ));
+//RS                 if !inferred {
+//RS                     self.fmt_named_struct_head(
+//RS                         type_name,
+//RS                         type_args,
+//RS                         import_ns.as_deref(),
+//RS                         Some(*span),
+//RS                     );
+//RS                 }
+//RS                 self.fmt_struct_lit_body(fields, *span);
+//RS             }
+//RS             Expr::TypedLit { head, body, span } => {
+//RS                 // D-DOTCTOR3: print the head (when present) and the body shape.
+//RS                 if let Some(head) = head {
+//RS                     self.fmt_type(head);
+//RS                 }
+//RS                 self.write("{");
+//RS                 let multiline = self.source_span_multiline(*span);
+//RS                 if multiline {
+//RS                     self.newline();
+//RS                 }
+//RS                 if multiline {
+//RS                     self.indent += 1;
+//RS                 }
+//RS                 match body {
+//RS                     crate::AST::TypedLitBody::Empty => {}
+//RS                     crate::AST::TypedLitBody::Fields(fields) => {
+//RS                         for (i, (name, name_span, expr)) in fields.iter().enumerate() {
+//RS                             if i > 0 {
+//RS                                 if multiline {
+//RS                                     self.newline();
+//RS                                 } else {
+//RS                                     self.write(", ");
+//RS                                 }
+//RS                             }
+//RS                             if multiline {
+//RS                                 self.emit_leading(name_span.start);
+//RS                             }
+//RS                             self.write(name);
+//RS                             self.write(": ");
+//RS                             if multiline {
+//RS                                 self.emit_leading(expr.span().start);
+//RS                             }
+//RS                             self.fmt_expr(expr, Prec::OrFallback);
+//RS                             if multiline {
+//RS                                 self.write(",");
+//RS                             }
+//RS                             if multiline {
+//RS                                 self.emit_trailing(expr.span().end);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     crate::AST::TypedLitBody::Elements(elems) => {
+//RS                         for (i, expr) in elems.iter().enumerate() {
+//RS                             if i > 0 {
+//RS                                 if multiline {
+//RS                                     self.newline();
+//RS                                 } else {
+//RS                                     self.write(", ");
+//RS                                 }
+//RS                             }
+//RS                             if multiline {
+//RS                                 self.emit_leading(expr.span().start);
+//RS                             }
+//RS                             self.fmt_expr(expr, Prec::OrFallback);
+//RS                             if multiline {
+//RS                                 self.write(",");
+//RS                             }
+//RS                             if multiline {
+//RS                                 self.emit_trailing(expr.span().end);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     crate::AST::TypedLitBody::Entries(entries) => {
+//RS                         for (i, (key, val)) in entries.iter().enumerate() {
+//RS                             if i > 0 {
+//RS                                 if multiline {
+//RS                                     self.newline();
+//RS                                 } else {
+//RS                                     self.write(", ");
+//RS                                 }
+//RS                             }
+//RS                             if multiline {
+//RS                                 self.emit_leading(key.span().start);
+// END-PORT-PENDING 2066 crates/jet-parser/src/Formatter/Expressions.rs:1-1800
+

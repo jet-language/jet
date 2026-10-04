@@ -1,222 +1,160 @@
-// PORT-PENDING 0089 crates-jet-foundation-src-prelude-matchscan-module-group: crates/jet-foundation/src/Prelude/MatchScan.rs:1-218
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-BINPAT1 / I9: one binary-pattern scan kernel. `Codegen/mod.rs` embeds this
-//RS // exact source in generated AOT programs; Foundation's AST adapter, Cranelift,
-//RS // and the TIR evaluator marshal into it. Keep this fragment std-only and free
-//RS // of `crate::` paths so it also compiles at the root of generated Rust.
-//RS 
-//RS /// Typed capture produced by the shared text and binary pattern routes.
-//RS ///
-//RS /// Names are deliberately absent: MIR records holes in source order and the
-//RS /// capture index is the only adapter-visible binding identity.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum JetPatternCapture {
-//RS     Text(String),
-//RS     Int(i64),
-//RS     Float(f64),
-//RS     Bool(bool),
-//RS     Bytes(Vec<u8>),
-//RS }
-//RS 
-//RS /// Sema-admitted text-hole conversions.  The route receives this exact
-//RS /// descriptor; it must not infer a type from the matched spelling.
-//RS #[derive(Clone, Copy, Debug, PartialEq)]
-//RS pub enum JetTextHoleKind {
-//RS     Text,
-//RS     Int,
-//RS     Float,
-//RS     Bool,
-//RS     InlineRange { lo: i64, hi: i64 },
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq)]
-//RS pub enum JetTextMatchPart<'a> {
-//RS     Literal(&'a str),
-//RS     Hole { kind: JetTextHoleKind },
-//RS }
-//RS 
-//RS fn jet_text_capture(kind: JetTextHoleKind, raw: &str) -> Option<JetPatternCapture> {
-//RS     match kind {
-//RS         JetTextHoleKind::Text => Some(JetPatternCapture::Text(raw.to_string())),
-//RS         JetTextHoleKind::Int => raw.parse::<i64>().ok().map(JetPatternCapture::Int),
-//RS         JetTextHoleKind::Float => raw.parse::<f64>().ok().map(JetPatternCapture::Float),
-//RS         JetTextHoleKind::Bool => match raw {
-//RS             "true" | "True" | "1" => Some(JetPatternCapture::Bool(true)),
-//RS             "false" | "False" | "0" => Some(JetPatternCapture::Bool(false)),
-//RS             _ => None,
-//RS         },
-//RS         JetTextHoleKind::InlineRange { lo, hi } => raw
-//RS             .parse::<i64>()
-//RS             .ok()
-//RS             .filter(|value| (*value >= lo) && (*value <= hi))
-//RS             .map(JetPatternCapture::Int),
-//RS     }
-//RS }
-//RS 
-//RS /// Match a text subject against the canonical typed descriptor.
-//RS ///
-//RS /// `consume_prefix` permits trailing text and returns the byte length reached
-//RS /// by the match. The returned offset is safe for advancing a UTF-8 cursor
-//RS /// because every literal and hole boundary is discovered on `&str` slices.
-//RS pub fn jet_text_match_scan(
-//RS     subject: &str,
-//RS     parts: &[JetTextMatchPart<'_>],
-//RS     consume_prefix: bool,
-//RS ) -> Option<(usize, Vec<JetPatternCapture>)> {
-//RS     let mut cursor = 0usize;
-//RS     let mut captures = Vec::new();
-//RS     for (index, part) in parts.iter().enumerate() {
-//RS         match part {
-//RS             JetTextMatchPart::Literal(literal) => {
-//RS                 let tail = subject.get(cursor..)?;
-//RS                 if !tail.starts_with(literal) {
-//RS                     return None;
-//RS                 }
-//RS                 cursor = cursor.checked_add(literal.len())?;
-//RS             }
-//RS             JetTextMatchPart::Hole { kind } => {
-//RS                 let end = match parts.get(index + 1) {
-//RS                     Some(JetTextMatchPart::Literal(next)) => {
-//RS                         subject.get(cursor..)?.find(next).map(|offset| cursor + offset)?
-//RS                     }
-//RS                     Some(JetTextMatchPart::Hole { .. }) | None => subject.len(),
-//RS                 };
-//RS                 let raw = subject.get(cursor..end)?;
-//RS                 captures.push(jet_text_capture(*kind, raw)?);
-//RS                 cursor = end;
-//RS             }
-//RS         }
-//RS     }
-//RS     if !consume_prefix && cursor != subject.len() {
-//RS         return None;
-//RS     }
-//RS     Some((cursor, captures))
-//RS }
-//RS 
-//RS /// Match a complete UTF-8 subject against the canonical typed descriptor.
-//RS pub fn jet_text_pattern_match(
-//RS     subject: &str,
-//RS     parts: &[JetTextMatchPart<'_>],
-//RS ) -> Option<Vec<JetPatternCapture>> {
-//RS     jet_text_match_scan(subject, parts, false).map(|(_, captures)| captures)
-//RS }
-//RS 
-//RS /// Match a complete byte subject using the Foundation bit scanner and return
-//RS /// its typed captures in source order.
-//RS pub fn jet_binary_pattern_match(
-//RS     subject: &[u8],
-//RS     parts: &[JetBinMatchPart<'_>],
-//RS ) -> Option<Vec<JetPatternCapture>> {
-//RS     let (_, values) = jet_bin_match_scan(subject, parts, false)?;
-//RS     values
-//RS         .into_iter()
-//RS         .map(|value| match value {
-//RS             JetBinMatchValue::Int(value) => Some(JetPatternCapture::Int(value as i64)),
-//RS             JetBinMatchValue::Rest(value) => Some(JetPatternCapture::Bytes(value)),
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug)]
-//RS pub enum JetBinMatchPart<'a> {
-//RS     Lit(&'a [u8]),
-//RS     Bits { width: usize, little: bool },
-//RS     Rest,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum JetBinMatchValue {
-//RS     Int(u64),
-//RS     Rest(Vec<u8>),
-//RS }
-//RS 
-//RS /// Scan one byte-pattern description from the current bit position.
-//RS ///
-//RS /// `consume_prefix` permits trailing subject bytes, but still requires the
-//RS /// match to end on a byte boundary because `Reader` advances by bytes.
-//RS pub fn jet_bin_match_scan(
-//RS     subject: &[u8],
-//RS     parts: &[JetBinMatchPart<'_>],
-//RS     consume_prefix: bool,
-//RS ) -> Option<(usize, Vec<JetBinMatchValue>)> {
-//RS     let total = subject.len().checked_mul(8)?;
-//RS     let mut bit_pos = 0usize;
-//RS     let mut values = Vec::new();
-//RS 
-//RS     for part in parts {
-//RS         match *part {
-//RS             JetBinMatchPart::Lit(bytes) => {
-//RS                 if bit_pos % 8 != 0 {
-//RS                     return None;
-//RS                 }
-//RS                 let byte_pos = bit_pos / 8;
-//RS                 let end = byte_pos.checked_add(bytes.len())?;
-//RS                 if end > subject.len() || &subject[byte_pos..end] != bytes {
-//RS                     return None;
-//RS                 }
-//RS                 bit_pos = bit_pos.checked_add(bytes.len().checked_mul(8)?)?;
-//RS             }
-//RS             JetBinMatchPart::Bits { width, little } => {
-//RS                 let end = bit_pos.checked_add(width)?;
-//RS                 if end > total {
-//RS                     return None;
-//RS                 }
-//RS                 let mut value = 0u64;
-//RS                 if bit_pos % 8 == 0 && width % 8 == 0 && width <= 64 {
-//RS                     let byte_pos = bit_pos / 8;
-//RS                     let bytes = width / 8;
-//RS                     let byte_end = byte_pos.checked_add(bytes)?;
-//RS                     let subject_bytes = subject.get(byte_pos..byte_end)?;
-//RS                     if little {
-//RS                         for (index, byte) in subject_bytes.iter().enumerate() {
-//RS                             value |= u64::from(*byte) << (8 * index);
-//RS                         }
-//RS                     } else {
-//RS                         for byte in subject_bytes {
-//RS                             value = (value << 8) | u64::from(*byte);
-//RS                         }
-//RS                     }
-//RS                 } else {
-//RS                     for offset in 0..width {
-//RS                         let position = bit_pos + offset;
-//RS                         let byte = subject[position / 8];
-//RS                         let bit = 7 - (position % 8);
-//RS                         value = (value << 1) | u64::from((byte >> bit) & 1);
-//RS                     }
-//RS                     if little && width % 8 == 0 {
-//RS                         let bytes = width / 8;
-//RS                         let mut swapped = 0u64;
-//RS                         for index in 0..bytes {
-//RS                             swapped |= ((value >> (8 * index)) & 0xff) << (8 * (bytes - 1 - index));
-//RS                         }
-//RS                         value = swapped;
-//RS                     }
-//RS                 }
-//RS                 bit_pos = end;
-//RS                 values.push(JetBinMatchValue::Int(value));
-//RS             }
-//RS             JetBinMatchPart::Rest => {
-//RS                 if bit_pos % 8 != 0 {
-//RS                     return None;
-//RS                 }
-//RS                 values.push(JetBinMatchValue::Rest(subject[bit_pos / 8..].to_vec()));
-//RS                 bit_pos = total;
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     if !consume_prefix && bit_pos != total {
-//RS         let has_rest = parts
-//RS             .iter()
-//RS             .any(|part| matches!(*part, JetBinMatchPart::Rest));
-//RS         if !has_rest {
-//RS             return None;
-//RS         }
-//RS     }
-//RS     if consume_prefix && bit_pos % 8 != 0 {
-//RS         return None;
-//RS     }
-//RS     Some((bit_pos, values))
-//RS }
-// END-PORT-PENDING 0089 crates/jet-foundation/src/Prelude/MatchScan.rs:1-218
+// One typed text/binary pattern scan kernel shared by compiler execution routes.
+use core.sys.target as match_target // GATE #4483: checked arithmetic follows selected usize width.
 
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:11
+pub enum JetPatternCapture {
+    Text(String)
+    Int(I64)
+    Float(F64)
+    Bool(Bool)
+    Bytes([U8])
+}
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:22
+pub enum JetTextHoleKind { Text, Int, Float, Bool, InlineRange(lo: I64, hi: I64) }
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:31
+pub enum JetTextMatchPart { Literal(String), Hole(kind: JetTextHoleKind) }
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:36
+fn jet_text_capture(kind: JetTextHoleKind, raw: String) -> JetPatternCapture? Never! {
+    if kind == {
+        .Text -> Val(JetPatternCapture.Text(raw.to_string()))
+        .Int -> { value :: raw.parse<I64>() ?? return None; Val(JetPatternCapture.Int(value)) }
+        .Float -> { value :: raw.parse<F64>() ?? return None; Val(JetPatternCapture.Float(value)) }
+        .Bool -> if raw == {
+            "true" -> Val(JetPatternCapture.Bool(true))
+            "True" -> Val(JetPatternCapture.Bool(true))
+            "1" -> Val(JetPatternCapture.Bool(true))
+            "false" -> Val(JetPatternCapture.Bool(false))
+            "False" -> Val(JetPatternCapture.Bool(false))
+            "0" -> Val(JetPatternCapture.Bool(false))
+            else -> None
+        }
+        .InlineRange(lo, hi) -> {
+            value :: raw.parse<I64>() ?? return None
+            if value < lo || value > hi -> return None
+            Val(JetPatternCapture.Int(value))
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:59
+// Offsets are byte offsets, including prefix cursor advancement.
+pub fn jet_text_match_scan(subject: String, parts: View<JetTextMatchPart>, consume_prefix: Bool) -> (offset: Int, captures: [JetPatternCapture])? Never! {
+    cursor := 0
+    captures := [JetPatternCapture]{}
+    loop index in 0..<parts.len() {
+        if parts[index] == {
+            .Literal(literal) -> {
+                tail := subject.get(cursor..<subject.bytes().len()) ?? return None // #4303
+                if !tail.starts_with(literal) -> return None
+                if Int{literal.bytes().len()} > Int{match_target.usize_max()} - cursor -> return None
+                cursor += literal.bytes().len()
+            }
+            .Hole(kind) -> {
+                end := subject.bytes().len()
+                if index + 1 < parts.len() {
+                    if parts[index + 1] == .Literal(next_literal) {
+                        tail := subject.get(cursor..<subject.bytes().len()) ?? return None // #4303
+                        offset :: tail.index_of(next_literal) ?? return None
+                        end = cursor + offset
+                    }
+                }
+                raw := subject.get(cursor..<end) ?? return None // #4303
+                capture :: jet_text_capture(kind, raw) ?? return None
+                &captures.push(^capture)
+                cursor = end
+            }
+        }
+    }
+    if !consume_prefix && cursor != subject.bytes().len() -> return None
+    Val((cursor, ^captures))
+}
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:95
+pub fn jet_text_pattern_match(subject: String, parts: View<JetTextMatchPart>) -> [JetPatternCapture]? Never! {
+    result :: jet_text_match_scan(subject, parts, false) ?? return None
+    Val(^result.captures)
+}
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:104
+pub fn jet_binary_pattern_match(subject: View<U8>, parts: View<JetBinMatchPart>) -> [JetPatternCapture]? Never! {
+    result :: jet_bin_match_scan(subject, parts, false) ?? return None
+    captures := [JetPatternCapture].with_capacity(result.values.len())
+    loop value in result.values {
+        if value == {
+            .Int(integer) -> &captures.push(JetPatternCapture.Int(I64.from_bits(integer)))
+            .Rest(bytes) -> &captures.push(JetPatternCapture.Bytes(^bytes))
+        }
+    }
+    Val(^captures)
+}
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:119
+pub enum JetBinMatchPart { Lit(View<U8>), Bits(width: Int, little: Bool), Rest }
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:126
+pub enum JetBinMatchValue { Int(U64), Rest([U8]) }
+// Rust: crates/jet-foundation/src/Prelude/MatchScan.rs:135
+pub fn jet_bin_match_scan(subject: View<U8>, parts: View<JetBinMatchPart>, consume_prefix: Bool) -> (bits: Int, values: [JetBinMatchValue])? Never! {
+    usize_max :: Int{match_target.usize_max()}
+    if subject.len() > usize_max / 8 -> return None
+    total :: subject.len() * 8
+    bit_pos := 0
+    values := [JetBinMatchValue]{}
+    loop part in parts {
+        if part == {
+            .Lit(bytes) -> {
+                if bit_pos % 8 != 0 -> return None
+                byte_pos :: bit_pos / 8
+                if bytes.len() > usize_max - byte_pos -> return None
+                end :: byte_pos + bytes.len()
+                if end > subject.len() || subject.view(byte_pos..<end) != bytes -> return None
+                if bytes.len() > usize_max / 8 || bytes.len() * 8 > usize_max - bit_pos -> return None
+                bit_pos += bytes.len() * 8
+            }
+            .Bits(width, little) -> {
+                if width < 0 || width > usize_max - bit_pos -> return None
+                end :: bit_pos + width
+                if end > total -> return None
+                value := U64{0}
+                if bit_pos % 8 == 0 && width % 8 == 0 && width <= 64 {
+                    byte_pos :: bit_pos / 8
+                    bytes :: width / 8
+                    if bytes > usize_max - byte_pos -> return None
+                    byte_end :: byte_pos + bytes
+                    if byte_end > subject.len() -> return None
+                    if little {
+                        loop index in 0..<bytes -> value |= U64{subject[byte_pos + index]} << (8 * index)
+                    } else {
+                        loop index in byte_pos..<byte_end -> value = (value << 8) | U64{subject[index]}
+                    }
+                } else {
+                    loop offset in 0..<width {
+                        position :: bit_pos + offset
+                        byte :: subject[position / 8]
+                        bit :: 7 - position % 8
+                        value = (value << 1) | U64{(byte >> bit) & U8{1}}
+                    }
+                    if little && width % 8 == 0 {
+                        bytes :: width / 8
+                        swapped := U64{0}
+                        loop index in 0..<bytes {
+                            swapped |= ((value >> (8 * index)) & U64{255}) << (8 * (bytes - 1 - index))
+                        }
+                        value = swapped
+                    }
+                }
+                bit_pos = end
+                &values.push(JetBinMatchValue.Int(value))
+            }
+            .Rest -> {
+                if bit_pos % 8 != 0 -> return None
+                &values.push(JetBinMatchValue.Rest(subject.view(bit_pos / 8..<subject.len()).to_array()))
+                bit_pos = total
+            }
+        }
+    }
+    if !consume_prefix && bit_pos != total {
+        has_rest := false
+        loop part in parts {
+            if part == .Rest { has_rest = true; break }
+        }
+        if !has_rest -> return None
+    }
+    if consume_prefix && bit_pos % 8 != 0 -> return None
+    Val((bit_pos, ^values))
+}

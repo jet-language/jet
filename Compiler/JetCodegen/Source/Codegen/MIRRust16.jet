@@ -1,0 +1,1804 @@
+// PORT-PENDING 2016 crates-jet-codegen-src-codegen-mirrust-slice-27001: crates/jet-codegen/src/Codegen/MIRRust.rs:27001-28800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         {
+//RS             return "()".to_string();
+//RS         }
+//RS         if self.shared_constant_value(function, value) {
+//RS             // Dropping a shared-constant read ends the borrow; it never copies.
+//RS             return format!("{{ {}.release(); () }}", value_slot(value));
+//RS         }
+//RS         if matches!(kind, MirDropKind::ForeignHandle) {
+//RS             let ty = self.value_type(function, value);
+//RS             let handle = self
+//RS                 .handle_for_type(ty)
+//RS                 .unwrap_or_else(|| panic!("MIR foreign-handle drop has no lifecycle row"));
+//RS             return self.close_handle_drop(handle, self.value_move(value));
+//RS         }
+//RS         // The Shared plane of `#Transact`: the STM guard's scope cleanup is its
+//RS         // commit, matching the interpreter and JIT, which commit at the
+//RS         // transaction scope exit. Dropping the guard itself would roll back.
+//RS         if matches!(
+//RS             self.value_type(function, value).kind(),
+//RS             MirTypeKind::Apply { name, args } if args.is_empty() && name.name == STM_TYPE
+//RS         ) {
+//RS             return format!("{{ {}.commit(); () }}", self.value_move(value));
+//RS         }
+//RS         match kind {
+//RS             MirDropKind::None => format!("{{ let _ = {}; () }}", self.value_move(value)),
+//RS             MirDropKind::Value => format!("{{ drop({}); () }}", self.value_move(value)),
+//RS             MirDropKind::Shared => format!("{{ drop({}); () }}", self.value_move(value)),
+//RS             MirDropKind::View => format!("{{ drop({}); () }}", self.value_move(value)),
+//RS             MirDropKind::ForeignHandle => unreachable!(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn map_guard_path(
+//RS         &self,
+//RS         mut expression: String,
+//RS         path: &[MirFieldId],
+//RS         editable: bool,
+//RS         route: &MirPreludeCall,
+//RS     ) -> String {
+//RS         let method = if route.module == "core.cell_guard"
+//RS             && matches!(route.member.as_str(), "map_read" | "map_edit")
+//RS         {
+//RS             "map"
+//RS         } else {
+//RS             route.member.as_str()
+//RS         };
+//RS         let borrow = if editable { "&mut " } else { "&" };
+//RS         let cell_route = route.module == "core.cell_guard";
+//RS         for field in path {
+//RS             let field_name = self.field_name(*field);
+//RS             let project = format!("|__jet_guard_value| {borrow}__jet_guard_value.{field_name}");
+//RS             let arguments = if cell_route {
+//RS                 format!("{method}({project})")
+//RS             } else {
+//RS                 format!("{method}({}i64, {project})", field.0)
+//RS             };
+//RS             expression = format!("({expression}).{arguments}");
+//RS         }
+//RS         expression
+//RS     }
+//RS 
+//RS     fn shared_guard_map(
+//RS         &self,
+//RS         call: MirPreludeCallId,
+//RS         guard: MirValueId,
+//RS         path: &[MirFieldId],
+//RS         editable: bool,
+//RS     ) -> String {
+//RS         if path.is_empty() {
+//RS             panic!("MIR shared guard map has no checked field path");
+//RS         }
+//RS         let route = self.prelude_row(call);
+//RS         self.map_guard_path(self.value_move(guard), path, editable, route)
+//RS     }
+//RS 
+//RS     fn shared_guard_split(
+//RS         &self,
+//RS         call: MirPreludeCallId,
+//RS         map_call: MirPreludeCallId,
+//RS         guard: MirValueId,
+//RS         first: &[MirFieldId],
+//RS         second: &[MirFieldId],
+//RS         editable: bool,
+//RS     ) -> String {
+//RS         if first.is_empty() || second.is_empty() {
+//RS             panic!("MIR shared guard split has an empty checked field path");
+//RS         }
+//RS         let mut common = 0usize;
+//RS         while common < first.len() && common < second.len() && first[common] == second[common] {
+//RS             common += 1;
+//RS         }
+//RS         if common == first.len() || common == second.len() {
+//RS             panic!("MIR shared guard split paths are identical or prefix-related");
+//RS         }
+//RS         let map_route = self.prelude_row(map_call);
+//RS         let split_route = self.prelude_row(call);
+//RS         let prefix = self.map_guard_path(
+//RS             self.value_move(guard),
+//RS             &first[..common],
+//RS             editable,
+//RS             map_route,
+//RS         );
+//RS         let method = if split_route.module == "core.cell_guard"
+//RS             && matches!(split_route.member.as_str(), "split_read" | "split_edit")
+//RS         {
+//RS             "split"
+//RS         } else {
+//RS             split_route.member.as_str()
+//RS         };
+//RS         let borrow = if editable { "&mut " } else { "&" };
+//RS         let first_field = self.field_name(first[common]);
+//RS         let second_field = self.field_name(second[common]);
+//RS         let project = format!(
+//RS             "|__jet_guard_value| ({borrow}__jet_guard_value.{first_field}, {borrow}__jet_guard_value.{second_field})"
+//RS         );
+//RS         let split = if split_route.module == "core.cell_guard" {
+//RS             format!("({prefix}).{method}({project})")
+//RS         } else {
+//RS             format!(
+//RS                 "({prefix}).{method}({}i64, {}i64, {project})",
+//RS                 first[common].0, second[common].0
+//RS             )
+//RS         };
+//RS         let first_mapped = self.map_guard_path(
+//RS             "__jet_split_first".to_string(),
+//RS             &first[common + 1..],
+//RS             editable,
+//RS             map_route,
+//RS         );
+//RS         let second_mapped = self.map_guard_path(
+//RS             "__jet_split_second".to_string(),
+//RS             &second[common + 1..],
+//RS             editable,
+//RS             map_route,
+//RS         );
+//RS         format!(
+//RS             "{{ let (__jet_split_first, __jet_split_second) = {split}; ({first_mapped}, {second_mapped}) }}"
+//RS         )
+//RS     }
+//RS     fn validate_dma_buffer_type(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         actual_value: MirValueId,
+//RS         expected: &MirType,
+//RS         context: &str,
+//RS     ) {
+//RS         let actual = self.value_type(function, actual_value);
+//RS         if !actual.same_checked_type(expected) {
+//RS             panic!("MIR hardware DMA {context} buffer type disagrees with checked buffer_ty");
+//RS         }
+//RS     }
+//RS     fn hardware_register_helper(
+//RS         &self,
+//RS         operation: &str,
+//RS         profile_id: &str,
+//RS         block: &str,
+//RS         register: &str,
+//RS         width: jet_foundation::TargetMachine::RegisterWidth,
+//RS     ) -> String {
+//RS         let profile = self
+//RS             .program
+//RS             .facts
+//RS             .hardware_profile
+//RS             .as_ref()
+//RS             .unwrap_or_else(|| panic!("MIR hardware register has no checked profile"));
+//RS         if self.program.facts.hardware_profile_id != profile_id {
+//RS             panic!("MIR hardware register profile disagrees with checked profile");
+//RS         }
+//RS         let block_fact = profile
+//RS             .register_blocks
+//RS             .iter()
+//RS             .find(|candidate| candidate.name == block)
+//RS             .unwrap_or_else(|| panic!("MIR hardware register has unknown block"));
+//RS         let register_fact = block_fact
+//RS             .registers
+//RS             .iter()
+//RS             .find(|candidate| candidate.name == register)
+//RS             .unwrap_or_else(|| panic!("MIR hardware register has unknown register"));
+//RS         if register_fact.width != width {
+//RS             panic!("MIR hardware register width disagrees with checked fact");
+//RS         }
+//RS         let allowed = match operation {
+//RS             "read" => register_fact.access.can_read(),
+//RS             "write" => register_fact.access.can_write(),
+//RS             _ => panic!("MIR hardware register has unknown operation"),
+//RS         };
+//RS         if !allowed {
+//RS             panic!("MIR hardware register operation disagrees with checked access");
+//RS         }
+//RS         self.hardware_register_helper_name(operation, profile_id, block, register)
+//RS     }
+//RS 
+//RS     fn hardware_call(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         op: &MirHardwareOp,
+//RS         receiver: Option<MirValueId>,
+//RS         args: &[MirCallArg],
+//RS     ) -> String {
+//RS         let route = self.prelude_row(call);
+//RS         self.validate_prelude_count(route, args.len());
+//RS         if route.signature.borrow_mask.iter().any(|borrowed| *borrowed) {
+//RS             panic!("MIR hardware route {:?} has borrowed arguments", call);
+//RS         }
+//RS         let root = &self.config.root_prefix;
+//RS         match op {
+//RS             MirHardwareOp::RegisterRead {
+//RS                 profile_id,
+//RS                 block,
+//RS                 register,
+//RS                 width,
+//RS             } => {
+//RS                 if receiver.is_some() || !args.is_empty() {
+//RS                     panic!("MIR hardware register read has unexpected receiver or arguments");
+//RS                 }
+//RS                 let helper =
+//RS                     self.hardware_register_helper("read", profile_id, block, register, *width);
+//RS                 format!("{root}{helper}()")
+//RS             }
+//RS             MirHardwareOp::RegisterWrite {
+//RS                 profile_id,
+//RS                 block,
+//RS                 register,
+//RS                 width,
+//RS             } => {
+//RS                 if receiver.is_some() || args.len() != 1 {
+//RS                     panic!("MIR hardware register write requires one value argument");
+//RS                 }
+//RS                 if args[0].access == MirAccess::Write {
+//RS                     panic!("MIR hardware register write value cannot be a borrowed place");
+//RS                 }
+//RS                 let value = self.call_arg_for_function(function, &args[0], false);
+//RS                 let helper =
+//RS                     self.hardware_register_helper("write", profile_id, block, register, *width);
+//RS                 format!("{root}{helper}({value})")
+//RS             }
+//RS             MirHardwareOp::DmaStart {
+//RS                 profile_id,
+//RS                 channel,
+//RS                 buffer_ty,
+//RS             } => {
+//RS                 if receiver.is_some() || args.len() != 1 {
+//RS                     panic!("MIR hardware DMA start requires one buffer argument");
+//RS                 }
+//RS                 if args[0].access != MirAccess::Move {
+//RS                     panic!("MIR hardware DMA start buffer is not an owned move argument");
+//RS                 }
+//RS                 self.validate_dma_buffer_type(function, args[0].value, buffer_ty, "start");
+//RS                 let buffer = self.call_arg_for_function(function, &args[0], false);
+//RS                 format!("{root}jet_hardware_dma_start_typed({profile_id:?}, {channel:?}, {buffer})")
+//RS             }
+//RS             MirHardwareOp::DmaWait {
+//RS                 profile_id,
+//RS                 channel,
+//RS                 buffer_ty,
+//RS             } => {
+//RS                 let transfer = receiver
+//RS                     .unwrap_or_else(|| panic!("MIR hardware DMA wait has no transfer receiver"));
+//RS                 if !args.is_empty() {
+//RS                     panic!("MIR hardware DMA wait has unexpected value arguments");
+//RS                 }
+//RS                 let transfer_ty = self.value_type(function, transfer);
+//RS                 let MirTypeKind::Apply { name, args } = transfer_ty.kind() else {
+//RS                     panic!("MIR hardware DMA wait receiver is not a checked transfer type");
+//RS                 };
+//RS                 if name.name != "__JetDmaTransfer"
+//RS                     || args.len() != 1
+//RS                     || !args[0].same_checked_type(buffer_ty)
+//RS                 {
+//RS                     panic!("MIR hardware DMA wait receiver disagrees with checked buffer_ty");
+//RS                 }
+//RS                 format!(
+//RS                     "{root}jet_hardware_dma_wait_typed({profile_id:?}, {channel:?}, {})",
+//RS                     self.value_move(transfer)
+//RS                 )
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn plugin_wire_path(&self, item: &str) -> String {
+//RS         format!("{}jet_std::plugin_wire::{item}", self.config.root_prefix)
+//RS     }
+//RS 
+//RS     fn plugin_unwrap_type<'b>(&'b self, ty: &'b MirType) -> &'b MirType {
+//RS         match ty.kind() {
+//RS             MirTypeKind::InlineRange { base, .. }
+//RS             | MirTypeKind::Tagged { inner: base, .. }
+//RS             | MirTypeKind::Quantity { base, .. } => self.plugin_unwrap_type(base),
+//RS             MirTypeKind::Apply { name, .. } => {
+//RS                 let Some(definition) = self
+//RS                     .program
+//RS                     .types
+//RS                     .iter()
+//RS                     .find(|definition| definition.id == name.id)
+//RS                 else {
+//RS                     return ty;
+//RS                 };
+//RS                 match &definition.kind {
+//RS                     MirTypeDefKind::Alias { target } => self.plugin_unwrap_type(target),
+//RS                     _ => ty,
+//RS                 }
+//RS             }
+//RS             _ => ty,
+//RS         }
+//RS     }
+//RS 
+//RS     fn plugin_record_def(&self, ty: &MirType, descriptor: &ComponentTypeDescriptor) -> &MirTypeDef {
+//RS         let ty = self.plugin_unwrap_type(ty);
+//RS         let identity = ty.identity;
+//RS         let nominal_name = ty.nominal_name().unwrap_or_default();
+//RS         let descriptor_name = match descriptor {
+//RS             ComponentTypeDescriptor::Record { name, .. } => name.as_str(),
+//RS             _ => panic!("MIR plugin record descriptor has a non-record source type"),
+//RS         };
+//RS         if let Some(identity) = identity {
+//RS             return self
+//RS                 .program
+//RS                 .types
+//RS                 .iter()
+//RS                 .find(|definition| definition.id == identity)
+//RS                 .unwrap_or_else(|| {
+//RS                     panic!("MIR plugin record `{descriptor_name}` has no checked type definition")
+//RS                 });
+//RS         }
+//RS         self.program
+//RS             .types
+//RS             .iter()
+//RS             .find(|definition| {
+//RS                 definition.key == nominal_name
+//RS                     || definition.name == nominal_name
+//RS                     || definition.key == descriptor_name
+//RS                     || definition.name == descriptor_name
+//RS             })
+//RS             .unwrap_or_else(|| {
+//RS                 panic!("MIR plugin record `{descriptor_name}` has no checked type definition")
+//RS             })
+//RS     }
+//RS 
+//RS     fn plugin_record_field<'b>(
+//RS         &self,
+//RS         definition: &'b MirTypeDef,
+//RS         index: usize,
+//RS         name: &str,
+//RS     ) -> &'b MirField {
+//RS         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+//RS             panic!("MIR plugin record descriptor names a non-struct type");
+//RS         };
+//RS         fields
+//RS             .get(index)
+//RS             .filter(|field| {
+//RS                 field.name == name
+//RS                     || mangle(&field.name) == name
+//RS                     || field
+//RS                         .shape_names
+//RS                         .name_for(ShapeProjectionKind::Json)
+//RS                         .expect("checked MIR field is missing its JSON shape name")
+//RS                         == name
+//RS             })
+//RS             .or_else(|| {
+//RS                 fields.iter().find(|field| {
+//RS                     field.name == name
+//RS                         || mangle(&field.name) == name
+//RS                         || field
+//RS                             .shape_names
+//RS                             .name_for(ShapeProjectionKind::Json)
+//RS                             .expect("checked MIR field is missing its JSON shape name")
+//RS                             == name
+//RS                 })
+//RS             })
+//RS             .unwrap_or_else(|| {
+//RS                 panic!(
+//RS                     "MIR plugin record field `{name}` (index {index}) is absent from its type definition"
+//RS                 )
+//RS             })
+//RS     }
+//RS 
+//RS     fn plugin_encode_value_expr(
+//RS         &self,
+//RS         descriptor: &ComponentTypeDescriptor,
+//RS         ty: &MirType,
+//RS         value: &str,
+//RS         depth: usize,
+//RS     ) -> String {
+//RS         let wire = self.plugin_wire_path("PluginValue");
+//RS         let ty = self.plugin_unwrap_type(ty);
+//RS         match descriptor {
+//RS             ComponentTypeDescriptor::Int => format!(
+//RS                 "{wire}::Int({}jet_std::jet_int_owned_to_i64(&({value})).expect(\"plugin Int exceeds i64 wire range\"))",
+//RS                 self.config.root_prefix,
+//RS             ),
+//RS             ComponentTypeDescriptor::Float => {
+//RS                 format!("{wire}::Float(({value}) as f64)")
+//RS             }
+//RS             ComponentTypeDescriptor::Bool => format!("{wire}::Bool({value})"),
+//RS             ComponentTypeDescriptor::String => {
+//RS                 format!("{wire}::Text(({value}).to_string())")
+//RS             }
+//RS             ComponentTypeDescriptor::List(inner) => {
+//RS                 let child_ty = match ty.kind() {
+//RS                     MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+//RS                         inner.as_ref()
+//RS                     }
+//RS                     _ => panic!("MIR plugin list descriptor has a non-list value type"),
+//RS                 };
+//RS                 let child_name = format!("__jet_plugin_encode_item_{depth}");
+//RS                 let child = self.plugin_encode_value_expr(
+//RS                     inner,
+//RS                     child_ty,
+//RS                     &child_name,
+//RS                     depth.saturating_add(1),
+//RS                 );
+//RS                 let iterator = match ty.kind() {
+//RS                     MirTypeKind::List(inner) if self.columnar_type_def(inner).is_some() => {
+//RS                         format!("({value}).to_aos().into_iter()")
+//RS                     }
+//RS                     _ => format!("({value}).into_iter()"),
+//RS                 };
+//RS                 format!("{wire}::List({iterator}.map(|{child_name}| {child}).collect())")
+//RS             }
+//RS             ComponentTypeDescriptor::Option(inner) => {
+//RS                 let child_ty = match ty.kind() {
+//RS                     MirTypeKind::Option(inner) => inner.as_ref(),
+//RS                     _ => panic!("MIR plugin option descriptor has a non-option value type"),
+//RS                 };
+//RS                 let child_name = format!("__jet_plugin_option_value_{depth}");
+//RS                 let child = self.plugin_encode_value_expr(
+//RS                     inner,
+//RS                     child_ty,
+//RS                     &child_name,
+//RS                     depth.saturating_add(1),
+//RS                 );
+//RS                 format!(
+//RS                     "match ({value}) {{ \
+//RS                      Ok({child_name}) => {wire}::Option(Some(Box::new({child}))), \
+//RS                      Err(_) => {wire}::Option(None) \
+//RS                      }}"
+//RS                 )
+//RS             }
+//RS             ComponentTypeDescriptor::Result { ok, err } => {
+//RS                 let (ok_ty, err_ty) = match ty.kind() {
+//RS                     MirTypeKind::Result { ok, err } => (ok.as_ref(), err.as_ref()),
+//RS                     _ => panic!("MIR plugin result descriptor has a non-result value type"),
+//RS                 };
+//RS                 let ok_name = format!("__jet_plugin_result_ok_{depth}");
+//RS                 let err_name = format!("__jet_plugin_result_err_{depth}");
+//RS                 let ok_value =
+//RS                     self.plugin_encode_value_expr(ok, ok_ty, &ok_name, depth.saturating_add(1));
+//RS                 let err_value =
+//RS                     self.plugin_encode_value_expr(err, err_ty, &err_name, depth.saturating_add(1));
+//RS                 format!(
+//RS                     "match ({value}) {{ \
+//RS                      Ok({ok_name}) => {wire}::ResultOk(Some(Box::new({ok_value}))), \
+//RS                      Err({err_name}) => {wire}::ResultErr(Some(Box::new({err_value}))) \
+//RS                      }}"
+//RS                 )
+//RS             }
+//RS             ComponentTypeDescriptor::Record { fields, .. } => {
+//RS                 let definition = self.plugin_record_def(ty, descriptor);
+//RS                 let record_name = format!("__jet_plugin_record_{depth}");
+//RS                 let encoded_fields = fields
+//RS                     .iter()
+//RS                     .map(|(index, name, field_descriptor)| {
+//RS                         let field = self.plugin_record_field(definition, *index, name);
+//RS                         let field_value = format!("({record_name}).{}", mangle(&field.name));
+//RS                         let encoded = self.plugin_encode_value_expr(
+//RS                             field_descriptor,
+//RS                             &field.ty,
+//RS                             &field_value,
+//RS                             depth.saturating_add(1),
+//RS                         );
+//RS                         format!("({name:?}.to_string(), {encoded})")
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 format!(
+//RS                     "{{ let {record_name} = ({value}); \
+//RS                      {wire}::Record(vec![{encoded_fields}]) }}"
+//RS                 )
+//RS             }
+//RS         }
+//RS     }
+//RS     fn plugin_decode_value_expr(
+//RS         &self,
+//RS         descriptor: &ComponentTypeDescriptor,
+//RS         ty: &MirType,
+//RS         value: &str,
+//RS         depth: usize,
+//RS     ) -> String {
+//RS         let wire = self.plugin_wire_path("PluginValue");
+//RS         let ty = self.plugin_unwrap_type(ty);
+//RS         match descriptor {
+//RS             ComponentTypeDescriptor::Int => format!(
+//RS                 "match ({value}) {{ \
+//RS                  {wire}::Int(value) => Ok({}jet_std::jet_int_owned_from_i64(value)), \
+//RS                  _ => Err(\"plugin returned a value with the wrong Int shape\".to_string()) \
+//RS                  }}",
+//RS                 self.config.root_prefix,
+//RS             ),
+//RS             ComponentTypeDescriptor::Float => format!(
+//RS                 "match ({value}) {{ \
+//RS                  {wire}::Float(value) => Ok(value), \
+//RS                  _ => Err(\"plugin returned a value with the wrong Float shape\".to_string()) \
+//RS                  }}"
+//RS             ),
+//RS             ComponentTypeDescriptor::Bool => format!(
+//RS                 "match ({value}) {{ \
+//RS                  {wire}::Bool(value) => Ok(value), \
+//RS                  _ => Err(\"plugin returned a value with the wrong Bool shape\".to_string()) \
+//RS                  }}"
+//RS             ),
+//RS             ComponentTypeDescriptor::String => format!(
+//RS                 "match ({value}) {{ \
+//RS                  {wire}::Text(value) => Ok(value), \
+//RS                  _ => Err(\"plugin returned a value with the wrong String shape\".to_string()) \
+//RS                  }}"
+//RS             ),
+//RS             ComponentTypeDescriptor::List(inner) => {
+//RS                 let child_ty = match ty.kind() {
+//RS                     MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+//RS                         inner.as_ref()
+//RS                     }
+//RS                     _ => panic!("MIR plugin list descriptor has a non-list result type"),
+//RS                 };
+//RS                 let child_name = format!("__jet_plugin_decode_item_{depth}");
+//RS                 let child = self.plugin_decode_value_expr(
+//RS                     inner,
+//RS                     child_ty,
+//RS                     &child_name,
+//RS                     depth.saturating_add(1),
+//RS                 );
+//RS                 let inner_rust = self.rust_type(child_ty);
+//RS                 let items_name = format!("__jet_plugin_decode_items_{depth}");
+//RS                 let result_name = format!("__jet_plugin_decode_list_result_{depth}");
+//RS                 let converted = match ty.kind() {
+//RS                     MirTypeKind::FixedList { .. } => {
+//RS                         let output = self.rust_type(ty);
+//RS                         format!(
+//RS                             "let {result_name}: Result<{output}, Vec<{inner_rust}>> = \
+//RS                              {items_name}.try_into(); \
+//RS                              match {result_name} {{ \
+//RS                              Ok(value) => Ok(value), \
+//RS                              Err(_) => Err(\"plugin returned a list with the wrong length\".to_string()) \
+//RS                              }}"
+//RS                         )
+//RS                     }
+//RS                     MirTypeKind::List(inner) if self.columnar_type_def(inner).is_some() => {
+//RS                         let output = self.rust_type(ty);
+//RS                         format!("Ok(<{output}>::from_aos({items_name}))")
+//RS                     }
+//RS                     _ => format!("Ok({items_name})"),
+//RS                 };
+//RS                 format!(
+//RS                     "match ({value}) {{ \
+//RS                      {wire}::List(values) => {{ \
+//RS                      let {items_name}: Result<Vec<{inner_rust}>, String> = \
+//RS                      values.into_iter().map(|{child_name}| {child}).collect(); \
+//RS                      match {items_name} {{ \
+//RS                      Ok({items_name}) => {{ {converted} }}, \
+//RS                      Err(error) => Err(error) \
+//RS                      }} \
+//RS                      }}, \
+//RS                      _ => Err(\"plugin returned a value with the wrong List shape\".to_string()) \
+//RS                      }}"
+//RS                 )
+//RS             }
+//RS             ComponentTypeDescriptor::Option(inner) => {
+//RS                 let child_ty = match ty.kind() {
+//RS                     MirTypeKind::Option(inner) => inner.as_ref(),
+//RS                     _ => panic!("MIR plugin option descriptor has a non-option result type"),
+//RS                 };
+//RS                 let child_name = format!("__jet_plugin_option_value_{depth}");
+//RS                 let child = self.plugin_decode_value_expr(
+//RS                     inner,
+//RS                     child_ty,
+//RS                     &child_name,
+//RS                     depth.saturating_add(1),
+//RS                 );
+//RS                 let absent = format!("{}JetAbsent", self.config.root_prefix);
+//RS                 format!(
+//RS                     "match ({value}) {{ \
+//RS                      {wire}::Option(None) => Ok(Err({absent})), \
+//RS                      {wire}::Option(Some({child_name})) => match {child} {{ \
+//RS                      Ok(value) => Ok(Ok(value)), \
+//RS                      Err(error) => Err(error) \
+//RS                      }}, \
+//RS                      _ => Err(\"plugin returned a value with the wrong Option shape\".to_string()) \
+//RS                      }}"
+//RS                 )
+//RS             }
+//RS             ComponentTypeDescriptor::Result { ok, err } => {
+//RS                 let (ok_ty, err_ty) = match ty.kind() {
+//RS                     MirTypeKind::Result { ok, err } => (ok.as_ref(), err.as_ref()),
+//RS                     _ => panic!("MIR plugin result descriptor has a non-result result type"),
+//RS                 };
+//RS                 let ok_name = format!("__jet_plugin_result_ok_{depth}");
+//RS                 let err_name = format!("__jet_plugin_result_err_{depth}");
+//RS                 let ok_value =
+//RS                     self.plugin_decode_value_expr(ok, ok_ty, &ok_name, depth.saturating_add(1));
+//RS                 let err_value =
+//RS                     self.plugin_decode_value_expr(err, err_ty, &err_name, depth.saturating_add(1));
+//RS                 format!(
+//RS                     "match ({value}) {{ \
+//RS                      {wire}::ResultOk(Some({ok_name})) => match {ok_value} {{ \
+//RS                      Ok(value) => Ok(Ok(value)), \
+//RS                      Err(error) => Err(error) \
+//RS                      }}, \
+//RS                      {wire}::ResultErr(Some({err_name})) => match {err_value} {{ \
+//RS                      Ok(value) => Ok(Err(value)), \
+//RS                      Err(error) => Err(error) \
+//RS                      }}, \
+//RS                      {wire}::ResultOk(None) | {wire}::ResultErr(None) => \
+//RS                      Err(\"plugin returned a result without its payload\".to_string()), \
+//RS                      _ => Err(\"plugin returned a value with the wrong Result shape\".to_string()) \
+//RS                      }}"
+//RS                 )
+//RS             }
+//RS             ComponentTypeDescriptor::Record { fields, .. } => {
+//RS                 let definition = self.plugin_record_def(ty, descriptor);
+//RS                 let record_name = format!("__jet_plugin_record_{depth}");
+//RS                 let mut setup = Vec::new();
+//RS                 let mut decoded = Vec::new();
+//RS                 for (index, name, field_descriptor) in fields {
+//RS                     let field = self.plugin_record_field(definition, *index, name);
+//RS                     let raw_name = format!("__jet_plugin_record_field_{depth}_{index}");
+//RS                     let value_name = format!("__jet_plugin_record_value_{depth}_{index}");
+//RS                     setup.push(format!(
+//RS                         "let {raw_name} = match {record_name}.iter().position(|(name, _)| name == {name:?}) \
+//RS                          {{ Some(index) => {record_name}.swap_remove(index).1, \
+//RS                          None => return Err(\"plugin returned a record missing field {name:?}\".to_string()) }};"
+//RS                     ));
+//RS                     let child = self.plugin_decode_value_expr(
+//RS                         field_descriptor,
+//RS                         &field.ty,
+//RS                         &raw_name,
+//RS                         depth.saturating_add(1),
+//RS                     );
+//RS                     decoded.push(format!(
+//RS                         "let {value_name} = match {child} {{ \
+//RS                          Ok(value) => value, Err(error) => return Err(error) }};"
+//RS                     ));
+//RS                 }
+//RS                 let MirTypeDefKind::Struct {
+//RS                     fields: declared_fields,
+//RS                     ..
+//RS                 } = &definition.kind
+//RS                 else {
+//RS                     panic!("MIR plugin record descriptor names a non-struct type");
+//RS                 };
+//RS                 let assignments = declared_fields
+//RS                     .iter()
+//RS                     .filter(|field| !field.computed)
+//RS                     .map(|field| {
+//RS                         if field.skip {
+//RS                             return format!("{}: Default::default()", mangle(&field.name));
+//RS                         }
+//RS                         let descriptor_index = fields
+//RS                             .iter()
+//RS                             .find(|(index, name, _)| {
+//RS                                 self.plugin_record_field(definition, *index, name).id == field.id
+//RS                             })
+//RS                             .map(|(index, _, _)| *index)
+//RS                             .unwrap_or_else(|| {
+//RS                                 panic!(
+//RS                                     "MIR plugin record field `{}` has no descriptor entry",
+//RS                                     field.name
+//RS                                 )
+//RS                             });
+//RS                         format!(
+//RS                             "{}: __jet_plugin_record_value_{depth}_{descriptor_index}",
+//RS                             mangle(&field.name)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 setup.extend(decoded);
+//RS                 let output = self.rust_type(ty);
+//RS                 format!(
+//RS                     "match ({value}) {{ \
+//RS                      {wire}::Record(mut {record_name}) => {{ \
+//RS                      {} \
+//RS                      if !{record_name}.is_empty() {{ \
+//RS                      return Err(\"plugin returned a record with unexpected fields\".to_string()); \
+//RS                      }} \
+//RS                      Ok({output} {{ {assignments} }}) \
+//RS                      }}, \
+//RS                      _ => Err(\"plugin returned a value with the wrong Record shape\".to_string()) \
+//RS                      }}",
+//RS                     setup.join(" ")
+//RS                 )
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn plugin_invoke(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         call: MirPreludeCallId,
+//RS         handle: MirValueId,
+//RS         export_name: &str,
+//RS         signature: &ComponentSignatureDescriptor,
+//RS         args: &[MirValueId],
+//RS         result: Option<MirValueId>,
+//RS     ) -> String {
+//RS         if args.len() != signature.params.len() {
+//RS             panic!(
+//RS                 "MIR plugin export `{export_name}` has {} checked parameters but {} values",
+//RS                 signature.params.len(),
+//RS                 args.len()
+//RS             );
+//RS         }
+//RS         let result = result.unwrap_or_else(|| {
+//RS             panic!("MIR plugin export `{export_name}` has no checked result value")
+//RS         });
+//RS         let result_ty = self.value_type(function, result);
+//RS         let MirTypeKind::Result { ok, err } = result_ty.kind() else {
+//RS             panic!("MIR plugin export `{export_name}` result is not a checked Result")
+//RS         };
+//RS         if !matches!(self.plugin_unwrap_type(err).kind(), MirTypeKind::String) {
+//RS             panic!("MIR plugin export `{export_name}` result error is not checked String")
+//RS         }
+//RS         let params = signature
+//RS             .params
+//RS             .iter()
+//RS             .zip(args)
+//RS             .map(|(descriptor, value)| {
+//RS                 self.plugin_encode_value_expr(
+//RS                     descriptor,
+//RS                     self.value_type(function, *value),
+//RS                     &self.value_owned(*value),
+//RS                     0,
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let wire = self.plugin_wire_path("");
+//RS         let call = self.prelude_call_args_exact(
+//RS             call,
+//RS             &[
+//RS                 format!("({}).handle", self.value_owned(handle)),
+//RS                 format!("{export_name:?}"),
+//RS                 "&__jet_plugin_params_wire".to_string(),
+//RS             ],
+//RS         );
+//RS         let result_type = self.rust_type(ok);
+//RS         let decoded =
+//RS             self.plugin_decode_value_expr(&signature.result, ok, "__jet_plugin_result_value", 0);
+//RS         format!(
+//RS             "{{ \
+//RS              let __jet_plugin_params: Vec<{wire}PluginValue> = vec![{params}]; \
+//RS              let __jet_plugin_params_wire = {wire}plugin_encode_params(&__jet_plugin_params); \
+//RS              let __jet_plugin_wire = {call}; \
+//RS              match {wire}plugin_decode_result(&__jet_plugin_wire) {{ \
+//RS              Ok(__jet_plugin_result_value) => \
+//RS              (|__jet_plugin_result_value: {wire}PluginValue| -> Result<{result_type}, String> {{ \
+//RS              {decoded} \
+//RS              }})(__jet_plugin_result_value), \
+//RS              Err(__jet_plugin_error) => Err(__jet_plugin_error), \
+//RS              }} \
+//RS              }}"
+//RS         )
+//RS     }
+//RS 
+//RS     fn history_source_field_value(&self, owner: &str, field: &str, value: String) -> String {
+//RS         let Some(owner) = crate::Codegen::history_rust_type_name(owner) else {
+//RS             return value;
+//RS         };
+//RS         if (matches!(owner, "HandleID" | "TaskID" | "EventID") && field == "value")
+//RS             || (owner == "HistoryCase" && field == "seed")
+//RS             || (owner == "HistoryOperation" && field == "index")
+//RS             || (owner == "HistoryScheduleChoice" && field == "operation")
+//RS         {
+//RS             return format!("usize::try_from({value}).expect(\"history value exceeds Count\")");
+//RS         }
+//RS         if owner == "HistoryOperation" && field == "depends_on" {
+//RS             return format!("({value}).into_iter().map(|value| usize::try_from(value).expect(\"history dependency exceeds Count\")).collect::<Vec<_>>()");
+//RS         }
+//RS         if matches!(owner, "HistoryOperation" | "HistoryScheduleChoice")
+//RS             && matches!(field, "task" | "event")
+//RS         {
+//RS             return format!("({value}).ok_or({}JetAbsent)", self.config.root_prefix);
+//RS         }
+//RS         value
+//RS     }
+//RS 
+//RS     fn history_field_expression(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         base: MirValueId,
+//RS         field: MirFieldId,
+//RS     ) -> String {
+//RS         if let Some(projected) =
+//RS             self.native_http_headers_fields_projection(&self.value_owned(base), field)
+//RS         {
+//RS             return projected;
+//RS         }
+//RS         let field_name = self.field_name(field);
+//RS         let value = if let Some(reference) = self.partial_projected_value(function, base, field) {
+//RS             if self.boxed_field(field) {
+//RS                 format!("({reference}).as_ref().clone()")
+//RS             } else {
+//RS                 format!("(*({reference})).clone()")
+//RS             }
+//RS         } else if let Some(place) = self.elided_shared_guard_base(function, base) {
+//RS             // The guard deref (or guard field) feeding this read is a borrow
+//RS             // projection that is never stored in its value slot; read the
+//RS             // field through the guard's own place instead of that empty slot.
+//RS             if self.boxed_field(field) {
+//RS                 format!("({place}).{field_name}.as_ref().clone()")
+//RS             } else {
+//RS                 format!("({place}).{field_name}.clone()")
+//RS             }
+//RS         } else if self.boxed_field(field) {
+//RS             // Borrow the base slot and copy only the projected field; never
+//RS             // clone the whole aggregate to read one of its fields.
+//RS             format!(
+//RS                 "({}).{}.as_ref().clone()",
+//RS                 self.value_slot_reference(base, false),
+//RS                 field_name
+//RS             )
+//RS         } else {
+//RS             format!(
+//RS                 "({}).{}.clone()",
+//RS                 self.value_slot_reference(base, false),
+//RS                 field_name
+//RS             )
+//RS         };
+//RS         let ty = self.value_type(function, base);
+//RS         if ty.nominal_name() == Some("WebFormFieldSpec")
+//RS             && matches!(field_name.as_str(), "default" | "group")
+//RS         {
+//RS             return format!("({value}).ok_or({}JetAbsent)", self.config.root_prefix);
+//RS         }
+//RS         if let Some(converted) = self.native_email_struct_field_result(field, &value) {
+//RS             return converted;
+//RS         }
+//RS         if let Some(field_ty) = self.native_host_field_type(field) {
+//RS             if let Some(converted) = self.native_int_result(&value, field_ty) {
+//RS                 return converted;
+//RS             }
+//RS         }
+//RS         // Prelude VJP continuations use native Rc<Fn> carriers. Projecting
+//RS         // one into a checked Jet function value must cross the callable ABI.
+//RS         if ty.nominal_name() == Some("VJPRun") {
+//RS             let closure = match field_name.as_str() {
+//RS                 "pull" => Some(format!(
+//RS                     "move |__jet_seed: {}| (__jet_native_callback)(&__jet_seed)",
+//RS                     self.compute_runtime_name("JetTensor"),
+//RS                 )),
+//RS                 "grads" => Some("move || (__jet_native_callback)()".to_string()),
+//RS                 _ => None,
+//RS             };
+//RS             if let Some(closure) = closure {
+//RS                 let carrier = if self.history_runtime_metadata_enabled() {
+//RS                     format!("Box::new({closure})")
+//RS                 } else {
+//RS                     format!("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))")
+//RS                 };
+//RS                 return format!("{{ let __jet_native_callback = {value}; {carrier} }}");
+//RS             }
+//RS         }
+//RS         match ty.nominal_name() {
+//RS             Some(owner) => self.history_source_field_value(owner, &field_name, value),
+//RS             None => value,
+//RS         }
+//RS     }
+//RS 
+//RS     /// A shared-guard deref or guard field whose instruction is elided as a
+//RS     /// direct borrow projection (see the `direct_borrow_projection` skip):
+//RS     /// its value slot is never assigned, so readers use the guard place.
+//RS     fn elided_shared_guard_base(&self, function: &MirFunction, base: MirValueId) -> Option<String> {
+//RS         if !self.shared_guard_borrow_origin(function, base) || !self.direct_borrow_only(function, base) {
+//RS             return None;
+//RS         }
+//RS         self.shared_guard_borrow_place(function, base, MirAccess::Read)
+//RS     }
+//RS 
+//RS     fn history_struct_field_value(
+//RS         &self,
+//RS         type_id: jet_foundation::MIR::MirTypeId,
+//RS         field: jet_foundation::MIR::MirFieldId,
+//RS         value: String,
+//RS     ) -> String {
+//RS         let type_name = self.type_name(type_id);
+//RS         let field_name = self.field_name(field);
+//RS         if type_name.ends_with("HandleID")
+//RS             || type_name.ends_with("TaskID")
+//RS             || type_name.ends_with("EventID")
+//RS         {
+//RS             if field_name == "value" {
+//RS                 return format!(
+//RS                     "u32::try_from({value}).expect(\"history identity value exceeds u32\")"
+//RS                 );
+//RS             }
+//RS         }
+//RS         if type_name.ends_with("HistoryCase") && field_name == "seed" {
+//RS             return format!("u64::try_from({value}).expect(\"history seed exceeds u64\")");
+//RS         }
+//RS         if (type_name.ends_with("HistoryOperation") && field_name == "index")
+//RS             || (type_name.ends_with("HistoryScheduleChoice") && field_name == "operation")
+//RS         {
+//RS             return format!("u32::try_from({value}).expect(\"history count exceeds u32\")");
+//RS         }
+//RS         if type_name.ends_with("HistoryOperation") && field_name == "depends_on" {
+//RS             return format!(
+//RS                 "({value}).into_iter().map(|value| u32::try_from(value).expect(\"history dependency exceeds u32\")).collect::<Vec<_>>()"
+//RS             );
+//RS         }
+//RS         if (type_name.ends_with("HistoryOperation") || type_name.ends_with("HistoryScheduleChoice"))
+//RS             && matches!(field_name.as_str(), "task" | "event")
+//RS         {
+//RS             return format!("({value}).ok()");
+//RS         }
+//RS         // The checked IOContext field is ?Int, but the native/plugin ABI
+//RS         // carries a bounded host OS code. Preserve absence and narrow only
+//RS         // present values at the Prelude boundary.
+//RS         if self.type_def(type_id).key == crate::Syntax::TYPE_IO_CONTEXT
+//RS             && field_name == "os_code"
+//RS         {
+//RS             let native = self.native_int_argument("os_code".to_string(), None);
+//RS             return format!("({value}).map(|os_code| {native})");
+//RS         }
+//RS         // TerminalSize stores dimensions as native i64 in the process
+//RS         // prelude while Core exposes them as checked Jet Int values.
+//RS         if type_name.ends_with("TerminalSize") && matches!(field_name.as_str(), "cols" | "rows") {
+//RS             return self.native_int_argument(value, None);
+//RS         }
+//RS         value
+//RS     }
+//RS     fn named_task_group_all(
+//RS         &self,
+//RS         call: MirPreludeCallId,
+//RS         kind: MirTaskGroupKind,
+//RS         function: &MirFunction,
+//RS         tasks: &[MirValueId],
+//RS     ) -> Option<String> {
+//RS         if !matches!(kind, MirTaskGroupKind::All) || tasks.len() != 1 {
+//RS             return None;
+//RS         }
+//RS         let MirTypeKind::Tuple(fields) = self.value_type(function, tasks[0]).kind() else {
+//RS             return None;
+//RS         };
+//RS         if fields.is_empty() {
+//RS             return None;
+//RS         }
+//RS         let rust_fields = fields
+//RS             .iter()
+//RS             .map(|(_, ty)| self.rust_type(ty))
+//RS             .collect::<Vec<_>>();
+//RS         if rust_fields.iter().any(|ty| ty != &rust_fields[0]) {
+//RS             return None;
+//RS         }
+//RS         let tuple = self.value_move(tasks[0]);
+//RS         let pulls = (0..fields.len())
+//RS             .map(|index| format!("__jet_named_tasks.{index}"))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let nexts = (0..fields.len())
+//RS             .map(|_| "__jet_named_iter.next().expect(\"named task.all result field\")".to_string())
+//RS             .collect::<Vec<_>>();
+//RS         let result_tuple = if fields.len() == 1 {
+//RS             format!("({},)", nexts[0])
+//RS         } else {
+//RS             format!("({})", nexts.join(", "))
+//RS         };
+//RS         let invoked = self.prelude_call_args(call, &[format!("vec![{pulls}]")]);
+//RS         Some(format!(
+//RS             "{{ let __jet_named_tasks = {tuple}; match {invoked} {{ Ok(__jet_named_values) => {{ let mut __jet_named_iter = __jet_named_values.into_iter(); Ok({result_tuple}) }}, Err(__jet_named_err) => Err(__jet_named_err) }} }}"
+//RS         ))
+//RS     }
+//RS 
+//RS     fn fixed_reader_take_pattern(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         receiver_place: MirPlaceId,
+//RS         parts: &[MirBinaryPatternPart],
+//RS         fields: &[(String, MirType)],
+//RS     ) -> Option<String> {
+//RS         let mut bit_offset = 0usize;
+//RS         let mut checks = Vec::new();
+//RS         let mut captures = Vec::new();
+//RS         for part in parts {
+//RS             match part {
+//RS                 MirBinaryPatternPart::Literal(bytes) => {
+//RS                     if bit_offset % 8 != 0 {
+//RS                         return None;
+//RS                     }
+//RS                     let byte_offset = bit_offset / 8;
+//RS                     let end = byte_offset.checked_add(bytes.len())?;
+//RS                     for (index, byte) in bytes.iter().enumerate() {
+//RS                         let position = byte_offset.checked_add(index)?;
+//RS                         checks.push(format!("__jet_bytes[{position}] != {byte}u8"));
+//RS                     }
+//RS                     bit_offset = end.checked_mul(8)?;
+//RS                 }
+//RS                 MirBinaryPatternPart::Bits { width, little, .. } => {
+//RS                     let width = usize::from(*width);
+//RS                     if width == 0 || width > 64 {
+//RS                         return None;
+//RS                     }
+//RS                     let end = bit_offset.checked_add(width)?;
+//RS                     let load = if bit_offset % 8 == 0 && width % 8 == 0 {
+//RS                         let offset = bit_offset / 8;
+//RS                         let byte_count = width / 8;
+//RS                         let endian = if *little { "le" } else { "be" };
+//RS                         match width {
+//RS                             8 => format!("u8::from_{endian}_bytes([__jet_bytes[{offset}]])"),
+//RS                             16 | 32 | 64 => {
+//RS                                 let rust_ty = format!("u{width}");
+//RS                                 let bytes = (0..byte_count)
+//RS                                     .map(|index| format!("__jet_bytes[{}]", offset + index))
+//RS                                     .collect::<Vec<_>>()
+//RS                                     .join(", ");
+//RS                                 format!("{rust_ty}::from_{endian}_bytes([{bytes}])")
+//RS                             }
+//RS                             _ => {
+//RS                                 let terms = (0..byte_count)
+//RS                                     .map(|index| {
+//RS                                         let shift = if *little {
+//RS                                             index * 8
+//RS                                         } else {
+//RS                                             (byte_count - 1 - index) * 8
+//RS                                         };
+//RS                                         format!(
+//RS                                             "(u64::from(__jet_bytes[{}]) << {shift})",
+//RS                                             offset + index
+//RS                                         )
+//RS                                     })
+//RS                                     .collect::<Vec<_>>()
+//RS                                     .join(" | ");
+//RS                                 format!("({terms})")
+//RS                             }
+//RS                         }
+//RS                     } else {
+//RS                         let terms = (0..width)
+//RS                             .map(|index| {
+//RS                                 let position = bit_offset + index;
+//RS                                 let byte = position / 8;
+//RS                                 let bit = 7 - (position % 8);
+//RS                                 let shift = width - index - 1;
+//RS                                 format!(
+//RS                                     "(((u64::from(__jet_bytes[{byte}]) >> {bit}) & 1) << {shift})"
+//RS                                 )
+//RS                             })
+//RS                             .collect::<Vec<_>>()
+//RS                             .join(" | ");
+//RS                         let value = format!("({terms})");
+//RS                         if *little && width % 8 == 0 {
+//RS                             format!("({value}).swap_bytes() >> {}", 64 - width)
+//RS                         } else {
+//RS                             value
+//RS                         }
+//RS                     };
+//RS                     captures.push(load);
+//RS                     bit_offset = end;
+//RS                 }
+//RS                 MirBinaryPatternPart::Rest { .. } => return None,
+//RS             }
+//RS         }
+//RS         if bit_offset % 8 != 0 {
+//RS             return None;
+//RS         }
+//RS         let offset = bit_offset / 8;
+//RS         if captures.len() != fields.len() || i64::try_from(offset).is_err() {
+//RS             return None;
+//RS         }
+//RS         let captures = captures
+//RS             .into_iter()
+//RS             .zip(fields.iter())
+//RS             .map(|(capture, (_, ty))| {
+//RS                 if !matches!(ty.kind(), MirTypeKind::IntN { .. }) {
+//RS                     return None;
+//RS                 }
+//RS                 Some(format!("({capture}) as {}", self.rust_type(ty)))
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()?;
+//RS         let reader = self.place_reference(function, receiver_place, MirAccess::Write);
+//RS         let checks = if checks.is_empty() {
+//RS             "false".to_string()
+//RS         } else {
+//RS             checks.join(" || ")
+//RS         };
+//RS         let tuple = if captures.is_empty() {
+//RS             "()".to_string()
+//RS         } else {
+//RS             format!("({},)", captures.join(", "))
+//RS         };
+//RS         Some(format!(
+//RS             "{{ let __jet_reader = {reader}; \
+//RS                match jet_reader_region_bounds(&*__jet_reader, {offset}i64) {{ \
+//RS                    Some((__jet_start, __jet_end)) => {{ \
+//RS                        let __jet_bytes = &__jet_reader.buf[__jet_start..__jet_end]; \
+//RS                        if {checks} {{ \
+//RS                            Err(jet_reader_pattern_miss(&*__jet_reader)) \
+//RS                        }} else {{ \
+//RS                            jet_reader_take_pattern_checked(\
+//RS                                __jet_reader, __jet_start, __jet_end); \
+//RS                            Ok({tuple}) \
+//RS                        }} \
+//RS                    }}, \
+//RS                    None => Err(jet_reader_pattern_miss(&*__jet_reader)), \
+//RS                }} }}"
+//RS         ))
+//RS     }
+//RS 
+//RS     fn semantic(
+//RS         &self,
+//RS         function: &MirFunction,
+//RS         operation: &MirSemanticOp,
+//RS         result: Option<MirValueId>,
+//RS         location: Option<MirPanicLoc>,
+//RS     ) -> String {
+//RS         match operation {
+//RS             MirSemanticOp::DataEntriesToMap { call, local } => {
+//RS                 self.prelude_call_args(*call, &[self.local_read(function, *local)])
+//RS             }
+//RS             MirSemanticOp::MathBuiltin { call, args, .. }
+//RS             | MirSemanticOp::PreciseBuiltin { call, args, .. } => self.prelude_values(*call, args),
+//RS             MirSemanticOp::Print { call, value } => {
+//RS                 let test_print = matches!(
+//RS                     self.artifact.kind,
+//RS                     MirArtifactKind::TestExecutable
+//RS                         | MirArtifactKind::FuzzExecutable
+//RS                         | MirArtifactKind::TestOverride
+//RS                 );
+//RS                 // Printing only reads its value: it borrows it. A test print
+//RS                 // takes a String, so it consumes the value at its single use.
+//RS                 let value_expr = if !matches!(
+//RS                     self.value_type(function, *value).kind(),
+//RS                     MirTypeKind::String
+//RS                 ) {
+//RS                     format!("({}).jet_show()", self.value_borrow(*value))
+//RS                 } else if test_print {
+//RS                     self.value_consume(function, *value)
+//RS                 } else {
+//RS                     format!("*{}", self.value_borrow(*value))
+//RS                 };
+//RS                 if test_print {
+//RS                     format!("jet_test_print({value_expr})")
+//RS                 } else {
+//RS                     format!(
+//RS                         "{{ let _ = {}; }}",
+//RS                         self.prelude_call_args(
+//RS                             *call,
+//RS                             &[format!("&({value_expr})"), "true".to_string()]
+//RS                         )
+//RS                     )
+//RS                 }
+//RS             }
+//RS             MirSemanticOp::AmbientInput { call, prompt } => {
+//RS                 let prompt = prompt
+//RS                     .map(|value| format!("Some({})", self.value_borrow(value)))
+//RS                     .unwrap_or_else(|| "None".to_string());
+//RS                 self.prelude_call_args(*call, &[prompt])
+//RS             }
+//RS             MirSemanticOp::RequireStop {
+//RS                 call,
+//RS                 kind,
+//RS                 condition,
+//RS                 location,
+//RS                 context,
+//RS                 values,
+//RS                 ..
+//RS             } => self.require_stop(
+//RS                 function, *call, *kind, *condition, *location, context, values,
+//RS             ),
+//RS             MirSemanticOp::LayoutCompare {
+//RS                 call,
+//RS                 op,
+//RS                 left,
+//RS                 right,
+//RS             } => {
+//RS                 let emitted = self.prelude_values(*call, &[*left, *right]);
+//RS                 format!("{emitted} /* layout_compare={op:?} */")
+//RS             }
+//RS             MirSemanticOp::LayoutLiteral { inner } => format!(
+//RS                 "{}jet_layout::LinExpr::from_const(({}) as f64)",
+//RS                 self.config.root_prefix,
+//RS                 self.value_owned(*inner)
+//RS             ),
+//RS             MirSemanticOp::StructLiteral {
+//RS                 type_id,
+//RS                 fields,
+//RS                 boxed_fields,
+//RS                 trait_coercion,
+//RS                 ..
+//RS             } => {
+//RS                 let value = self.rust_struct_literal(*type_id, fields, boxed_fields, true);
+//RS                 match trait_coercion {
+//RS                     Some(trait_id) => {
+//RS                         let trait_object = self.trait_object_type(*trait_id);
+//RS                         format!("Box::new({value}) as {}", self.rust_type(trait_object))
+//RS                     }
+//RS                     None => value,
+//RS                 }
+//RS             }
+//RS             MirSemanticOp::ReflectOf {
+//RS                 type_name,
+//RS                 path,
+//RS                 display,
+//RS                 fields,
+//RS             } => {
+//RS                 let fields = fields
+//RS                     .iter()
+//RS                     .map(|field| {
+//RS                         format!(
+//RS                             "jet_reflect_field_new({:?}.to_string(), jet_reflect_value_from_field(&({}), {:?}, {:?}))",
+//RS                             field.name,
+//RS                             format!("*{}", self.value_borrow(field.value)),
+//RS                             field.type_name,
+//RS                             field.path,
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 format!(
+//RS                     "jet_reflect_value_finish({:?}.to_string(), {:?}.to_string(), {}, vec![{}])",
+//RS                     type_name,
+//RS                     path,
+//RS                     self.value_owned(*display),
+//RS                     fields,
+//RS                 )
+//RS             }
+//RS             MirSemanticOp::HardwareCall {
+//RS                 call,
+//RS                 op,
+//RS                 receiver,
+//RS                 args,
+//RS             } => self.hardware_call(function, *call, op, *receiver, args),
+//RS             MirSemanticOp::StaticPreludeCall {
+//RS                 call,
+//RS                 args,
+//RS                 owner_type_args,
+//RS                 type_args,
+//RS             } => self.static_prelude_call(function, *call, args, owner_type_args, type_args),
+//RS             MirSemanticOp::DecodeUnder {
+//RS                 call,
+//RS                 segment,
+//RS                 inner,
+//RS             } => self.prelude_values(*call, &[*segment, *inner]),
+//RS             MirSemanticOp::BuiltinMethod {
+//RS                 call,
+//RS                 receiver,
+//RS                 receiver_place,
+//RS                 args,
+//RS                 ..
+//RS             } => {
+//RS                 let emitted = self.prelude_values_with_receiver(
+//RS                     function,
+//RS                     *call,
+//RS                     *receiver,
+//RS                     *receiver_place,
+//RS                     args,
+//RS                     result,
+//RS                 );
+//RS                 let emitted = self.canonical_builtin_optional_result(*call, emitted);
+//RS                 result
+//RS                     .and_then(|value| {
+//RS                         self.native_int_result(&emitted, self.value_type(function, value))
+//RS                     })
+//RS                     .unwrap_or(emitted)
+//RS             }
+//RS             MirSemanticOp::CellGuardProject {
+//RS                 map_call,
+//RS                 split_call,
+//RS                 guard,
+//RS                 paths,
+//RS                 editable,
+//RS                 edit_paths_disjoint,
+//RS             } => match paths.as_slice() {
+//RS                 [path] => self.shared_guard_map(*map_call, *guard, path, *editable),
+//RS                 [first, second] => {
+//RS                     if *editable && !*edit_paths_disjoint {
+//RS                         panic!("MIR editable cell guard split paths are not disjoint");
+//RS                     }
+//RS                     let split_call = split_call.unwrap_or_else(|| {
+//RS                         panic!("MIR cell guard split has no checked split route")
+//RS                     });
+//RS                     self.shared_guard_split(split_call, *map_call, *guard, first, second, *editable)
+//RS                 }
+//RS                 _ => panic!("MIR cell guard projection has one or two checked paths"),
+//RS             },
+//RS             MirSemanticOp::SharedGuardMap {
+//RS                 call,
+//RS                 guard,
+//RS                 path,
+//RS                 editable,
+//RS             } => self.shared_guard_map(*call, *guard, path, *editable),
+//RS             MirSemanticOp::SharedGuardSplit {
+//RS                 call,
+//RS                 map_call,
+//RS                 guard,
+//RS                 first,
+//RS                 second,
+//RS                 editable,
+//RS             } => self.shared_guard_split(*call, *map_call, *guard, first, second, *editable),
+//RS             MirSemanticOp::SharedGuardWait {
+//RS                 call,
+//RS                 guard,
+//RS                 condition,
+//RS                 predicate,
+//RS             } => {
+//RS                 // The guard owns a held lock and is not Clone; the wait kernel
+//RS                 // borrows it straight from the guard's place.
+//RS                 let row = self.prelude_row(*call);
+//RS                 self.validate_prelude_count(row, 3);
+//RS                 format!(
+//RS                     "{}({}, {}, {})",
+//RS                     self.prelude_symbol(*call),
+//RS                     self.borrowed_value_reference(function, *guard, MirAccess::Read),
+//RS                     self.value_slot_reference(*condition, false),
+//RS                     self.value_owned(*predicate)
+//RS                 )
+//RS             }
+//RS             MirSemanticOp::ConditionNotify {
+//RS                 call,
+//RS                 condition,
+//RS                 all,
+//RS             } => self.prelude_call_args(*call, &[self.value_move(*condition), all.to_string()]),
+//RS             MirSemanticOp::AllocNew {
+//RS                 call,
+//RS                 kind,
+//RS                 inline_size,
+//RS                 args,
+//RS             } => {
+//RS                 let row = self.prelude_row(*call);
+//RS                 let expected = match kind {
+//RS                     MirAllocatorKind::Arena => row.member == "arena.new",
+//RS                     MirAllocatorKind::Bump => row.member == "bump.new",
+//RS                     MirAllocatorKind::Pool => row.member == "pool.new",
+//RS                     MirAllocatorKind::Fixed => {
+//RS                         matches!(row.member.as_str(), "fixed.new" | "fixed.over")
+//RS                     }
+//RS                 };
+//RS                 if !expected {
+//RS                     panic!("MIR allocator constructor route does not match its kind");
+//RS                 }
+//RS                 self.validate_prelude_count(row, args.len());
+//RS                 if row.member == "fixed.new" {
+//RS                     let size = inline_size
+//RS                         .unwrap_or_else(|| panic!("MIR Fixed.new has no checked inline size"));
+//RS                     let result =
+//RS                         result.unwrap_or_else(|| panic!("MIR Fixed.new has no result slot"));
+//RS                     let backing = fixed_inline_backing_name(result);
+//RS                     return format!(
+//RS                         "{}jet_mem::JetFixed::over_uninit(&mut {backing}) /* allocator=Fixed, inline_size={size} */",
+//RS                         self.config.root_prefix,
+//RS                     );
+//RS                 }
+//RS                 if row.member == "fixed.over" {
+//RS                     let over_local = args.first().and_then(|arg| {
+//RS                         let place_id = arg.place?;
+//RS                         let place = self.place_row(function, place_id)?;
+//RS                         if !place.projections.is_empty() {
+//RS                             return None;
+//RS                         }
+//RS                         match place.base {
+//RS                             MirPlaceBase::Local(local)
+//RS                                 if self.local_uninit_fixed_type(function, local).is_some() =>
+//RS                             {
+//RS                                 Some(local)
+//RS                             }
+//RS                             _ => None,
+//RS                         }
+//RS                     });
+//RS                     if let Some(local) = over_local {
+//RS                         let slot = self.local_storage(function, local);
+//RS                         return format!(
+//RS                             "{{ let mut __jet_bytes = {slot}.as_mut().expect(\"MIR local\"); {}jet_mem::JetFixed::over_uninit_fixed(&mut __jet_bytes) /* allocator=Fixed */ }}",
+//RS                             self.config.root_prefix,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 let values = args
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, arg)| {
+//RS                         let borrowed = row.signature.borrow_mask.get(index).copied().unwrap_or(false);
+//RS                         let value = self.call_arg_for_function(function, arg, borrowed);
+//RS                         let native_count = !borrowed
+//RS                             && matches!(
+//RS                                 row.member.as_str(),
+//RS                                 "arena.new" | "bump.new" | "pool.new"
+//RS                             )
+//RS                             && matches!(self.value_type(function, arg.value).kind(), MirTypeKind::Int);
+//RS                         if native_count {
+//RS                             format!(
+//RS                                 "usize::try_from({}).unwrap_or_else(|_| {}jet_arithmetic_stop(\"<mir>\", 0, \"allocator size is negative or exceeds usize range\"))",
+//RS                                 self.native_int_argument(value, location.as_ref()),
+//RS                                 self.config.root_prefix,
+//RS                             )
+//RS                         } else {
+//RS                             value
+//RS                         }
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 let emitted = self.prelude_call_args(*call, &values);
+//RS                 format!("{emitted} /* allocator={kind:?}, inline_size={inline_size:?} */")
+//RS             }
+//RS             MirSemanticOp::ColumnarRead {
+//RS                 base,
+//RS                 index,
+//RS                 column,
+//RS                 column_index,
+//RS                 accessor,
+//RS                 ..
+//RS             } => self.columnar_read(
+//RS                 function,
+//RS                 *accessor,
+//RS                 *base,
+//RS                 *column,
+//RS                 *column_index,
+//RS                 *index,
+//RS                 location,
+//RS             ),
+//RS             MirSemanticOp::OptionLift2 {
+//RS                 call,
+//RS                 function,
+//RS                 left,
+//RS                 right,
+//RS             } => {
+//RS                 let emitted = self.prelude_call_args(
+//RS                     *call,
+//RS                     &[
+//RS                         self.value_owned(*function),
+//RS                         "left".to_string(),
+//RS                         "right".to_string(),
+//RS                     ],
+//RS                 );
+//RS                 format!(
+//RS                     "match ({}, {}) {{ (Ok(left), Ok(right)) => {emitted}, _ => Err({}JetAbsent) }}",
+//RS                     self.value_owned(*left),
+//RS                     self.value_owned(*right),
+//RS                     self.config.root_prefix
+//RS                 )
+//RS             }
+//RS             MirSemanticOp::ClosureMethod {
+//RS                 receiver,
+//RS                 call,
+//RS                 args,
+//RS             } => {
+//RS                 let emitted = self.prelude_receiver_call(function, *call, *receiver, args, result);
+//RS                 result
+//RS                     .and_then(|value| {
+//RS                         self.native_int_result(&emitted, self.value_type(function, value))
+//RS                     })
+//RS                     .unwrap_or(emitted)
+//RS             }
+//RS             MirSemanticOp::HostBorrowCallback { callable, params } => {
+//RS                 self.host_callback(function, *callable, params, true, false)
+//RS             }
+//RS             MirSemanticOp::NumericMethod { call, receiver } => {
+//RS                 self.prelude_values(*call, &[*receiver])
+//RS             }
+//RS             MirSemanticOp::NumericBinaryMethod {
+//RS                 call,
+//RS                 receiver,
+//RS                 argument,
+//RS             } => {
+//RS                 let emitted = self.prelude_values(*call, &[*receiver, *argument]);
+//RS                 // The owned exact-Int Euclidean kernels take the call's
+//RS                 // source location for their division-by-zero stop.
+//RS                 let contextual = self
+//RS                     .exact_prelude_adapter(&self.prelude_symbol(*call))
+//RS                     .is_some_and(|(name, _)| {
+//RS                         matches!(
+//RS                             name,
+//RS                             "jet_std::jet_int_owned_div_euclid" | "jet_std::jet_int_owned_rem_euclid"
+//RS                         )
+//RS                     });
+//RS                 if !contextual {
+//RS                     return emitted;
+//RS                 }
+//RS                 let location = location.unwrap_or_else(|| {
+//RS                     panic!("MIR exact Int Euclidean division is missing source location")
+//RS                 });
+//RS                 let call = emitted
+//RS                     .strip_suffix(')')
+//RS                     .unwrap_or_else(|| panic!("MIR Prelude call text has no argument list"));
+//RS                 format!(
+//RS                     "{call}, {:?}, {}u32)",
+//RS                     self.source_file_path(location.file),
+//RS                     location.line
+//RS                 )
+//RS             }
+//RS             MirSemanticOp::OverflowOption {
+//RS                 call,
+//RS                 left,
+//RS                 right,
+//RS                 location,
+//RS             } => self.overflow_option(*call, *left, *right, location),
+//RS             MirSemanticOp::HandleMethod {
+//RS                 call,
+//RS                 receiver,
+//RS                 args,
+//RS                 frame_schedule,
+//RS                 frame_schedule_derivation,
+//RS             } => {
+//RS                 let route = self.prelude_row(*call);
+//RS                 if route.module == "core.reflect" {
+//RS                     if !args.is_empty() {
+//RS                         panic!("MIR reflection handle method received arguments");
+//RS                     }
+//RS                     let receiver =
+//RS                         self.borrowed_value_reference(function, *receiver, MirAccess::Read);
+//RS                     return match route.member.as_str() {
+//RS                         "value.type_name" => {
+//RS                             format!("jet_reflect_value_type_name({receiver})")
+//RS                         }
+//RS                         "value.path" => format!("jet_reflect_value_path({receiver})"),
+//RS                         "value.display" => {
+//RS                             format!("jet_reflect_value_display({receiver})")
+//RS                         }
+//RS                         "value.fields" => format!("jet_reflect_value_fields({receiver})"),
+//RS                         "field.name" => format!("jet_reflect_field_name({receiver})"),
+//RS                         "field.value" => format!("jet_reflect_field_value({receiver})"),
+//RS                         member => panic!("unknown MIR reflection handle method `{member}`"),
+//RS                     };
+//RS                 }
+//RS                 if route.member == "reader.read_u8" && args.is_empty() {
+//RS                     return self.reader_read_u8_fast(function, *receiver);
+//RS                 }
+//RS                 let emitted = self.prelude_handle_method(
+//RS                     function,
+//RS                     *call,
+//RS                     *receiver,
+//RS                     args,
+//RS                     frame_schedule.as_ref(),
+//RS                     frame_schedule_derivation.as_ref(),
+//RS                     location.as_ref(),
+//RS                 );
+//RS                 let emitted = if self.prelude_row(*call).member == "file_reader.read_line" {
+//RS                     format!(
+//RS                         "({emitted}).map(|line| line.ok_or({}JetAbsent))",
+//RS                         self.config.root_prefix,
+//RS                     )
+//RS                 } else {
+//RS                     emitted
+//RS                 };
+//RS                 if result
+//RS                     .is_some_and(|value| is_allocator_result_type(self.value_type(function, value)))
+//RS                 {
+//RS                     return format!("{emitted}.map(|value| std::clone::Clone::clone(&*value))");
+//RS                 }
+//RS                 result
+//RS                     .and_then(|value| {
+//RS                         self.native_int_result(&emitted, self.value_type(function, value))
+//RS                     })
+//RS                     .unwrap_or(emitted)
+//RS             }
+//RS             MirSemanticOp::PluginInvoke {
+//RS                 call,
+//RS                 handle,
+//RS                 export_name,
+//RS                 signature,
+//RS                 args,
+//RS             } => self.plugin_invoke(
+//RS                 function,
+//RS                 *call,
+//RS                 *handle,
+//RS                 export_name,
+//RS                 signature,
+//RS                 args,
+//RS                 result,
+//RS             ),
+//RS             MirSemanticOp::HttpRouterRegister {
+//RS                 call,
+//RS                 receiver,
+//RS                 path,
+//RS                 handler,
+//RS                 method,
+//RS                 handler_param_names,
+//RS                 contract_json,
+//RS                 location,
+//RS             } => self.http_router_register(
+//RS                 function,
+//RS                 *call,
+//RS                 *receiver,
+//RS                 *path,
+//RS                 *handler,
+//RS                 *method,
+//RS                 handler_param_names,
+//RS                 contract_json,
+//RS                 *location,
+//RS             ),
+//RS             MirSemanticOp::TextPatternMatch {
+//RS                 call,
+//RS                 subject,
+//RS                 parts,
+//RS             } => {
+//RS                 let pattern = self.text_pattern(parts);
+//RS                 let subject = format!("({}).as_str()", self.value_slot_reference(*subject, false));
+//RS                 let scan = self.prelude_call_args(*call, &[subject, pattern]);
+//RS                 self.pattern_match_result(function, result, &scan)
+//RS             }
+//RS             MirSemanticOp::BinaryPatternMatch {
+//RS                 call,
+//RS                 subject,
+//RS                 parts,
+//RS             } => {
+//RS                 let pattern = self.binary_pattern(parts);
+//RS                 let subject = format!("({}).bytes", self.value_slot_reference(*subject, false));
+//RS                 let scan = self.prelude_call_args(*call, &[subject, pattern]);
+//RS                 self.pattern_match_result(function, result, &scan)
+//RS             }
+//RS             MirSemanticOp::CursorTakePattern {
+//RS                 receiver_place,
+//RS                 parts,
+//RS                 ..
+//RS             } => {
+//RS                 let result = result.expect("MIR Cursor.take_pattern has no result value");
+//RS                 let (ok, _) = self
+//RS                     .value_type(function, result)
+//RS                     .result_parts()
+//RS                     .expect("MIR Cursor.take_pattern does not return Result");
+//RS                 let MirTypeKind::Tuple(fields) = ok.kind() else {
+//RS                     panic!("MIR Cursor.take_pattern does not carry typed captures");
+//RS                 };
+//RS                 let tuple = if fields.is_empty() {
+//RS                     "()".to_string()
+//RS                 } else {
+//RS                     let captures = fields
+//RS                         .iter()
+//RS                         .map(|(_, ty)| {
+//RS                             self.pattern_capture_value(
+//RS                                 ty,
+//RS                                 "__jet_captures.next().expect(\"MIR Cursor pattern capture is missing\")",
+//RS                             )
+//RS                         })
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ");
+//RS                     format!(
+//RS                         "{{ let mut __jet_captures = __jet_captures.into_iter(); ({captures},) }}"
+//RS                     )
+//RS                 };
+//RS                 let cursor = self.place_reference(function, *receiver_place, MirAccess::Write);
+//RS                 let pattern = self.text_pattern(parts);
+//RS                 format!(
+//RS                     "{{ let __jet_cursor = {cursor}; \
+//RS                        let __jet_scan = jet_text_match_scan(\
+//RS                            jet_cursor_tail(&*__jet_cursor), \
+//RS                            {pattern}, true); \
+//RS                        match __jet_scan {{ \
+//RS                            Some((__jet_consumed, __jet_values)) => {{ \
+//RS                                let mut __jet_captures = __jet_values.into_iter(); \
+//RS                                jet_cursor_take_pattern(__jet_cursor, __jet_consumed); \
+//RS                                Ok({tuple}) \
+//RS                            }}, \
+//RS                            None => Err(jet_cursor_pattern_miss(\
+//RS                                &*__jet_cursor)), \
+//RS                        }} }}"
+//RS                 )
+//RS             }
+//RS             MirSemanticOp::ReaderTakePattern {
+//RS                 receiver_place,
+//RS                 parts,
+//RS                 ..
+//RS             } => {
+//RS                 let result = result.expect("MIR Reader.take_pattern has no result value");
+//RS                 let (ok, _) = self
+//RS                     .value_type(function, result)
+//RS                     .result_parts()
+//RS                     .expect("MIR Reader.take_pattern does not return Result");
+//RS                 let MirTypeKind::Tuple(fields) = ok.kind() else {
+//RS                     panic!("MIR Reader.take_pattern does not carry typed captures");
+//RS                 };
+//RS                 if let Some(fast) =
+//RS                     self.fixed_reader_take_pattern(function, *receiver_place, parts, fields)
+//RS                 {
+//RS                     return fast;
+//RS                 }
+//RS                 let tuple = if fields.is_empty() {
+//RS                     "()".to_string()
+//RS                 } else {
+//RS                     let captures = fields
+//RS                         .iter()
+//RS                         .map(|(_, ty)| {
+//RS                             self.pattern_capture_value(
+//RS                                 ty,
+//RS                                 "__jet_captures.next().expect(\"MIR Reader pattern capture is missing\")",
+//RS                             )
+//RS                         })
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ");
+//RS                     format!(
+//RS                         "{{ let mut __jet_captures = __jet_captures.into_iter(); ({captures},) }}"
+//RS                     )
+//RS                 };
+//RS                 let reader = self.place_reference(function, *receiver_place, MirAccess::Write);
+//RS                 let pattern = self.binary_pattern(parts);
+//RS                 format!(
+//RS                     "{{ let __jet_reader = {reader}; \
+//RS                        let __jet_scan = jet_bin_match_scan(\
+//RS                            jet_reader_tail(&*__jet_reader), \
+//RS                            {pattern}, true); \
+//RS                        match __jet_scan {{ \
+//RS                            Some((__jet_bits, __jet_values)) => {{ \
+//RS                                let mut __jet_captures = __jet_values.into_iter().map(|value| \
+//RS                                    match value {{ \
+//RS                                        JetBinMatchValue::Int(value) => JetPatternCapture::Int(value as i64), \
+//RS                                        JetBinMatchValue::Rest(value) => JetPatternCapture::Bytes(value), \
+//RS                                    }}); \
+//RS                                jet_reader_take_pattern(\
+//RS                                    __jet_reader, __jet_bits / 8).map(|_| {tuple}) \
+//RS                            }}, \
+//RS                            None => Err(jet_reader_pattern_miss(\
+//RS                                &*__jet_reader)), \
+//RS                        }} }}"
+//RS                 )
+//RS             }
+//RS             MirSemanticOp::CoreClosureCall {
+//RS                 call,
+//RS                 kind,
+//RS                 values,
+//RS                 closure,
+//RS                 site,
+//RS                 label,
+//RS             } => self.core_closure_call(
+//RS                 function,
+//RS                 *call,
+//RS                 kind.clone(),
+//RS                 values,
+//RS                 *closure,
+//RS                 *site,
+//RS                 label,
+//RS             ),
+//RS             MirSemanticOp::TaskGroup { call, kind, tasks } => {
+//RS                 if let Some(emitted) = self.named_task_group_all(*call, *kind, function, tasks) {
+//RS                     return emitted;
+//RS                 }
+//RS                 let args = tasks
+//RS                     .iter()
+//RS                     .map(|value| self.value_move(*value))
+//RS                     .collect::<Vec<_>>();
+//RS                 let emitted = self.prelude_call_args(*call, &args);
+//RS                 format!("{emitted} /* task_group={kind:?} */")
+//RS             }
+//RS             MirSemanticOp::Select { call, kind, values } => {
+//RS                 let args = values
+//RS                     .iter()
+//RS                     .map(|value| self.value_move(*value))
+//RS                     .collect::<Vec<_>>();
+//RS                 let emitted = self.prelude_call_args(*call, &args);
+//RS                 format!("{emitted} /* select={kind:?} */")
+//RS             }
+//RS             MirSemanticOp::PolicyFunction { policy, values } => format!(
+//RS                 "{}({})",
+//RS                 self.value_owned(*policy),
+//RS                 values
+//RS                     .iter()
+//RS                     .map(|value| self.value_move(*value))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             ),
+//RS             MirSemanticOp::InterruptFunction { interrupt, values } => format!(
+//RS                 "{}({})",
+//RS                 self.value_owned(*interrupt),
+//RS                 values
+//RS                     .iter()
+//RS                     .map(|value| self.value_move(*value))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             ),
+//RS             MirSemanticOp::CarrierFact {
+//RS                 call,
+//RS                 receiver,
+//RS                 field,
+//RS                 notes: _,
+//RS             } => self.carrier_fact(*call, *receiver, *field),
+//RS             MirSemanticOp::GcEdit {
+//RS                 call,
+//RS                 root,
+//RS                 edges,
+//RS                 edit,
+//RS                 index,
+//RS                 kind,
+//RS                 site,
+//RS             } => self.gc_edit(*call, *root, edges, *edit, *index, *kind, *site),
+//RS             MirSemanticOp::TypedTextInterp {
+//RS                 call,
+//RS                 kind,
+//RS                 literals,
+//RS                 holes,
+//RS                 trusted_html,
+//RS             } => self.typed_text_interp(function, *call, *kind, literals, holes, trusted_html),
+//RS             MirSemanticOp::CCallback {
+//RS                 call,
+//RS                 callback,
+//RS                 lambda,
+//RS             } => self.c_callback(function, *call, *callback, *lambda),
+//RS             MirSemanticOp::HostCall { call, args } => {
+//RS                 self.prelude_host_call(function, *call, args, location.as_ref())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn carrier_fact(
+//RS         &self,
+//RS         call: MirPreludeCallId,
+//RS         receiver: MirValueId,
+// END-PORT-PENDING 2016 crates/jet-codegen/src/Codegen/MIRRust.rs:27001-28800
+

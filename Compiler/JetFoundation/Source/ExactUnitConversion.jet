@@ -1,560 +1,390 @@
-// PORT-PENDING 0062 crates-jet-foundation-src-exactunitconversion-module-group: crates/jet-foundation/src/ExactUnitConversion.rs:1-556
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Exact runtime proof for unit conversions, shared by JIT and emitted AOT code.
-//RS 
-//RS #[derive(Clone)]
-//RS struct Integer {
-//RS     sign: i8,
-//RS     limbs: Vec<u32>,
-//RS }
-//RS 
-//RS impl Integer {
-//RS     const BASE: u64 = 1_000_000_000;
-//RS     fn zero() -> Self {
-//RS         Self {
-//RS             sign: 0,
-//RS             limbs: Vec::new(),
-//RS         }
-//RS     }
-//RS     fn one() -> Self {
-//RS         Self::from_u64(1)
-//RS     }
-//RS     fn from_u64(mut value: u64) -> Self {
-//RS         if value == 0 {
-//RS             return Self::zero();
-//RS         }
-//RS         let mut limbs = Vec::new();
-//RS         while value != 0 {
-//RS             limbs.push((value % Self::BASE) as u32);
-//RS             value /= Self::BASE;
-//RS         }
-//RS         Self { sign: 1, limbs }
-//RS     }
-//RS     fn parse(text: &str) -> Option<Self> {
-//RS         let (sign, digits) = text
-//RS             .strip_prefix('-')
-//RS             .map_or((1, text), |digits| (-1, digits));
-//RS         if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-//RS             return None;
-//RS         }
-//RS         let mut value = Self::zero();
-//RS         for byte in digits.bytes() {
-//RS             value = value
-//RS                 .mul_small(10)
-//RS                 .add(&Self::from_u64(u64::from(byte - b'0')));
-//RS         }
-//RS         if !value.is_zero() {
-//RS             value.sign = sign;
-//RS         }
-//RS         Some(value)
-//RS     }
-//RS     fn is_zero(&self) -> bool {
-//RS         self.sign == 0
-//RS     }
-//RS     fn is_odd(&self) -> bool {
-//RS         self.limbs.first().is_some_and(|limb| limb % 2 == 1)
-//RS     }
-//RS     fn neg(mut self) -> Self {
-//RS         self.sign = -self.sign;
-//RS         self
-//RS     }
-//RS     fn normalize(&mut self) {
-//RS         while self.limbs.last() == Some(&0) {
-//RS             self.limbs.pop();
-//RS         }
-//RS         if self.limbs.is_empty() {
-//RS             self.sign = 0;
-//RS         }
-//RS     }
-//RS     fn abs(&self) -> Self {
-//RS         let mut value = self.clone();
-//RS         if !value.is_zero() {
-//RS             value.sign = 1;
-//RS         }
-//RS         value
-//RS     }
-//RS     fn abs_cmp(&self, other: &Self) -> std::cmp::Ordering {
-//RS         self.limbs
-//RS             .len()
-//RS             .cmp(&other.limbs.len())
-//RS             .then_with(|| self.limbs.iter().rev().cmp(other.limbs.iter().rev()))
-//RS     }
-//RS     fn abs_add(&self, other: &Self) -> Self {
-//RS         let mut carry = 0;
-//RS         let mut limbs = Vec::with_capacity(self.limbs.len().max(other.limbs.len()) + 1);
-//RS         for index in 0..self.limbs.len().max(other.limbs.len()) {
-//RS             let value = u64::from(*self.limbs.get(index).unwrap_or(&0))
-//RS                 + u64::from(*other.limbs.get(index).unwrap_or(&0))
-//RS                 + carry;
-//RS             limbs.push((value % Self::BASE) as u32);
-//RS             carry = value / Self::BASE;
-//RS         }
-//RS         if carry != 0 {
-//RS             limbs.push(carry as u32);
-//RS         }
-//RS         Self { sign: 1, limbs }
-//RS     }
-//RS     fn abs_sub(&self, other: &Self) -> Self {
-//RS         let mut borrow = 0;
-//RS         let mut limbs = Vec::with_capacity(self.limbs.len());
-//RS         for index in 0..self.limbs.len() {
-//RS             let mut value = i64::from(self.limbs[index])
-//RS                 - i64::from(*other.limbs.get(index).unwrap_or(&0))
-//RS                 - borrow;
-//RS             if value < 0 {
-//RS                 value += Self::BASE as i64;
-//RS                 borrow = 1;
-//RS             } else {
-//RS                 borrow = 0;
-//RS             }
-//RS             limbs.push(value as u32);
-//RS         }
-//RS         let mut value = Self { sign: 1, limbs };
-//RS         value.normalize();
-//RS         value
-//RS     }
-//RS     fn add(&self, other: &Self) -> Self {
-//RS         if self.is_zero() {
-//RS             return other.clone();
-//RS         }
-//RS         if other.is_zero() {
-//RS             return self.clone();
-//RS         }
-//RS         if self.sign == other.sign {
-//RS             let mut value = self.abs_add(other);
-//RS             value.sign = self.sign;
-//RS             value
-//RS         } else {
-//RS             match self.abs_cmp(other) {
-//RS                 std::cmp::Ordering::Greater => {
-//RS                     let mut value = self.abs_sub(other);
-//RS                     value.sign = self.sign;
-//RS                     value
-//RS                 }
-//RS                 std::cmp::Ordering::Less => {
-//RS                     let mut value = other.abs_sub(self);
-//RS                     value.sign = other.sign;
-//RS                     value
-//RS                 }
-//RS                 std::cmp::Ordering::Equal => Self::zero(),
-//RS             }
-//RS         }
-//RS     }
-//RS     fn mul_small(&self, other: u32) -> Self {
-//RS         if other == 0 || self.is_zero() {
-//RS             return Self::zero();
-//RS         }
-//RS         let mut carry = 0;
-//RS         let mut limbs = Vec::with_capacity(self.limbs.len() + 1);
-//RS         for limb in &self.limbs {
-//RS             let value = u64::from(*limb) * u64::from(other) + carry;
-//RS             limbs.push((value % Self::BASE) as u32);
-//RS             carry = value / Self::BASE;
-//RS         }
-//RS         if carry != 0 {
-//RS             limbs.push(carry as u32);
-//RS         }
-//RS         Self {
-//RS             sign: self.sign,
-//RS             limbs,
-//RS         }
-//RS     }
-//RS     fn mul(&self, other: &Self) -> Self {
-//RS         if self.is_zero() || other.is_zero() {
-//RS             return Self::zero();
-//RS         }
-//RS         let mut limbs = vec![0u64; self.limbs.len() + other.limbs.len()];
-//RS         for (left_index, left) in self.limbs.iter().enumerate() {
-//RS             let mut carry = 0;
-//RS             for (right_index, right) in other.limbs.iter().enumerate() {
-//RS                 let index = left_index + right_index;
-//RS                 let value = limbs[index] + u64::from(*left) * u64::from(*right) + carry;
-//RS                 limbs[index] = value % Self::BASE;
-//RS                 carry = value / Self::BASE;
-//RS             }
-//RS             limbs[left_index + other.limbs.len()] += carry;
-//RS         }
-//RS         let mut value = Self {
-//RS             sign: self.sign * other.sign,
-//RS             limbs: limbs.into_iter().map(|limb| limb as u32).collect(),
-//RS         };
-//RS         value.normalize();
-//RS         value
-//RS     }
-//RS     fn mul_pow2(mut self, exponent: u32) -> Self {
-//RS         for _ in 0..exponent {
-//RS             self = self.mul_small(2);
-//RS         }
-//RS         self
-//RS     }
-//RS     fn div_rem_abs(&self, other: &Self) -> Option<(Self, Self)> {
-//RS         if other.is_zero() {
-//RS             return None;
-//RS         }
-//RS         let divisor = other.abs();
-//RS         let dividend = self.abs();
-//RS         if dividend.abs_cmp(&divisor) == std::cmp::Ordering::Less {
-//RS             return Some((Self::zero(), dividend));
-//RS         }
-//RS         let mut quotient = vec![0; dividend.limbs.len()];
-//RS         let mut remainder = Self::zero();
-//RS         for index in (0..dividend.limbs.len()).rev() {
-//RS             remainder.limbs.insert(0, dividend.limbs[index]);
-//RS             remainder.sign = 1;
-//RS             remainder.normalize();
-//RS             let (mut low, mut high) = (0, (Self::BASE - 1) as u32);
-//RS             while low < high {
-//RS                 let middle = low + (high - low) / 2 + 1;
-//RS                 if divisor.mul_small(middle).abs_cmp(&remainder) != std::cmp::Ordering::Greater {
-//RS                     low = middle;
-//RS                 } else {
-//RS                     high = middle - 1;
-//RS                 }
-//RS             }
-//RS             quotient[index] = low;
-//RS             if low != 0 {
-//RS                 remainder = remainder.abs_sub(&divisor.mul_small(low));
-//RS             }
-//RS         }
-//RS         let mut quotient = Self {
-//RS             sign: 1,
-//RS             limbs: quotient,
-//RS         };
-//RS         quotient.normalize();
-//RS         Some((quotient, remainder))
-//RS     }
-//RS     fn decimal(&self) -> String {
-//RS         if self.is_zero() {
-//RS             return "0".to_string();
-//RS         }
-//RS         let mut limbs = self.limbs.iter().rev();
-//RS         let mut text = limbs.next().expect("nonzero integer has limbs").to_string();
-//RS         for limb in limbs {
-//RS             text.push_str(&format!("{limb:09}"));
-//RS         }
-//RS         if self.sign < 0 {
-//RS             text.insert(0, '-');
-//RS         }
-//RS         text
-//RS     }
-//RS }
-//RS 
-//RS fn float_ratio(value: f64) -> Option<(Integer, Integer)> {
-//RS     if !value.is_finite() {
-//RS         return None;
-//RS     }
-//RS     let bits = value.to_bits();
-//RS     let exponent_bits = ((bits >> 52) & 0x7ff) as i32;
-//RS     let fraction = bits & ((1_u64 << 52) - 1);
-//RS     let (significand, exponent) = if exponent_bits == 0 {
-//RS         (fraction, -1074)
-//RS     } else {
-//RS         ((1_u64 << 52) | fraction, exponent_bits - 1023 - 52)
-//RS     };
-//RS     let mut numerator = Integer::from_u64(significand);
-//RS     if bits >> 63 != 0 && !numerator.is_zero() {
-//RS         numerator.sign = -1;
-//RS     }
-//RS     let mut denominator = Integer::one();
-//RS     if exponent >= 0 {
-//RS         numerator = numerator.mul_pow2(exponent as u32);
-//RS     } else {
-//RS         denominator = denominator.mul_pow2((-exponent) as u32);
-//RS     }
-//RS     Some((numerator, denominator))
-//RS }
-//RS 
-//RS fn converted_ratio(
-//RS     value: f64,
-//RS     scale_num: &str,
-//RS     scale_den: &str,
-//RS     offset_num: &str,
-//RS     offset_den: &str,
-//RS ) -> Option<(Integer, Integer)> {
-//RS     let (value_num, value_den) = float_ratio(value)?;
-//RS     let scale_num = Integer::parse(scale_num)?;
-//RS     let scale_den = Integer::parse(scale_den)?;
-//RS     let offset_num = Integer::parse(offset_num)?;
-//RS     let offset_den = Integer::parse(offset_den)?;
-//RS     if scale_den.is_zero() || offset_den.is_zero() {
-//RS         return None;
-//RS     }
-//RS     let mut numerator = value_num
-//RS         .mul(&scale_num)
-//RS         .mul(&offset_den)
-//RS         .add(&offset_num.mul(&value_den).mul(&scale_den));
-//RS     let mut denominator = value_den.mul(&scale_den).mul(&offset_den);
-//RS     if denominator.sign < 0 {
-//RS         numerator = numerator.neg();
-//RS         denominator = denominator.neg();
-//RS     }
-//RS     Some((numerator, denominator))
-//RS }
-//RS 
-//RS fn exact_integer(numerator: &Integer, denominator: &Integer) -> Option<Integer> {
-//RS     let (mut quotient, remainder) = numerator.div_rem_abs(denominator)?;
-//RS     if !remainder.is_zero() {
-//RS         return None;
-//RS     }
-//RS     if !quotient.is_zero() {
-//RS         quotient.sign = numerator.sign * denominator.sign;
-//RS     }
-//RS     Some(quotient)
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS #[repr(i64)]
-//RS pub enum UnitRoundingMode {
-//RS     TowardZero,
-//RS     Floor,
-//RS     Ceiling,
-//RS     NearestEven,
-//RS }
-//RS 
-//RS pub const UNIT_ROUNDING_NEGATIVE_DIGITS: &str = "rounded unit conversion needs nonnegative digits";
-//RS pub const UNIT_ROUNDING_UNREPRESENTABLE: &str =
-//RS     "unit conversion overflows its runtime representation";
-//RS 
-//RS // The smallest positive Float is 2^-1074, so every finite Float terminates by
-//RS // this many decimal places. Greater precision can be checked without building
-//RS // a power of ten proportional to the runtime `digits` value.
-//RS const MAX_FINITE_FLOAT_DECIMAL_PLACES: i64 = 1074;
-//RS 
-//RS fn rounded_integer(
-//RS     numerator: &Integer,
-//RS     denominator: &Integer,
-//RS     mode: UnitRoundingMode,
-//RS ) -> Option<Integer> {
-//RS     let (mut quotient, remainder) = numerator.div_rem_abs(denominator)?;
-//RS     let sign = numerator.sign * denominator.sign;
-//RS     let increment = match mode {
-//RS         UnitRoundingMode::TowardZero => false,
-//RS         UnitRoundingMode::Floor => sign < 0 && !remainder.is_zero(),
-//RS         UnitRoundingMode::Ceiling => sign > 0 && !remainder.is_zero(),
-//RS         UnitRoundingMode::NearestEven => {
-//RS             let comparison = remainder.mul_small(2).abs_cmp(&denominator.abs());
-//RS             comparison == std::cmp::Ordering::Greater
-//RS                 || (comparison == std::cmp::Ordering::Equal && quotient.is_odd())
-//RS         }
-//RS     };
-//RS     if increment {
-//RS         quotient = quotient.add(&Integer::one());
-//RS     }
-//RS     if !quotient.is_zero() {
-//RS         quotient.sign = sign;
-//RS     }
-//RS     Some(quotient)
-//RS }
-//RS 
-//RS fn decimal_value(integer: &Integer, digits: usize) -> Option<f64> {
-//RS     let negative = integer.sign < 0;
-//RS     let mut decimal = integer.abs().decimal();
-//RS     if digits != 0 {
-//RS         if decimal.len() <= digits {
-//RS             decimal.insert_str(0, &"0".repeat(digits + 1 - decimal.len()));
-//RS         }
-//RS         decimal.insert(decimal.len() - digits, '.');
-//RS     }
-//RS     if negative {
-//RS         decimal.insert(0, '-');
-//RS     }
-//RS     let value = decimal.parse::<f64>().ok()?;
-//RS     value.is_finite().then_some(value)
-//RS }
-//RS 
-//RS fn ratio_cmp(
-//RS     left_num: &Integer,
-//RS     left_den: &Integer,
-//RS     right_num: &Integer,
-//RS     right_den: &Integer,
-//RS ) -> std::cmp::Ordering {
-//RS     let difference = left_num.mul(right_den).add(&right_num.mul(left_den).neg());
-//RS     difference.sign.cmp(&0)
-//RS }
-//RS 
-//RS fn float_represents_ratio(value: f64, numerator: &Integer, denominator: &Integer) -> bool {
-//RS     float_ratio(value).is_some_and(|(float_num, float_den)| {
-//RS         ratio_cmp(numerator, denominator, &float_num, &float_den) == std::cmp::Ordering::Equal
-//RS     })
-//RS }
-//RS 
-//RS fn exactly_represented_float(integer: &Integer) -> Option<f64> {
-//RS     let value = integer.decimal().parse::<f64>().ok()?;
-//RS     if !value.is_finite() {
-//RS         return None;
-//RS     }
-//RS     float_represents_ratio(value, integer, &Integer::one()).then_some(value)
-//RS }
-//RS 
-//RS fn exactly_represented_decimal(integer: &Integer, digits: usize) -> Option<f64> {
-//RS     let value = decimal_value(integer, digits)?;
-//RS     let mut denominator = Integer::one();
-//RS     for _ in 0..digits {
-//RS         denominator = denominator.mul_small(10);
-//RS     }
-//RS     float_represents_ratio(value, integer, &denominator).then_some(value)
-//RS }
-//RS 
-//RS fn ratio_cmp_float(numerator: &Integer, denominator: &Integer, value: f64) -> std::cmp::Ordering {
-//RS     let (float_num, float_den) = float_ratio(value).expect("finite Float bound has an exact ratio");
-//RS     ratio_cmp(numerator, denominator, &float_num, &float_den)
-//RS }
-//RS 
-//RS fn positive_float_bounds(numerator: &Integer, denominator: &Integer) -> (f64, bool, Option<f64>) {
-//RS     const MAX_FINITE_BITS: u64 = 0x7fefffffffffffff;
-//RS     let mut low = 0_u64;
-//RS     let mut high = MAX_FINITE_BITS;
-//RS     while low < high {
-//RS         let middle = low + (high - low) / 2 + 1;
-//RS         if ratio_cmp_float(numerator, denominator, f64::from_bits(middle))
-//RS             != std::cmp::Ordering::Less
-//RS         {
-//RS             low = middle;
-//RS         } else {
-//RS             high = middle - 1;
-//RS         }
-//RS     }
-//RS     let floor = f64::from_bits(low);
-//RS     let exact = ratio_cmp_float(numerator, denominator, floor) == std::cmp::Ordering::Equal;
-//RS     let ceiling = (!exact && low < MAX_FINITE_BITS).then(|| f64::from_bits(low + 1));
-//RS     (floor, exact, ceiling)
-//RS }
-//RS 
-//RS fn float_bounds(
-//RS     numerator: &Integer,
-//RS     denominator: &Integer,
-//RS ) -> (Option<f64>, Option<f64>, Option<f64>) {
-//RS     if numerator.is_zero() {
-//RS         return (Some(0.0), Some(0.0), Some(0.0));
-//RS     }
-//RS     let (floor_abs, exact, ceiling_abs) = positive_float_bounds(&numerator.abs(), denominator);
-//RS     if exact {
-//RS         let value = if numerator.sign < 0 {
-//RS             -floor_abs
-//RS         } else {
-//RS             floor_abs
-//RS         };
-//RS         return (Some(value), Some(value), Some(value));
-//RS     }
-//RS     if numerator.sign < 0 {
-//RS         (ceiling_abs.map(|value| -value), None, Some(-floor_abs))
-//RS     } else {
-//RS         (Some(floor_abs), None, ceiling_abs)
-//RS     }
-//RS }
-//RS 
-//RS fn cmp_times_power10(left: &Integer, right: &Integer, power: u64) -> std::cmp::Ordering {
-//RS     if left.is_zero() {
-//RS         return std::cmp::Ordering::Less;
-//RS     }
-//RS     let left = left.abs().decimal();
-//RS     let right = right.abs().decimal();
-//RS     let left_len = left.len() as u128 + power as u128;
-//RS     match left_len.cmp(&(right.len() as u128)) {
-//RS         std::cmp::Ordering::Equal => {
-//RS             let prefix = &right[..left.len()];
-//RS             match left.as_str().cmp(prefix) {
-//RS                 std::cmp::Ordering::Equal => {
-//RS                     if right[left.len()..].bytes().all(|byte| byte == b'0') {
-//RS                         std::cmp::Ordering::Equal
-//RS                     } else {
-//RS                         std::cmp::Ordering::Less
-//RS                     }
-//RS                 }
-//RS                 ordering => ordering,
-//RS             }
-//RS         }
-//RS         ordering => ordering,
-//RS     }
-//RS }
-//RS 
-//RS fn candidate_distance_cmp(
-//RS     numerator: &Integer,
-//RS     denominator: &Integer,
-//RS     candidate: f64,
-//RS     digits: u64,
-//RS     half_step: bool,
-//RS ) -> std::cmp::Ordering {
-//RS     let (candidate_num, candidate_den) =
-//RS         float_ratio(candidate).expect("finite Float candidate has an exact ratio");
-//RS     let mut difference = numerator
-//RS         .mul(&candidate_den)
-//RS         .add(&candidate_num.mul(denominator).neg())
-//RS         .abs();
-//RS     if half_step {
-//RS         difference = difference.mul_small(2);
-//RS     }
-//RS     cmp_times_power10(&difference, &denominator.mul(&candidate_den), digits)
-//RS }
-//RS 
-//RS fn huge_precision_rounded_float(
-//RS     numerator: &Integer,
-//RS     denominator: &Integer,
-//RS     mode: UnitRoundingMode,
-//RS     digits: u64,
-//RS ) -> Option<f64> {
-//RS     let (lower, exact, upper) = float_bounds(numerator, denominator);
-//RS     if exact.is_some() {
-//RS         return exact;
-//RS     }
-//RS     let directed = match mode {
-//RS         UnitRoundingMode::TowardZero if numerator.sign < 0 => upper,
-//RS         UnitRoundingMode::TowardZero | UnitRoundingMode::Floor => lower,
-//RS         UnitRoundingMode::Ceiling => upper,
-//RS         UnitRoundingMode::NearestEven => None,
-//RS     };
-//RS     if mode != UnitRoundingMode::NearestEven {
-//RS         return directed.filter(|candidate| {
-//RS             candidate_distance_cmp(numerator, denominator, *candidate, digits, false)
-//RS                 == std::cmp::Ordering::Less
-//RS         });
-//RS     }
-//RS     [lower, upper].into_iter().flatten().find(|candidate| {
-//RS         candidate_distance_cmp(numerator, denominator, *candidate, digits, true)
-//RS             != std::cmp::Ordering::Greater
-//RS     })
-//RS }
-//RS 
-//RS /// Converts a Float only when exact rational arithmetic proves the result integral.
-//RS pub fn jet_unit_conversion_exact(
-//RS     value: f64,
-//RS     scale_num: &str,
-//RS     scale_den: &str,
-//RS     offset_num: &str,
-//RS     offset_den: &str,
-//RS ) -> Option<f64> {
-//RS     let (numerator, denominator) =
-//RS         converted_ratio(value, scale_num, scale_den, offset_num, offset_den)?;
-//RS     exactly_represented_float(&exact_integer(&numerator, &denominator)?)
-//RS }
-//RS 
-//RS /// Applies the declared rational conversion, then rounds to destination decimal places.
-//RS pub fn jet_unit_conversion_rounded(
-//RS     value: f64,
-//RS     scale_num: &str,
-//RS     scale_den: &str,
-//RS     offset_num: &str,
-//RS     offset_den: &str,
-//RS     mode: UnitRoundingMode,
-//RS     digits: i64,
-//RS ) -> Result<f64, &'static str> {
-//RS     if digits < 0 {
-//RS         return Err(UNIT_ROUNDING_NEGATIVE_DIGITS);
-//RS     }
-//RS     let (mut numerator, denominator) =
-//RS         converted_ratio(value, scale_num, scale_den, offset_num, offset_den)
-//RS             .ok_or(UNIT_ROUNDING_UNREPRESENTABLE)?;
-//RS     if digits > MAX_FINITE_FLOAT_DECIMAL_PLACES {
-//RS         return huge_precision_rounded_float(&numerator, &denominator, mode, digits as u64)
-//RS             .ok_or(UNIT_ROUNDING_UNREPRESENTABLE);
-//RS     }
-//RS     let digits = digits as usize;
-//RS     for _ in 0..digits {
-//RS         numerator = numerator.mul_small(10);
-//RS     }
-//RS     let integer =
-//RS         rounded_integer(&numerator, &denominator, mode).ok_or(UNIT_ROUNDING_UNREPRESENTABLE)?;
-//RS     exactly_represented_decimal(&integer, digits).ok_or(UNIT_ROUNDING_UNREPRESENTABLE)
-//RS }
-// END-PORT-PENDING 0062 crates/jet-foundation/src/ExactUnitConversion.rs:1-556
+// Exact runtime proof for unit conversions, shared by emitted code.
+use core.cmp.[Ordering]
 
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:4
+struct Integer {
+    sign: I8
+    limbs: [U32]
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:10
+    const BASE: U64 = U64{1_000_000_000}
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:11
+    fn zero() -> Integer Never! { Integer{sign: I8{0}, limbs: []} }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:17
+    fn one() -> Integer Never! { Integer.from_u64(U64{1}) }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:20
+    fn from_u64(value: U64) -> Integer Never! {
+        if value == U64{0} -> return Integer.zero()
+        remaining := value
+        limbs := [U32]{}
+        loop remaining != U64{0} {
+            &limbs.push(U32{remaining % Integer.BASE})
+            remaining /= Integer.BASE
+        }
+        Integer{sign: I8{1}, limbs: ^limbs}
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:31
+    fn parse(text: String) -> Integer? Never! {
+        negative :: text.starts_with("-")
+        digits :: if negative -> text.slice(1..<text.len()) else -> text
+        if digits.is_empty() -> return None
+        loop byte in digits.bytes() {
+            if byte < U8{48} || byte > U8{57} -> return None
+        }
+        value := Integer.zero()
+        loop byte in digits.bytes() {
+            value = value.mul_small(U32{10}).add(Integer.from_u64(U64{byte - U8{48}}))
+        }
+        if !value.is_zero() -> value.sign = if negative -> I8{-1} else -> I8{1}
+        Val(^value)
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:49
+    fn is_zero(self) -> Bool Never! { self.sign == I8{0} }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:52
+    fn is_odd(self) -> Bool Never! { !self.limbs.is_empty() && self.limbs[0] % U32{2} == U32{1} }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:55
+    fn neg(^self) -> Integer Never! { self.sign = -self.sign; ^self }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:59
+    fn normalize(&self) Never! {
+        loop !self.limbs.is_empty() && self.limbs[self.limbs.len() - 1] == U32{0} {
+            _ :: &self.limbs.pop()
+        }
+        if self.limbs.is_empty() -> self.sign = I8{0}
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:67
+    fn abs(self) -> Integer Never! {
+        value := ~self
+        if !value.is_zero() -> value.sign = I8{1}
+        ^value
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:74
+    fn abs_cmp(self, other: Integer) -> Ordering Never! {
+        if self.limbs.len() != other.limbs.len() -> return self.limbs.len().cmp(other.limbs.len())
+        index := self.limbs.len()
+        loop index > 0 {
+            index -= 1
+            if self.limbs[index] != other.limbs[index] -> return self.limbs[index].cmp(other.limbs[index])
+        }
+        Ordering.Equal
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:80
+    fn abs_add(self, other: Integer) -> Integer Never! {
+        carry := U64{0}
+        length :: self.limbs.len().max(other.limbs.len())
+        limbs := [U32].with_capacity(length + 1)
+        loop index in 0..<length {
+            left :: if index < self.limbs.len() -> self.limbs[index] else -> U32{0}
+            right :: if index < other.limbs.len() -> other.limbs[index] else -> U32{0}
+            value :: U64{left} + U64{right} + carry
+            &limbs.push(U32{value % Integer.BASE})
+            carry = value / Integer.BASE
+        }
+        if carry != U64{0} -> &limbs.push(U32{carry})
+        Integer{sign: I8{1}, limbs: ^limbs}
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:95
+    fn abs_sub(self, other: Integer) -> Integer Never! {
+        borrow := I64{0}
+        limbs := [U32].with_capacity(self.limbs.len())
+        loop index in 0..<self.limbs.len() {
+            right :: if index < other.limbs.len() -> other.limbs[index] else -> U32{0}
+            value := I64{self.limbs[index]} - I64{right} - borrow
+            if value < I64{0} { value += I64{Integer.BASE}; borrow = I64{1} }
+            else -> borrow = I64{0}
+            &limbs.push(U32{value})
+        }
+        value := Integer{sign: I8{1}, limbs: ^limbs}
+        &value.normalize()
+        ^value
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:114
+    fn add(self, other: Integer) -> Integer Never! {
+        if self.is_zero() -> return ~other
+        if other.is_zero() -> return ~self
+        if self.sign == other.sign {
+            value := self.abs_add(other)
+            value.sign = self.sign
+            return ^value
+        }
+        if self.abs_cmp(other) == {
+            .Greater -> { value := self.abs_sub(other); value.sign = self.sign; ^value }
+            .Less -> { value := other.abs_sub(self); value.sign = other.sign; ^value }
+            .Equal -> Integer.zero()
+        }
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:141
+    fn mul_small(self, other: U32) -> Integer Never! {
+        if other == U32{0} || self.is_zero() -> return Integer.zero()
+        carry := U64{0}
+        limbs := [U32].with_capacity(self.limbs.len() + 1)
+        loop limb in self.limbs {
+            value :: U64{limb} * U64{other} + carry
+            &limbs.push(U32{value % Integer.BASE})
+            carry = value / Integer.BASE
+        }
+        if carry != U64{0} -> &limbs.push(U32{carry})
+        Integer{sign: self.sign, limbs: ^limbs}
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:160
+    fn mul(self, other: Integer) -> Integer Never! {
+        if self.is_zero() || other.is_zero() -> return Integer.zero()
+        limbs := [U64].filled(self.limbs.len() + other.limbs.len(), U64{0})
+        loop left_index in 0..<self.limbs.len() {
+            carry := U64{0}
+            loop right_index in 0..<other.limbs.len() {
+                index :: left_index + right_index
+                value :: limbs[index] + U64{self.limbs[left_index]} * U64{other.limbs[right_index]} + carry
+                limbs[index] = value % Integer.BASE
+                carry = value / Integer.BASE
+            }
+            limbs[left_index + other.limbs.len()] += carry
+        }
+        narrow := [U32].with_capacity(limbs.len())
+        loop limb in limbs -> &narrow.push(U32{limb})
+        value := Integer{sign: self.sign * other.sign, limbs: ^narrow}
+        &value.normalize()
+        ^value
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:182
+    fn mul_pow2(^self, exponent: U32) -> Integer Never! {
+        loop _ in U32{0}..<exponent -> self = self.mul_small(U32{2})
+        ^self
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:188
+    fn div_rem_abs(self, other: Integer) -> (quotient: Integer, remainder: Integer)? Never! {
+        if other.is_zero() -> return None
+        divisor :: other.abs()
+        dividend :: self.abs()
+        if dividend.abs_cmp(divisor) == Ordering.Less -> return Val((Integer.zero(), ^dividend))
+        quotient_limbs := [U32].filled(dividend.limbs.len(), U32{0})
+        remainder := Integer.zero()
+        index := dividend.limbs.len()
+        loop index > 0 {
+            index -= 1
+            &remainder.limbs.insert(0, dividend.limbs[index])
+            remainder.sign = I8{1}
+            &remainder.normalize()
+            low := U32{0}
+            high := U32{Integer.BASE - U64{1}}
+            loop low < high {
+                middle :: low + (high - low) / U32{2} + U32{1}
+                if divisor.mul_small(middle).abs_cmp(remainder) != Ordering.Greater -> low = middle
+                else -> high = middle - U32{1}
+            }
+            quotient_limbs[index] = low
+            if low != U32{0} -> remainder = remainder.abs_sub(divisor.mul_small(low))
+        }
+        quotient := Integer{sign: I8{1}, limbs: ^quotient_limbs}
+        &quotient.normalize()
+        Val((^quotient, ^remainder))
+    }
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:224
+    fn decimal(self) -> String Never! {
+        if self.is_zero() -> return "0"
+        index := self.limbs.len() - 1
+        text := self.limbs[index].to_string()
+        loop index > 0 {
+            index -= 1
+            digits :: self.limbs[index].to_string()
+            &text.push_str("0".repeat(9 - digits.len()))
+            &text.push_str(digits)
+        }
+        if self.sign < I8{0} -> &text.insert_str(0, "-")
+        ^text
+    }
+}
+
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:240
+fn float_ratio(value: F64) -> (numerator: Integer, denominator: Integer)? Never! {
+    if !value.is_finite() -> return None
+    bits :: value.to_bits()
+    exponent_bits :: I32{(bits >> 52) & U64{0x7ff}}
+    fraction :: bits & ((U64{1} << 52) - U64{1})
+    significand :: if exponent_bits == I32{0} -> fraction else -> (U64{1} << 52) | fraction
+    exponent :: if exponent_bits == I32{0} -> I32{-1074} else -> exponent_bits - I32{1023} - I32{52}
+    numerator := Integer.from_u64(significand)
+    if bits >> 63 != U64{0} && !numerator.is_zero() -> numerator.sign = I8{-1}
+    denominator := Integer.one()
+    if exponent >= I32{0} -> numerator = ^numerator.mul_pow2(U32{exponent})
+    else -> denominator = ^denominator.mul_pow2(U32{-exponent})
+    Val((^numerator, ^denominator))
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:265
+fn converted_ratio(value: F64, scale_num: String, scale_den: String, offset_num: String, offset_den: String) -> (numerator: Integer, denominator: Integer)? Never! {
+    ratio :: float_ratio(value) ?? return None
+    sn :: Integer.parse(scale_num) ?? return None
+    sd :: Integer.parse(scale_den) ?? return None
+    on :: Integer.parse(offset_num) ?? return None
+    od :: Integer.parse(offset_den) ?? return None
+    if sd.is_zero() || od.is_zero() -> return None
+    numerator := ratio.numerator.mul(sn).mul(od).add(on.mul(ratio.denominator).mul(sd))
+    denominator := ratio.denominator.mul(sd).mul(od)
+    if denominator.sign < I8{0} { numerator = ^numerator.neg(); denominator = ^denominator.neg() }
+    Val((^numerator, ^denominator))
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:292
+fn exact_integer(numerator: Integer, denominator: Integer) -> Integer? Never! {
+    division := numerator.div_rem_abs(denominator) ?? return None
+    if !division.remainder.is_zero() -> return None
+    if !division.quotient.is_zero() -> division.quotient.sign = numerator.sign * denominator.sign
+    Val(^division.quotient)
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:305
+pub enum UnitRoundingMode: I64 { TowardZero, Floor, Ceiling, NearestEven }
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:312
+pub UNIT_ROUNDING_NEGATIVE_DIGITS :: "rounded unit conversion needs nonnegative digits"
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:313
+pub UNIT_ROUNDING_UNREPRESENTABLE :: "unit conversion overflows its runtime representation"
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:319
+// Every finite Float terminates within 1074 decimal places; do not allocate proportional to unbounded digits.
+MAX_FINITE_FLOAT_DECIMAL_PLACES :: I64{1074}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:321
+fn rounded_integer(numerator: Integer, denominator: Integer, mode: UnitRoundingMode) -> Integer? Never! {
+    division := numerator.div_rem_abs(denominator) ?? return None
+    sign :: numerator.sign * denominator.sign
+    increment :: if mode == {
+        .TowardZero -> false
+        .Floor -> sign < I8{0} && !division.remainder.is_zero()
+        .Ceiling -> sign > I8{0} && !division.remainder.is_zero()
+        .NearestEven -> {
+            comparison :: division.remainder.mul_small(U32{2}).abs_cmp(denominator.abs())
+            comparison == Ordering.Greater || (comparison == Ordering.Equal && division.quotient.is_odd())
+        }
+    }
+    if increment -> division.quotient = division.quotient.add(Integer.one())
+    if !division.quotient.is_zero() -> division.quotient.sign = sign
+    Val(^division.quotient)
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:347
+fn decimal_value(integer: Integer, digits: Int) -> F64? Never! {
+    negative :: integer.sign < I8{0}
+    decimal := integer.abs().decimal()
+    if digits != 0 {
+        if decimal.len() <= digits -> &decimal.insert_str(0, "0".repeat(digits + 1 - decimal.len()))
+        &decimal.insert_str(decimal.len() - digits, ".")
+    }
+    if negative -> &decimal.insert_str(0, "-")
+    value :: decimal.parse<F64>() ?? return None
+    if value.is_finite() -> Val(value) else -> None
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:363
+fn ratio_cmp(left_num: Integer, left_den: Integer, right_num: Integer, right_den: Integer) -> Ordering Never! {
+    difference :: left_num.mul(right_den).add(right_num.mul(left_den).neg())
+    difference.sign.cmp(I8{0})
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:373
+fn float_represents_ratio(value: F64, numerator: Integer, denominator: Integer) -> Bool Never! {
+    ratio :: float_ratio(value) ?? return false
+    ratio_cmp(numerator, denominator, ratio.numerator, ratio.denominator) == Ordering.Equal
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:379
+fn exactly_represented_float(integer: Integer) -> F64? Never! {
+    value :: integer.decimal().parse<F64>() ?? return None
+    if !value.is_finite() -> return None
+    if float_represents_ratio(value, integer, Integer.one()) -> Val(value) else -> None
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:387
+fn exactly_represented_decimal(integer: Integer, digits: Int) -> F64? Never! {
+    value :: decimal_value(integer, digits) ?? return None
+    denominator := Integer.one()
+    loop _ in 0..<digits -> denominator = denominator.mul_small(U32{10})
+    if float_represents_ratio(value, integer, denominator) -> Val(value) else -> None
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:396
+fn ratio_cmp_float(numerator: Integer, denominator: Integer, value: F64) -> Ordering Never! {
+    ratio :: float_ratio(value) ?? panic("finite Float bound has an exact ratio")
+    ratio_cmp(numerator, denominator, ratio.numerator, ratio.denominator)
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:401
+fn positive_float_bounds(numerator: Integer, denominator: Integer) -> (floor: F64, exact: Bool, ceiling: F64?) Never! {
+    // Rust: crates/jet-foundation/src/ExactUnitConversion.rs:402
+    MAX_FINITE_BITS :: U64{0x7fefffffffffffff}
+    low := U64{0}
+    high := MAX_FINITE_BITS
+    loop low < high {
+        middle :: low + (high - low) / U64{2} + U64{1}
+        if ratio_cmp_float(numerator, denominator, F64.from_bits(middle)) != Ordering.Less -> low = middle
+        else -> high = middle - U64{1}
+    }
+    floor :: F64.from_bits(low)
+    exact :: ratio_cmp_float(numerator, denominator, floor) == Ordering.Equal
+    ceiling :: if !exact && low < MAX_FINITE_BITS -> Val(F64.from_bits(low + U64{1})) else -> None
+    (floor, exact, ceiling)
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:421
+fn float_bounds(numerator: Integer, denominator: Integer) -> (lower: F64?, exact: F64?, upper: F64?) Never! {
+    if numerator.is_zero() -> return (Val(0.0), Val(0.0), Val(0.0))
+    bounds :: positive_float_bounds(numerator.abs(), denominator)
+    if bounds.exact {
+        value :: if numerator.sign < I8{0} -> -bounds.floor else -> bounds.floor
+        return (Val(value), Val(value), Val(value))
+    }
+    if numerator.sign < I8{0} {
+        lower :: if bounds.ceiling == { .Val(value) -> Val(-value), .None -> None }
+        return (lower, None, Val(-bounds.floor))
+    }
+    (Val(bounds.floor), None, bounds.ceiling)
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:444
+fn cmp_times_power10(left: Integer, right: Integer, power: U64) -> Ordering Never! {
+    if left.is_zero() -> return Ordering.Less
+    left_text :: left.abs().decimal()
+    right_text :: right.abs().decimal()
+    // Int preserves Rust's u128 sum without wrapping for enormous precision.
+    left_len :: Int{left_text.len()} + Int{power}
+    ordering :: left_len.cmp(right_text.len())
+    if ordering != Ordering.Equal -> return ordering
+    prefix := right_text.slice(0..<left_text.len()) // #4303
+    prefix_order :: left_text.cmp(prefix)
+    if prefix_order != Ordering.Equal -> return prefix_order
+    loop byte in right_text.slice(left_text.len()..<right_text.len()).bytes() {
+        if byte != U8{48} -> return Ordering.Less
+    }
+    Ordering.Equal
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:469
+fn candidate_distance_cmp(numerator: Integer, denominator: Integer, candidate: F64, digits: U64, half_step: Bool) -> Ordering Never! {
+    ratio :: float_ratio(candidate) ?? panic("finite Float candidate has an exact ratio")
+    difference := numerator.mul(ratio.denominator).add(ratio.numerator.mul(denominator).neg()).abs()
+    if half_step -> difference = difference.mul_small(U32{2})
+    cmp_times_power10(difference, denominator.mul(ratio.denominator), digits)
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:488
+fn huge_precision_rounded_float(numerator: Integer, denominator: Integer, mode: UnitRoundingMode, digits: U64) -> F64? Never! {
+    bounds :: float_bounds(numerator, denominator)
+    if bounds.exact != None -> return bounds.exact
+    directed :: if mode == {
+        .TowardZero -> if numerator.sign < I8{0} -> bounds.upper else -> bounds.lower
+        .Floor -> bounds.lower
+        .Ceiling -> bounds.upper
+        .NearestEven -> None
+    }
+    if mode != UnitRoundingMode.NearestEven {
+        candidate :: directed ?? return None
+        if candidate_distance_cmp(numerator, denominator, candidate, digits, false) == Ordering.Less -> return Val(candidate)
+        return None
+    }
+    loop candidate_option in [bounds.lower, bounds.upper] {
+        if candidate_option == .Val(candidate) {
+            if candidate_distance_cmp(numerator, denominator, candidate, digits, true) != Ordering.Greater -> return Val(candidate)
+        }
+    }
+    None
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:517
+pub fn jet_unit_conversion_exact(value: F64, scale_num: String, scale_den: String, offset_num: String, offset_den: String) -> F64? Never! {
+    ratio :: converted_ratio(value, scale_num, scale_den, offset_num, offset_den) ?? return None
+    integer :: exact_integer(ratio.numerator, ratio.denominator) ?? return None
+    exactly_represented_float(integer)
+}
+// Rust: crates/jet-foundation/src/ExactUnitConversion.rs:530
+pub fn jet_unit_conversion_rounded(value: F64, scale_num: String, scale_den: String, offset_num: String, offset_den: String, mode: UnitRoundingMode, digits: I64) -> F64 Err! {
+    if digits < I64{0} -> return Err(UNIT_ROUNDING_NEGATIVE_DIGITS)
+    ratio := converted_ratio(value, scale_num, scale_den, offset_num, offset_den) ?? return Err(UNIT_ROUNDING_UNREPRESENTABLE)
+    if digits > MAX_FINITE_FLOAT_DECIMAL_PLACES {
+        return huge_precision_rounded_float(ratio.numerator, ratio.denominator, mode, U64{digits}) ?? return Err(UNIT_ROUNDING_UNREPRESENTABLE)
+    }
+    places :: Int{digits}
+    loop _ in 0..<places -> ratio.numerator = ratio.numerator.mul_small(U32{10})
+    integer :: rounded_integer(ratio.numerator, ratio.denominator, mode) ?? return Err(UNIT_ROUNDING_UNREPRESENTABLE)
+    exactly_represented_decimal(integer, places) ?? return Err(UNIT_ROUNDING_UNREPRESENTABLE)
+}

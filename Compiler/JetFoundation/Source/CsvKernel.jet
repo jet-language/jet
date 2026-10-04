@@ -1,483 +1,263 @@
-// PORT-PENDING 0059 crates-jet-foundation-src-compilerstack-module-group: crates/jet-foundation/src/CsvKernel.rs:1-479
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Dependency-free CSV engine shared by whole-value and streaming readers.
-//RS //!
-//RS //! The parser keeps the physical opening line of each record. A record may
-//RS //! span several physical lines when a quoted field contains a line ending.
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub struct CsvOptions {
-//RS     pub delimiter: char,
-//RS     pub header: bool,
-//RS     pub skip_blank: bool,
-//RS }
-//RS 
-//RS impl Default for CsvOptions {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             delimiter: ',',
-//RS             header: false,
-//RS             skip_blank: false,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct CsvRecord {
-//RS     pub fields: Vec<String>,
-//RS     pub line: i64,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum CsvErrorKind {
-//RS     Syntax,
-//RS     Truncated,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct CsvError {
-//RS     pub kind: CsvErrorKind,
-//RS     pub record: usize,
-//RS     pub line: i64,
-//RS     pub column: i64,
-//RS     pub field: usize,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS impl CsvError {
-//RS     pub fn message(&self) -> String {
-//RS         format!(
-//RS             "E2701: CSV row {}, line {}, column {} — {}",
-//RS             self.record, self.line, self.column, self.reason
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS pub fn delimiter(value: &str) -> Result<char, String> {
-//RS     let mut chars = value.chars();
-//RS     let Some(delimiter) = chars.next() else {
-//RS         return Err(delimiter_error());
-//RS     };
-//RS     if chars.next().is_some() || matches!(delimiter, '"' | '\r' | '\n') {
-//RS         return Err(delimiter_error());
-//RS     }
-//RS     Ok(delimiter)
-//RS }
-//RS 
-//RS fn delimiter_error() -> String {
-//RS     "E2701: CSV delimiter must be exactly one character other than quote or line ending".to_string()
-//RS }
-//RS 
-//RS fn delimiter_name(delimiter: char) -> &'static str {
-//RS     if delimiter == ',' {
-//RS         "comma"
-//RS     } else {
-//RS         "delimiter"
-//RS     }
-//RS }
-//RS 
-//RS pub struct CsvParser {
-//RS     options: CsvOptions,
-//RS     fields: Vec<String>,
-//RS     field: String,
-//RS     quoted: bool,
-//RS     after_quote: bool,
-//RS     pending_cr: bool,
-//RS     pending_cr_line: i64,
-//RS     pending_cr_column: i64,
-//RS     record: usize,
-//RS     line: i64,
-//RS     column: i64,
-//RS     record_line: i64,
-//RS     record_has_content: bool,
-//RS     ended_record: bool,
-//RS     saw_input: bool,
-//RS }
-//RS 
-//RS impl CsvParser {
-//RS     pub fn new(options: CsvOptions) -> Result<Self, String> {
-//RS         if matches!(options.delimiter, '"' | '\r' | '\n') {
-//RS             return Err(delimiter_error());
-//RS         }
-//RS         Ok(Self {
-//RS             options,
-//RS             fields: Vec::new(),
-//RS             field: String::new(),
-//RS             quoted: false,
-//RS             after_quote: false,
-//RS             pending_cr: false,
-//RS             pending_cr_line: 1,
-//RS             pending_cr_column: 1,
-//RS             record: 1,
-//RS             line: 1,
-//RS             column: 0,
-//RS             record_line: 1,
-//RS             record_has_content: false,
-//RS             ended_record: false,
-//RS             saw_input: false,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn field_len_bytes(&self) -> usize {
-//RS         self.field.len()
-//RS     }
-//RS 
-//RS     pub fn current_field(&self) -> usize {
-//RS         self.fields.len()
-//RS     }
-//RS 
-//RS     pub fn current_record(&self) -> usize {
-//RS         self.record
-//RS     }
-//RS 
-//RS     pub fn line(&self) -> i64 {
-//RS         self.line
-//RS     }
-//RS 
-//RS     pub fn column(&self) -> i64 {
-//RS         self.column
-//RS     }
-//RS 
-//RS     /// Number of decoded field bytes that `push(ch)` will append.
-//RS     ///
-//RS     /// A CRLF inside a quoted field is held after the CR and appended as one
-//RS     /// decoded line ending when its LF arrives, so it contributes two bytes
-//RS     /// at that point. Streaming limits use this instead of guessing from the
-//RS     /// input character alone.
-//RS     pub fn append_len_bytes(&self, ch: char) -> usize {
-//RS         if self.pending_cr {
-//RS             return usize::from(self.quoted && ch == '\n') * 2;
-//RS         }
-//RS         if self.quoted {
-//RS             return if self.after_quote {
-//RS                 usize::from(ch == '"')
-//RS             } else {
-//RS                 usize::from(ch != '"') * ch.len_utf8()
-//RS             };
-//RS         }
-//RS         if matches!(ch, '"' | '\r' | '\n') || ch == self.options.delimiter {
-//RS             0
-//RS         } else {
-//RS             ch.len_utf8()
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn would_append(&self, ch: char) -> bool {
-//RS         self.append_len_bytes(ch) != 0
-//RS     }
-//RS 
-//RS     pub fn capacity_bytes(&self) -> usize {
-//RS         self.field
-//RS             .capacity()
-//RS             .saturating_add(
-//RS                 self.fields
-//RS                     .capacity()
-//RS                     .saturating_mul(std::mem::size_of::<String>()),
-//RS             )
-//RS             .saturating_add(
-//RS                 self.fields
-//RS                     .iter()
-//RS                     .map(|field| field.capacity())
-//RS                     .sum::<usize>(),
-//RS             )
-//RS     }
-//RS 
-//RS     pub fn push(&mut self, ch: char) -> Result<Option<CsvRecord>, CsvError> {
-//RS         self.saw_input = true;
-//RS         if self.pending_cr {
-//RS             if ch != '\n' {
-//RS                 return Err(self.error_at(
-//RS                     CsvErrorKind::Syntax,
-//RS                     self.pending_cr_line,
-//RS                     self.pending_cr_column,
-//RS                     "bare CR is not a record ending",
-//RS                 ));
-//RS             }
-//RS             self.pending_cr = false;
-//RS             self.column += 1;
-//RS             self.line += 1;
-//RS             self.column = 0;
-//RS             if self.quoted {
-//RS                 self.field.push('\r');
-//RS                 self.field.push('\n');
-//RS                 return Ok(None);
-//RS             }
-//RS             return Ok(self.finish_record());
-//RS         }
-//RS 
-//RS         self.ended_record = false;
-//RS         self.column += 1;
-//RS 
-//RS         if self.quoted {
-//RS             if self.after_quote {
-//RS                 return match ch {
-//RS                     '"' => {
-//RS                         self.field.push('"');
-//RS                         self.after_quote = false;
-//RS                         Ok(None)
-//RS                     }
-//RS                     ch if ch == self.options.delimiter => {
-//RS                         self.fields.push(std::mem::take(&mut self.field));
-//RS                         self.quoted = false;
-//RS                         self.after_quote = false;
-//RS                         Ok(None)
-//RS                     }
-//RS                     '\r' => {
-//RS                         self.quoted = false;
-//RS                         self.after_quote = false;
-//RS                         self.pending_cr = true;
-//RS                         self.pending_cr_line = self.line;
-//RS                         self.pending_cr_column = self.column;
-//RS                         Ok(None)
-//RS                     }
-//RS                     '\n' => {
-//RS                         self.quoted = false;
-//RS                         self.after_quote = false;
-//RS                         self.line += 1;
-//RS                         self.column = 0;
-//RS                         Ok(self.finish_record())
-//RS                     }
-//RS                     _ => Err(self.error(
-//RS                         CsvErrorKind::Syntax,
-//RS                         format!(
-//RS                             "only quote, {}, CRLF, LF, or EOF may follow a closing quote",
-//RS                             delimiter_name(self.options.delimiter)
-//RS                         ),
-//RS                     )),
-//RS                 };
-//RS             }
-//RS             if ch == '"' {
-//RS                 self.after_quote = true;
-//RS             } else {
-//RS                 self.field.push(ch);
-//RS                 if ch == '\n' {
-//RS                     self.line += 1;
-//RS                     self.column = 0;
-//RS                 }
-//RS             }
-//RS             return Ok(None);
-//RS         }
-//RS 
-//RS         match ch {
-//RS             '"' if self.field.is_empty() => {
-//RS                 self.quoted = true;
-//RS                 self.record_has_content = true;
-//RS                 Ok(None)
-//RS             }
-//RS             '"' => Err(self.error(
-//RS                 CsvErrorKind::Syntax,
-//RS                 "quote inside an unquoted field".to_string(),
-//RS             )),
-//RS             ch if ch == self.options.delimiter => {
-//RS                 self.fields.push(std::mem::take(&mut self.field));
-//RS                 Ok(None)
-//RS             }
-//RS             '\r' => {
-//RS                 self.pending_cr = true;
-//RS                 self.pending_cr_line = self.line;
-//RS                 self.pending_cr_column = self.column;
-//RS                 Ok(None)
-//RS             }
-//RS             '\n' => {
-//RS                 self.line += 1;
-//RS                 self.column = 0;
-//RS                 Ok(self.finish_record())
-//RS             }
-//RS             _ => {
-//RS                 self.field.push(ch);
-//RS                 self.record_has_content = true;
-//RS                 Ok(None)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn finish(&mut self) -> Result<Option<CsvRecord>, CsvError> {
-//RS         if self.pending_cr {
-//RS             return Err(self.error_at(
-//RS                 CsvErrorKind::Syntax,
-//RS                 self.pending_cr_line,
-//RS                 self.pending_cr_column,
-//RS                 "bare CR is not a record ending",
-//RS             ));
-//RS         }
-//RS         if self.quoted && !self.after_quote {
-//RS             return Err(self.error_at(
-//RS                 CsvErrorKind::Truncated,
-//RS                 self.line,
-//RS                 self.column + 1,
-//RS                 "quoted field ended before its closing quote",
-//RS             ));
-//RS         }
-//RS         if self.ended_record || !self.saw_input {
-//RS             return Ok(None);
-//RS         }
-//RS         self.quoted = false;
-//RS         self.after_quote = false;
-//RS         Ok(self.finish_record())
-//RS     }
-//RS 
-//RS     fn finish_record(&mut self) -> Option<CsvRecord> {
-//RS         self.fields.push(std::mem::take(&mut self.field));
-//RS         let number = self.record;
-//RS         let line = self.record_line;
-//RS         let has_content = self.record_has_content;
-//RS         self.record += 1;
-//RS         self.record_line = self.line;
-//RS         self.record_has_content = false;
-//RS         self.ended_record = true;
-//RS 
-//RS         if self.options.header && number == 1 {
-//RS             self.fields.clear();
-//RS             return None;
-//RS         }
-//RS         if self.options.skip_blank && !has_content {
-//RS             self.fields.clear();
-//RS             return None;
-//RS         }
-//RS         Some(CsvRecord {
-//RS             fields: std::mem::take(&mut self.fields),
-//RS             line,
-//RS         })
-//RS     }
-//RS 
-//RS     fn error(&self, kind: CsvErrorKind, reason: String) -> CsvError {
-//RS         CsvError {
-//RS             kind,
-//RS             record: self.record,
-//RS             line: self.line,
-//RS             column: self.column,
-//RS             field: self.fields.len(),
-//RS             reason,
-//RS         }
-//RS     }
-//RS 
-//RS     fn error_at(&self, kind: CsvErrorKind, line: i64, column: i64, reason: &str) -> CsvError {
-//RS         CsvError {
-//RS             kind,
-//RS             record: self.record,
-//RS             line,
-//RS             column,
-//RS             field: self.fields.len(),
-//RS             reason: reason.to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn parse(text: &str, options: CsvOptions) -> Result<Vec<CsvRecord>, String> {
-//RS     let mut parser = CsvParser::new(options)?;
-//RS     let mut records = Vec::new();
-//RS     for ch in text.chars() {
-//RS         if let Some(record) = parser.push(ch).map_err(|error| error.message())? {
-//RS             records.push(record);
-//RS         }
-//RS     }
-//RS     if let Some(record) = parser.finish().map_err(|error| error.message())? {
-//RS         records.push(record);
-//RS     }
-//RS     Ok(records)
-//RS }
-//RS 
-//RS pub fn render(rows: &[Vec<String>]) -> String {
-//RS     rows.iter()
-//RS         .map(|row| {
-//RS             row.iter()
-//RS                 .map(|field| {
-//RS                     if field.contains(',')
-//RS                         || field.contains('"')
-//RS                         || field.contains('\n')
-//RS                         || field.contains('\r')
-//RS                     {
-//RS                         format!("\"{}\"", field.replace('"', "\"\""))
-//RS                     } else {
-//RS                         field.clone()
-//RS                     }
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n")
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{delimiter, parse, CsvOptions};
-//RS 
-//RS     #[test]
-//RS     fn options_and_physical_lines_apply_to_records() {
-//RS         let rows = parse(
-//RS             "name\tage\r\n\r\nAda\t36\r\n\"Grace\r\nHopper\"\t85",
-//RS             CsvOptions {
-//RS                 delimiter: '\t',
-//RS                 header: true,
-//RS                 skip_blank: true,
-//RS             },
-//RS         )
-//RS         .expect("valid CSV");
-//RS         assert_eq!(rows[0].fields, vec!["Ada", "36"]);
-//RS         assert_eq!(rows[0].line, 3);
-//RS         assert_eq!(rows[1].fields, vec!["Grace\r\nHopper", "85"]);
-//RS         assert_eq!(rows[1].line, 4);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn blank_quoted_empty_field_is_not_a_blank_record() {
-//RS         let rows = parse(
-//RS             "\n\"\"\n",
-//RS             CsvOptions {
-//RS                 delimiter: ',',
-//RS                 header: false,
-//RS                 skip_blank: true,
-//RS             },
-//RS         )
-//RS         .expect("valid CSV");
-//RS         assert_eq!(rows.len(), 1);
-//RS         assert_eq!(rows[0].fields, vec![""]);
-//RS         assert_eq!(rows[0].line, 2);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn skip_blank_ignores_records_with_only_separators() {
-//RS         let rows = parse(
-//RS             ",\n \n,\n",
-//RS             CsvOptions {
-//RS                 delimiter: ',',
-//RS                 header: false,
-//RS                 skip_blank: true,
-//RS             },
-//RS         )
-//RS         .expect("valid CSV");
-//RS         assert_eq!(rows.len(), 1);
-//RS         assert_eq!(rows[0].fields, vec![" "]);
-//RS         assert_eq!(rows[0].line, 2);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn malformed_input_uses_the_same_engine() {
-//RS         let error = parse("a,\"unterminated", CsvOptions::default()).unwrap_err();
-//RS         assert!(error.contains("quoted field ended before its closing quote"));
-//RS         assert!(parse("a,\"ok\"junk", CsvOptions::default()).is_err());
-//RS         assert!(parse("a\rb", CsvOptions::default()).is_err());
-//RS 
-//RS         let multiline_error = parse(
-//RS             "header\r\n\"bad\r\nvalue",
-//RS             CsvOptions {
-//RS                 delimiter: ',',
-//RS                 header: true,
-//RS                 skip_blank: false,
-//RS             },
-//RS         )
-//RS         .unwrap_err();
-//RS         assert!(multiline_error.contains("line 3"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn delimiter_requires_one_safe_character() {
-//RS         assert!(delimiter("").unwrap_err().starts_with("E2701:"));
-//RS         assert!(delimiter("ab").unwrap_err().starts_with("E2701:"));
-//RS         assert!(delimiter("\"").unwrap_err().starts_with("E2701:"));
-//RS         assert_eq!(delimiter("\t"), Ok('\t'));
-//RS     }
-//RS }
-// END-PORT-PENDING 0059 crates/jet-foundation/src/CsvKernel.rs:1-479
+// Dependency-free CSV engine shared by whole-value and streaming readers.
+// Record lines identify the physical opening line, including multiline fields.
+use std.mem.[take, size_of]
 
+// Rust: crates/jet-foundation/src/CsvKernel.rs:7
+pub struct CsvOptions { pub delimiter: Char, pub header: Bool, pub skip_blank: Bool }
+impl CsvOptions {
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:14
+    pub fn default() -> CsvOptions Never! { CsvOptions{delimiter: ',', header: false, skip_blank: false} }
+}
+// Rust: crates/jet-foundation/src/CsvKernel.rs:24
+pub struct CsvRecord { pub fields: [String], pub line: Int }
+// Rust: crates/jet-foundation/src/CsvKernel.rs:30
+pub enum CsvErrorKind { Syntax Truncated }
+// Rust: crates/jet-foundation/src/CsvKernel.rs:36
+#Error
+pub struct CsvError {
+    pub kind: CsvErrorKind
+    pub record: Int
+    pub line: Int
+    pub column: Int
+    pub field: Int
+    pub reason: String
+}
+impl CsvError {
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:46
+    pub fn message(self) -> String Never! {
+        "E2701: CSV row {self.record}, line {self.line}, column {self.column} — {self.reason}"
+    }
+}
+// Rust: crates/jet-foundation/src/CsvKernel.rs:54
+pub fn delimiter(value: String) -> Char Err! {
+    chars := value.chars()
+    ch :: chars.next() ?? return Err(delimiter_error())
+    if chars.next() != None || ch == '"' || ch == '\r' || ch == '\n' -> return Err(delimiter_error())
+    ch
+}
+// Rust: crates/jet-foundation/src/CsvKernel.rs:65
+fn delimiter_error() -> String Never! {
+    "E2701: CSV delimiter must be exactly one character other than quote or line ending"
+}
+// Rust: crates/jet-foundation/src/CsvKernel.rs:69
+fn delimiter_name(delimiter: Char) -> String Never! {
+    if delimiter == ',' { "comma" } else { "delimiter" }
+}
+// Rust: crates/jet-foundation/src/CsvKernel.rs:77
+pub struct CsvParser {
+    options: CsvOptions
+    fields: [String]
+    field: String
+    quoted: Bool
+    after_quote: Bool
+    pending_cr: Bool
+    pending_cr_line: Int
+    pending_cr_column: Int
+    record: Int
+    physical_line: Int
+    physical_column: Int
+    record_line: Int
+    record_has_content: Bool
+    ended_record: Bool
+    saw_input: Bool
+}
+impl CsvParser {
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:96
+    pub fn new(options: CsvOptions) -> CsvParser Err! {
+        if options.delimiter == '"' || options.delimiter == '\r' || options.delimiter == '\n' -> return Err(delimiter_error())
+        CsvParser{options: options, fields: [], field: "", quoted: false, after_quote: false,
+            pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1,
+            physical_line: 1, physical_column: 0, record_line: 1,
+            record_has_content: false, ended_record: false, saw_input: false}
+    }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:119
+    pub fn field_len_bytes(self) -> Int Never! { self.field.len() }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:123
+    pub fn current_field(self) -> Int Never! { self.fields.len() }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:127
+    pub fn current_record(self) -> Int Never! { self.record }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:131
+    pub fn line(self) -> Int Never! { self.physical_line }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:135
+    pub fn column(self) -> Int Never! { self.physical_column }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:145
+    pub fn append_len_bytes(self, ch: Char) -> Int Never! {
+        if self.pending_cr {
+            return if self.quoted && ch == '\n' { 2 } else { 0 }
+        }
+        if self.quoted {
+            if self.after_quote -> return if ch == '"' { 1 } else { 0 }
+            return if ch != '"' { ch.len_utf8() } else { 0 }
+        }
+        if ch == '"' || ch == '\r' || ch == '\n' || ch == self.options.delimiter { 0 }
+        else { ch.len_utf8() }
+    }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:163
+    pub fn would_append(self, ch: Char) -> Bool Never! { self.append_len_bytes(ch) != 0 }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:167
+    pub fn capacity_bytes(self) -> Int Never! {
+        // GATE #4494 retained allocation capacity; #4483 selected-target String layout.
+        retained := 0
+        loop field in self.fields { retained += field.capacity() }
+        self.field.capacity().saturating_add(self.fields.capacity().saturating_mul(size_of<String>()))
+            .saturating_add(retained)
+    }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:183
+    pub fn push(&self, ch: Char) -> CsvRecord? CsvError! {
+        self.saw_input = true
+        if self.pending_cr {
+            if ch != '\n' {
+                return Err(self.error_at(CsvErrorKind.Syntax, self.pending_cr_line,
+                    self.pending_cr_column, "bare CR is not a record ending"))
+            }
+            self.pending_cr = false
+            self.physical_column += 1
+            self.physical_line += 1
+            self.physical_column = 0
+            if self.quoted {
+                self.field.push('\r')
+                self.field.push('\n')
+                return None
+            }
+            return self.finish_record()
+        }
+        self.ended_record = false
+        self.physical_column += 1
+        if self.quoted {
+            if self.after_quote {
+                if ch == '"' {
+                    self.field.push('"')
+                    self.after_quote = false
+                    return None
+                }
+                if ch == self.options.delimiter {
+                    self.fields.push(take(&self.field))
+                    self.quoted = false
+                    self.after_quote = false
+                    return None
+                }
+                if ch == '\r' {
+                    self.quoted = false
+                    self.after_quote = false
+                    self.pending_cr = true
+                    self.pending_cr_line = self.physical_line
+                    self.pending_cr_column = self.physical_column
+                    return None
+                }
+                if ch == '\n' {
+                    self.quoted = false
+                    self.after_quote = false
+                    self.physical_line += 1
+                    self.physical_column = 0
+                    return self.finish_record()
+                }
+                return Err(self.error(CsvErrorKind.Syntax,
+                    "only quote, {delimiter_name(self.options.delimiter)}, CRLF, LF, or EOF may follow a closing quote"))
+            }
+            if ch == '"' { self.after_quote = true }
+            else {
+                self.field.push(ch)
+                if ch == '\n' {
+                    self.physical_line += 1
+                    self.physical_column = 0
+                }
+            }
+            return None
+        }
+        if ch == '"' {
+            if !self.field.is_empty() -> return Err(self.error(CsvErrorKind.Syntax, "quote inside an unquoted field"))
+            self.quoted = true
+            self.record_has_content = true
+            return None
+        }
+        if ch == self.options.delimiter {
+            self.fields.push(take(&self.field))
+            return None
+        }
+        if ch == '\r' {
+            self.pending_cr = true
+            self.pending_cr_line = self.physical_line
+            self.pending_cr_column = self.physical_column
+            return None
+        }
+        if ch == '\n' {
+            self.physical_line += 1
+            self.physical_column = 0
+            return self.finish_record()
+        }
+        self.field.push(ch)
+        self.record_has_content = true
+        None
+    }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:292
+    pub fn finish(&self) -> CsvRecord? CsvError! {
+        if self.pending_cr {
+            return Err(self.error_at(CsvErrorKind.Syntax, self.pending_cr_line,
+                self.pending_cr_column, "bare CR is not a record ending"))
+        }
+        if self.quoted && !self.after_quote {
+            return Err(self.error_at(CsvErrorKind.Truncated, self.physical_line,
+                self.physical_column + 1, "quoted field ended before its closing quote"))
+        }
+        if self.ended_record || !self.saw_input -> return None
+        self.quoted = false
+        self.after_quote = false
+        self.finish_record()
+    }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:317
+    fn finish_record(&self) -> CsvRecord? Never! {
+        self.fields.push(take(&self.field))
+        number :: self.record
+        line :: self.record_line
+        has_content :: self.record_has_content
+        self.record += 1
+        self.record_line = self.physical_line
+        self.record_has_content = false
+        self.ended_record = true
+        if self.options.header && number == 1 {
+            self.fields.clear()
+            return None
+        }
+        if self.options.skip_blank && !has_content {
+            self.fields.clear()
+            return None
+        }
+        Val(CsvRecord{fields: take(&self.fields), line: line})
+    }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:341
+    fn error(self, kind: CsvErrorKind, reason: String) -> CsvError Never! {
+        CsvError{kind: kind, record: self.record, line: self.physical_line,
+            column: self.physical_column, field: self.fields.len(), reason: reason}
+    }
+    // Rust: crates/jet-foundation/src/CsvKernel.rs:352
+    fn error_at(self, kind: CsvErrorKind, line: Int, column: Int, reason: String) -> CsvError Never! {
+        CsvError{kind: kind, record: self.record, line: line, column: column,
+            field: self.fields.len(), reason: reason}
+    }
+}
+// Rust: crates/jet-foundation/src/CsvKernel.rs:364
+pub fn parse(text: String, options: CsvOptions) -> [CsvRecord] Err! {
+    parser := CsvParser.new(options)?
+    records := [CsvRecord]{}
+    loop ch in text.chars() {
+        record :: if parser.push(ch) == { .Ok(value) -> value .Err(error) -> return Err(error.message()) }
+        if record == .Val(value) { records.push(^value) }
+    }
+    record :: if parser.finish() == { .Ok(value) -> value .Err(error) -> return Err(error.message()) }
+    if record == .Val(value) { records.push(^value) }
+    records
+}
+// Rust: crates/jet-foundation/src/CsvKernel.rs:378
+pub fn render(rows: [[String]]) -> String Never! {
+    rendered := [String]{}
+    loop row in rows {
+        fields := [String]{}
+        loop field in row {
+            if field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains("\r") {
+                fields.push("\"{field.replace("\"", "\"\"")}\"")
+            } else { fields.push(field) }
+        }
+        rendered.push(fields.join(","))
+    }
+    rendered.join("\n")
+}
