@@ -4099,13 +4099,19 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
         .Ident(_, _) -> true
         else -> false
     }
-    string_view_return := sema_stmt_string_view_type(checked.ty) && (value_is_ident || sema_string_view_call_sources(value, scopes, &state).len() > 0)
-    // Rust keeps checking the move after a refused `View<str>` source (E0120).
-    view_valid := if string_view_return -> sema_string_view_record_return(value, scopes, &state, &context, &diagnostics) else -> sema_stmt_record_return_views(value, checked.ty, scopes, &state, &context, &diagnostics)
+    // Classify the value, not the enclosing Result/Option rail. The failure
+    // solver also wraps an infallible view return in `View<str> Never!`.
+    returned_success :: sema_stmt_return_success_type(Val(checked.ty))
+    string_view_return := sema_stmt_string_view_type(returned_success) && (value_is_ident || sema_string_view_call_sources(value, scopes, &state).len() > 0)
+    materialized_string_view :: sema_string_view_owning_read(value, returned_success, scopes)
+    // An owning materialization returns new storage, not the source window's
+    // provenance. A view return must instead prove its original owner.
+    view_valid := materialized_string_view || if string_view_return -> sema_string_view_record_return(value, scopes, &state, &context, &diagnostics) else -> sema_stmt_record_return_views(value, checked.ty, scopes, &state, &context, &diagnostics)
     // A named `View<T>` boundary reads every bare place through a window
     // (Rust wraps it before the audit), so only other returns are audited.
     if return_type != None && !sema_stmt_return_is_view_boundary(return_type) -> sema_copy_site_check_borrowed_return(value, environment, scopes, context, &diagnostics)
-    moved := (!string_view_return && !view_valid) || sema_stmt_move_direct(value, &state, scopes, "`return`", &diagnostics)
+    // Neither a returned window nor its owning copy moves the window's owner.
+    moved := materialized_string_view || string_view_return || (!view_valid) || sema_stmt_move_direct(value, &state, scopes, "`return`", &diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
 }

@@ -22,6 +22,10 @@ renumber one. Lexer, parser, and semantic checks raise the row that owns the
 violated rule; the CLI, LSP, machine reports, web pages, and backends project
 those rows rather than defining a second message or exposing raw backend text.
 
+Retired marker spellings retain their `$retired` replacement in
+`Prelude/Markers.jet`. Parser recovery must teach that same replacement and
+must not reinterpret a retired foreign import as a binding-generator module.
+
 ## Plain-words rubric
 
 Every active row, and every message builder that fills one, reads in plain
