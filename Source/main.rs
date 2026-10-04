@@ -1470,10 +1470,21 @@ fn named_debug_replay(argv: &[String], command: &str, json: bool) -> Option<Stri
 }
 
 fn parse_gate_flags(argv: &[String], json: bool) -> jet::Policy::GateSet {
+    if let Err(diagnostics) = jet::GateWriters::check_invocation_flags(Path::new("."), argv) {
+        for diagnostic in diagnostics {
+            emit_cli_value(diagnostic, json);
+        }
+        exit(ExitCodes::USER_ERROR);
+    }
     let mut gates = jet::Policy::GateSet::default();
     let mut index = 0;
     while index < argv.len() {
         let argument = &argv[index];
+        match jet::GateWriters::invocation_gate_kind(argument) {
+            Some(jet::Sema::GateLedger::GateKind::BuildFlag) => gates.record_invocation_flag(false),
+            Some(jet::Sema::GateLedger::GateKind::SessionFlag) => gates.record_invocation_flag(true),
+            _ => {}
+        }
         let spec = if let Some(spec) = argument.strip_prefix("--gate=") {
             Some(spec.to_string())
         } else if argument == "--gate" {
@@ -1495,7 +1506,7 @@ fn parse_gate_flags(argv: &[String], json: bool) -> jet::Policy::GateSet {
                         "E2104",
                         "invalid audited gate".to_string(),
                         detail,
-                        "use `--gate unsafe=allow`, `--gate impure=allow`, or `--gate nondeterministic=allow`".to_string(),
+                        "use `--gate <gate-kind>=allow`; gate kinds are listed by `jet inspect gates`".to_string(),
                         json,
                     );
                     exit(ExitCodes::USAGE);

@@ -236,8 +236,7 @@ fn exceptions_are_limited_to_expert_or_negative_sources() {
             })
             .expect("exception source is classified");
         assert!(
-            exception.site.starts_with("allow:")
-                || matches!(source.role, SourceRole::ExpertLesson | SourceRole::NegativeDiagnostic),
+            matches!(source.role, SourceRole::ExpertLesson | SourceRole::NegativeDiagnostic),
             "{} is classified as {:?} without an allowance site",
             exception.selector,
             source.role
@@ -306,15 +305,19 @@ fn cli_boundary_rules_cover_builder_views_and_repeated_process_reads() {
 }
 
 #[test]
-fn maintained_guidance_allow_requires_an_occurrence_manifest_row() {
+fn maintained_guidance_allow_explains_itself_at_the_source_site() {
     let policy = CorpusPolicy::load().unwrap();
     let error = policy
         .evaluate_source(
             "Examples/features/text/unreviewed_allow.jet",
             "fn run() { #allow(unit_scalar_rewrap) print(\"kept\") }",
         )
-        .expect_err("maintained guidance allowance must be recorded");
-    assert!(error.contains("occurrence-scoped manifest reason"), "{error}");
+        .expect_err("maintained guidance allowance must explain itself");
+    assert!(error.contains("reason at its source site"), "{error}");
+    policy.evaluate_source(
+        "Examples/features/text/reviewed_allow.jet",
+        "fn run() { #allow(unit_scalar_rewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }",
+    ).expect("a source reason needs no manifest exception");
 }
 
 #[test]

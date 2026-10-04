@@ -74,7 +74,7 @@ impl<'a> Checker<'a> {
                     } else {
                         "binding is never read"
                     },
-                    Some("_name".to_string()),
+                    None,
                 ));
             let code = if binding.parameter { "L0102" } else { "L0101" };
             let name = binding.name.as_str();

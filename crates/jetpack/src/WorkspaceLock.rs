@@ -21,7 +21,32 @@ use std::path::Path;
 /// Creates `.jet/` if it doesn't exist. A failed write is returned to the
 /// caller because a stale or partial workspace lock must never masquerade as
 /// a valid index.
-pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> {
+pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), Vec<crate::Diagnostics::Diagnostic>> {
+    let forced = plan.overlay_policy.overlays.iter().any(|overlay| {
+        overlay.packages.iter().any(jet_driver::GateWriters::is_forced_override)
+    });
+    let granted = plan.overlay_policy.build_grants.iter().any(|(_, effects)| !effects.is_empty());
+    if forced || granted {
+        let declarations = jet_driver::Loader::project_gate_declarations(workspace_root)?;
+        let mut diagnostics = Vec::new();
+        for overlay in &plan.overlay_policy.overlays {
+            for package in &overlay.packages {
+                if !jet_driver::GateWriters::is_forced_override(package) { continue; }
+                if let Some(diagnostic) = jet_foundation::Policy::gate_refusal(
+                    jet_foundation::Policy::PolicyKey::ForcePin,
+                    &format!("workspace.jet overlay {} package {} .Force", overlay.name, package.package), None, &declarations,
+                ) { diagnostics.push(diagnostic); }
+            }
+        }
+        for (subject, effects) in &plan.overlay_policy.build_grants {
+            if effects.is_empty() { continue; }
+            if let Some(diagnostic) = jet_foundation::Policy::gate_refusal(
+                jet_foundation::Policy::PolicyKey::DependencyGrant,
+                &format!("workspace.jet build grant {subject}"), None, &declarations,
+            ) { diagnostics.push(diagnostic); }
+        }
+        if !diagnostics.is_empty() { return Err(diagnostics); }
+    }
     super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
         let resolver = AuthorityResolver::open(workspace_root).map_err(|error| {
             std::io::Error::new(
@@ -217,7 +242,10 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
         Lock::write_lock_atomically(workspace_root, Lock::write(&lock).as_bytes())
             .map_err(std::io::Error::other)
     })
-    .map_err(|error| format!("could not write workspace lock: {error}"))
+    .map_err(|error| vec![crate::Lock::e1202_workspace_write(
+        &workspace_root.join(WORKSPACE_LOCK).display().to_string(),
+        &format!("could not write workspace lock: {error}"),
+    )])
 }
 
 fn empty_lock() -> LockFile {

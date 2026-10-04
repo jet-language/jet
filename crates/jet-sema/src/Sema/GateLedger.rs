@@ -71,11 +71,46 @@ impl GateLedger {
         );
 
         for module in &bundle.modules {
+            for import in &module.imports {
+                record_structure_name(&module.display, &import.alias, import.alias_span, &mut ledger);
+            }
             visit_statements(&module.display, &module.script_body, &mut ledger, &context);
             visit_items(&module.display, &module.items, &mut ledger, &context);
+            for application in &module.rule_facts {
+                if application.marker.name != crate::Syntax::MARKER_ALLOW {
+                    continue;
+                }
+                let reason = literal_text(application.marker.expr_arg(1)).or_else(|| {
+                    let expression = application.marker.expr_arg(1)?;
+                    module.source.get(expression.span().start..expression.span().end).map(str::to_string)
+                });
+                ledger.push(source_entry(
+                    GateKind::LintAllow,
+                    "lint",
+                    application.site.map_or("source", |site| site.name()),
+                    &module.display,
+                    application.marker.span,
+                    "#allow",
+                    reason.clone(),
+                    &format!("{:?}", application.marker.expr_arg(0)),
+                    if application.marker.expr_arg(1).is_some() { "recorded" } else { "missing" },
+                ));
+            }
         }
         append_fact_gates(&mut ledger, &bundle.build_facts);
         ledger.append_structure_facts(&bundle.name_ledger);
+        for (session, kind) in [(false, GateKind::BuildFlag), (true, GateKind::SessionFlag)] {
+            if gates.has_invocation_flag(session) {
+                ledger.push(GateEntry {
+                    kind, domain: "security".to_string(),
+                    scope: if session { "session" } else { "build" }.to_string(),
+                    source: "command line".to_string(), span: None,
+                    subject: "invocation flags".to_string(), reason: None,
+                    status: Some("recorded".to_string()), detail: "written invocation choice".to_string(),
+                    provenance: vec!["command line".to_string()], operations: Vec::new(),
+                });
+            }
+        }
         ledger.sort();
         ledger
     }
@@ -86,6 +121,46 @@ impl GateLedger {
 
     pub fn diagnostics(&self) -> &[GateDiagnostic] {
         self.inner.diagnostics()
+    }
+
+    /// Enforce the ledger's new policy kinds using each site's owning package.
+    /// Unsafe, impure and nondeterministic retain their specialized checks.
+    pub fn policy_diagnostics(&self, bundle: &ProgramBundle) -> Vec<crate::Diagnostics::Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for entry in self.entries() {
+            let key = entry.kind.policy_key();
+            if matches!(key, crate::Policy::PolicyKey::Unsafe
+                | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic) {
+                continue;
+            }
+            let module = bundle.modules.iter().find(|module| {
+                module.display == entry.source || module.path.to_string_lossy() == entry.source
+            }).unwrap_or(&bundle.modules[bundle.entry]);
+            let site = entry.span.map_or_else(
+                || format!("{} ({})", entry.source, entry.subject),
+                |span| format!("{}:{}..{} ({})", entry.source, span.start, span.end, entry.subject),
+            );
+            if let Some(mut diagnostic) = crate::Policy::gate_refusal(
+                key, &site, entry.span, &module.policy_declarations,
+            ) {
+                diagnostic.set_origin(std::sync::Arc::new(
+                    jet_foundation::Diagnostics::DiagnosticOrigin::new(
+                        module.display.clone(), module.path.to_string_lossy().into_owned(), module.source.clone(),
+                    ),
+                ));
+                diagnostics.push(diagnostic);
+            }
+        }
+        diagnostics
+    }
+
+    pub fn has_new_refusal(bundle: &ProgramBundle) -> bool {
+        bundle.modules.iter().any(|module| module.policy_declarations.iter().any(|declaration| {
+            declaration.value == crate::Policy::PolicyValue::Forbid
+                && declaration.key.is_audited_gate()
+                && !matches!(declaration.key, crate::Policy::PolicyKey::Unsafe
+                    | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic)
+        }))
     }
 
     pub fn set_diagnostics(&mut self, diagnostics: Vec<GateDiagnostic>) {
@@ -187,6 +262,15 @@ fn source_entry(
         detail: detail.to_string(),
         provenance: vec![format!("{}:{}..{}", source, span.start, span.end)],
         operations: Vec::new(),
+    }
+}
+
+fn record_structure_name(source: &str, name: &str, span: Span, ledger: &mut GateLedger) {
+    if name.starts_with('_') && !name.starts_with(crate::Syntax::GENERATED_NAME_PREFIX) {
+        ledger.push(source_entry(
+            GateKind::Structure, "structure", "liveness", source, span, name,
+            None, "written underscore name suppresses unused-name guidance", "recorded",
+        ));
     }
 }
 
@@ -315,6 +399,12 @@ fn visit_function(
     ledger: &mut GateLedger,
     context: &GateContext<'_>,
 ) {
+    if !function.compiler_generated {
+        record_structure_name(source, &function.name, function.name_span, ledger);
+    }
+    for parameter in &function.params {
+        record_structure_name(source, &parameter.name, parameter.name_span, ledger);
+    }
     if let Some(transition) = &function.state_transition {
         let from = transition.from.as_deref().unwrap_or("_");
         let spelling = format!("#Transition({from}, {})", transition.to);
@@ -635,6 +725,7 @@ fn literal_text(expression: Option<&Expr>) -> Option<String> {
 fn visit_statement_gates(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
     for statement in body {
         match statement {
+            Stmt::Val(binding) => record_structure_name(source, &binding.name, binding.name_span, ledger),
             Stmt::Impure { reason, span, .. } => ledger.push(source_entry(
                 GateKind::Impure,
                 "security",

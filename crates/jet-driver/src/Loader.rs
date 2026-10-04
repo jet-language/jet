@@ -386,6 +386,33 @@ pub fn package_facts_for_root(
     Ok(facts)
 }
 
+/// D-GATE-LAW1=A: refuse a concrete external writer before it mutates state.
+/// Uses the same checked Package carrier and organization floor as source loading.
+pub fn check_project_gate(
+    root: &Path,
+    key: crate::Policy::PolicyKey,
+    site: &str,
+) -> Result<(), Vec<Diagnostic>> {
+    let declarations = project_gate_declarations(root)?;
+    if let Some(diagnostic) = crate::Policy::gate_refusal(key, site, None, &declarations) {
+        return Err(vec![diagnostic]);
+    }
+    Ok(())
+}
+
+pub fn project_gate_declarations(root: &Path) -> Result<Vec<crate::Policy::PolicyDeclaration>, Vec<Diagnostic>> {
+    let mut declarations = load_organization_policy()
+        .map_err(|error| record_loader_error(&mut None, error))?;
+    if let Some(facts) = package_facts_for_root(root)? {
+        let source = facts.origin;
+        declarations.extend(facts.policy.declarations.into_iter().map(|mut declaration| {
+            declaration.source = source.clone();
+            declaration
+        }));
+    }
+    Ok(declarations)
+}
+
 fn package_facts_from_resolver(
     resolver: &AuthorityResolver,
 ) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
@@ -3012,7 +3039,7 @@ fn load_organization_policy() -> Result<Vec<crate::Policy::PolicyDeclaration>, L
                 "E3109",
                 "the organization gate policy has the wrong shape".to_string(),
                 "this admin input contains only the shared audited-gate fields".to_string(),
-                "use `policy: { unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }` (with any subset of those fields)".to_string(),
+                "use `policy: { gate_kind: .Forbid }` with any subset of the fourteen audited gate policy keys".to_string(),
                 None,
             )],
         ));

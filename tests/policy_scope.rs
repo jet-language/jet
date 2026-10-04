@@ -351,7 +351,7 @@ fn audited_gate_invocations_are_allowed_under_tightening_modes() {
     for key in jet::Policy::AUDITED_GATE_KEYS {
         let declaration = jet::Policy::PolicyDeclaration {
             key: *key,
-            value: jet::Policy::PolicyValue::Obligations,
+            value: jet::Policy::PolicyValue::GateOnly,
             scope: jet::Policy::PolicyScope::Organization,
             span: jet::Diagnostics::Span::new(0, 0),
             target: None,
@@ -374,7 +374,7 @@ fn audited_gate_invocations_are_allowed_under_tightening_modes() {
 fn audited_gate_ladder_example_allows_and_refuses_each_marker() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("Examples/features/effects/audited_gate_ladder.jet");
-    for key in jet::Policy::AUDITED_GATE_KEYS {
+    for key in &[jet::Policy::PolicyKey::Unsafe, jet::Policy::PolicyKey::Impure, jet::Policy::PolicyKey::Nondeterministic] {
         let mut allowed = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
         let mut all = jet::Policy::GateSet::default();
         for allowed_key in jet::Policy::AUDITED_GATE_KEYS {

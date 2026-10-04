@@ -1821,6 +1821,17 @@ fn apply_native_effect_policy(
                     error,
                 ),
             };
+            if manifest.authority.grants.iter().any(|(_, effects)| !effects.is_empty())
+                || manifest.authority.holds.allow.as_ref().is_some_and(|effects| !effects.is_empty())
+            {
+                if let Err(diagnostics) = jet::Loader::check_project_gate(
+                    root, jet::Policy::PolicyKey::DependencyGrant,
+                    &format!("{} dependency grants", lock_path.display()),
+                ) {
+                    report_problems(mode, file, src, &diagnostics);
+                    exit(ExitCodes::USER_ERROR);
+                }
+            }
             jet::EffectBudget::update_lock_provenance(&mut lock, entries, manifest);
             let replacement = jet::Lock::write(&lock);
             if let Err(error) = transaction.replace_file(&lock_snapshot, replacement.as_bytes()) {

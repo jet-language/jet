@@ -1479,7 +1479,7 @@ fn semindex_dossier_bypass_facts() {
     // `#[allow(lint)]` — surfaces as a fact in the dossier, program-wide.
     let src = r#"
 struct Invoice {
-    #allow(float_money)
+    #allow(float_money, "the inspection fixture deliberately accepts floating-point money")
     price: Float,
 }
 

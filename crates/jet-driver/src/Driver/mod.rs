@@ -330,13 +330,18 @@ fn append_authority_grants(
 
 fn apply_package_lint_policy(
     bundle: &crate::AST::ProgramBundle,
-    diagnostics: Vec<Diagnostic>,
+    mut diagnostics: Vec<Diagnostic>,
 ) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
     let deny = bundle
         .package_guarantees
         .lints_deny
         .as_deref()
         .unwrap_or_default();
+    if crate::Sema::GateLedger::GateLedger::has_new_refusal(bundle) {
+        let mut ledger = crate::Sema::GateLedger::GateLedger::default();
+        crate::GateWriters::append_package_writers(&mut ledger, bundle);
+        diagnostics.extend(ledger.policy_diagnostics(bundle));
+    }
     Ok(jet_foundation::LintPolicy::apply(deny, diagnostics))
 }
 
@@ -4366,7 +4371,7 @@ fn compile_build_from_front_end(
     //
     // The re-check below runs the same projection before runtime emission and
     // for project-check; static graph queries stop before codegen.
-    apply_application_authority(&mut bundle, options.application_authority.as_ref());
+    apply_application_authority(&mut bundle, options.application_authority.as_ref())?;
     crate::Sema::strip_build_only_entries(&mut bundle);
 
     // The selected target source closure and generated modules are a fresh
@@ -6670,10 +6675,20 @@ fn emit_web_from_mir(
 fn apply_application_authority(
     bundle: &mut crate::AST::ProgramBundle,
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-) {
+) -> Result<(), Vec<Diagnostic>> {
     let Some(invocation_authority) = invocation_authority else {
-        return;
+        return Ok(());
     };
+    if !invocation_authority.granted_effects.is_empty() {
+        let declarations = &bundle.modules[bundle.entry].policy_declarations;
+        for key in [crate::Policy::PolicyKey::BuildFlag, crate::Policy::PolicyKey::DependencyGrant] {
+            if let Some(diagnostic) = crate::Policy::gate_refusal(
+                key, &invocation_authority.authority, None, declarations,
+            ) {
+                return Err(vec![diagnostic]);
+            }
+        }
+    }
     let authority = &mut bundle.package_guarantees.application_authority;
     authority
         .granted_effects
@@ -6687,6 +6702,7 @@ fn apply_application_authority(
     authority
         .authority
         .push_str(&invocation_authority.authority);
+    Ok(())
 }
 
 /// Check an immutable source closure for native artifact lowering without
@@ -6891,7 +6907,7 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
         None
     };
 
-    apply_application_authority(&mut bundle, application_authority);
+    apply_application_authority(&mut bundle, application_authority)?;
     let request = mir_artifact_request_for_build(
         &bundle,
         mode,

@@ -1656,7 +1656,7 @@ fn subject_shorthand_nesting_lint_and_allow() {
 fn run() {
     words := [["a", "bb"]]
     print(words.map(.map(.len())))
-    #allow(subject_shorthand_nesting) print(words.map(.map(.len())))
+    #allow(subject_shorthand_nesting, "the second occurrence exercises local suppression") print(words.map(.map(.len())))
 }
 "#;
     let compiled = jet::compile(source).expect("nested subject shorthand should remain legal");
@@ -1681,7 +1681,7 @@ fn redundant_fixed_cleanup_lint_has_exact_fix_and_allow() {
 fn run() {
     value :: Float{1234.5}
     print("{value:Fixed(2)}".replace(",", ""))
-    #allow(redundant_fixed_cleanup) print("{value:Fixed(2)}".replace(",", ""))
+    #allow(redundant_fixed_cleanup, "the second occurrence exercises local suppression") print("{value:Fixed(2)}".replace(",", ""))
     print("{value:Grouped(2)}".replace(",", ""))
     print("1,234".replace(",", ""))
     print("{value:Fixed(2)}".replace(",", ","))

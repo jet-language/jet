@@ -7,7 +7,7 @@ fn busy_spin(flag: Shared<Flag>, _changed: Condition) {
 }
 
 fn allowed_spin(flag: Shared<Flag>) {
-    #allow(shared_busy_wait) loop flag.ready == false {}
+    #allow(shared_busy_wait, "the fixture exercises suppression of this occurrence") loop flag.ready == false {}
 }
 
 fn finite(flag: Shared<Flag>) {
