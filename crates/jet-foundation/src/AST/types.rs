@@ -146,24 +146,25 @@ fn escape_axis(axis: &str) -> String {
 
 fn unescape_axis(axis: &str) -> Option<String> {
     let bytes = axis.as_bytes();
-    let mut out = String::with_capacity(axis.len());
+    let mut out = Vec::with_capacity(axis.len());
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] != b'%' {
-            out.push(bytes[index] as char);
+            out.push(bytes[index]);
             index += 1;
             continue;
         }
         let code = axis.get(index + 1..index + 3)?;
         out.push(match code {
-            "25" => '%',
-            "3B" => ';',
-            "3A" => ':',
+            "25" => b'%',
+            "3B" => b';',
+            "3A" => b':',
             _ => return None,
         });
         index += 3;
     }
-    Some(out)
+    // Decode once after unescaping so non-ASCII nominal axes retain their UTF-8.
+    String::from_utf8(out).ok()
 }
 
 /// One compile-time number attached to a type. The measure plane owns the
@@ -3135,5 +3136,14 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn dimension_identity_round_trips_unicode_and_escaped_axes() {
+        for axis in ["mètre", "距離", "λ%;:"] {
+            let dimension = Dimension::base(axis);
+            assert_eq!(Dimension::from_identity(&dimension.identity()), Some(dimension));
+        }
+        assert_eq!(super::unescape_axis("%FF"), None);
     }
 }
