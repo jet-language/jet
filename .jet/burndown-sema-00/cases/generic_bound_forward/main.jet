@@ -1,0 +1,29 @@
+// A bounded type parameter forwarded to local and registered module generics,
+// both with an explicit type argument and with inference.
+use bound_support
+use bound_support.[Shape]
+
+struct Square {
+    side: Int
+}
+
+impl Square.Shape {
+    fn area(self) -> Int { self.side * self.side }
+}
+
+fn inner<P: Shape>(shape: P) -> Int { shape.area() }
+
+fn outer_explicit<P: Shape>(shape: P) -> Int { inner<P>(shape) }
+
+fn outer_inferred<P: Shape>(shape: P) -> Int { inner(shape) }
+
+fn registered_explicit<P: Shape>(shape: P) -> Int { bound_support.registered_inner<P>(shape) }
+
+fn registered_inferred<P: Shape>(shape: P) -> Int { bound_support.registered_inner(shape) }
+
+fn run() {
+    print(outer_explicit(Square{side: 3}))
+    print(outer_inferred(Square{side: 3}))
+    print(registered_explicit(Square{side: 3}))
+    print(registered_inferred(Square{side: 3}))
+}

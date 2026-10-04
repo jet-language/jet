@@ -1,0 +1,22 @@
+// An immutable binding cannot hold a cursor that `next` advances.
+struct BagIter {
+    items: [Int]
+    at: Int
+}
+
+impl BagIter.Iterator {
+    type Item = Int
+
+    fn next(&self) -> Int? {
+        if self.at >= self.items.len() -> return None
+        v :: self.items[self.at]
+        self.at += 1
+        Val(v)
+    }
+}
+
+fn run() {
+    cur :: BagIter{items: [10, 20], at: 0}
+    a :: &cur.next()
+    print("{a ?? 0}")
+}

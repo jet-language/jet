@@ -1,0 +1,11 @@
+// A forwarded type parameter satisfies a callee bound only when it declares
+// that bound itself: `outer`'s `P` has no `Shape` bound.
+trait Shape {
+    fn area(self) -> Int
+}
+
+fn inner<P: Shape>(shape: P) -> Int { shape.area() }
+
+fn outer<P>(shape: P) -> Int { inner<P>(shape) }
+
+fn run() {}

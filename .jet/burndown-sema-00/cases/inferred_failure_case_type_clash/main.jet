@@ -1,0 +1,16 @@
+// D-ERR-CASES1=A: the cases `find_person` creates form `FindPersonError`.
+// A declared type already uses that name, so the function must write its
+// failure contract instead.
+#Error
+enum FindPersonError {
+    Missing
+}
+
+fn find_person(book: [String:String], name: String) -> String {
+    if book.has_key(name) -> return book[name]
+    Err(.NotFound(~name))
+}
+
+fn run() {
+    print(find_person(["ada": "36"], "zed") ?? "none")
+}

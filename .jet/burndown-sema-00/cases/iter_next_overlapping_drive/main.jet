@@ -1,0 +1,11 @@
+// D-ITER-RESUME1=A: a loop that drives `items` holds it for the whole body, so
+// pulling from the same source inside the body is an overlapping mutable drive.
+// The checker rejects it before any backend runs.
+fn run() {
+    items := [1, 2, 3].lazy()
+    loop x in &items {
+        pulled :: &items.next()
+        print(x)
+        print(pulled)
+    }
+}
