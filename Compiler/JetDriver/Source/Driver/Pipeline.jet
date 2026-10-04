@@ -146,6 +146,7 @@ use jet_sema.[
     sema_comptime_graph_apply_values,
     sema_comptime_graph_with_values,
     sema_comptime_modules_with_values,
+    sema_comptime_staged_constant_rows,
     sema_finalize_registration_graph,
     sema_function_memory_plan_from_graph,
     sema_hardware_use_merge,
@@ -165,6 +166,7 @@ use jet_codegen.[
     JetWebEmitConfig,
     jet_codegen_collect_type_instances,
     jet_codegen_comptime_session,
+    jet_codegen_comptime_session_add_constants,
     jet_codegen_move_function_rows,
     jet_codegen_reachable_core_rows,
     jet_codegen_sorted_order,
@@ -1841,16 +1843,18 @@ fn jet_driver_run_comptime(
     // Checked functions whose checked-text calls were already queued; the
     // run's checked functions only grow, so each is scanned once.
     scanned_functions := 0
-    // Declaration checks of every module under the staged values. An item
-    // that names no staged constant and calls no function cannot observe a
-    // value's type, so it reuses the last checks; any other item rechecks
-    // when a value landed since them.
+    // Declaration checks of every module under the staged values, run once:
+    // a value that lands later changes only its own constant's row
+    // (sema_comptime_staged_constant_rows), which joins the lowering session
+    // in place. An item that names no staged constant and calls no function
+    // cannot observe a value, so it lowers against the last staged rows; any
+    // other item first takes the rows of the values that landed since them.
     staged_runtime_modules := [SemaGraphModuleResult]{}
-    // The lowering session of the current staged set: Codegen owns the staged
-    // modules (moved in, never copied per item) and their indexes.
+    // The lowering session of the staged set: Codegen owns the staged modules
+    // (moved in, never copied per item) and their indexes.
     codegen := JetDriverComptimeCodegen{session: None}
-    // Foreign rows read only the staged runtime modules and the run's artifact
-    // target, so they are lowered once per staged set.
+    // Foreign rows read only the staged runtime modules, which staged values
+    // never change, and the run's artifact target, so they are lowered once.
     staged_foreign := JetCodegenForeignArtifacts?{None}
     staged_count := -1
     loop pending.len() > 0 {
@@ -1967,10 +1971,11 @@ fn jet_driver_run_comptime(
                 }
             }
             scanned_functions = checked_functions.len()
-            if staged_count < 0 || (values.len() != staged_count && (comptime_request.dependencies.len() > 0 || closure.functions.len() > 0)) {
+            landed_since_staging := values.len() != staged_count && (comptime_request.dependencies.len() > 0 || closure.functions.len() > 0)
+            if staged_count < 0 || landed_since_staging {
                 // The environment's graph already carries every value so far:
                 // values land only after this item's checks. It is moved out
-                // for the declaration checks and back, never copied.
+                // for the staging and back, never copied.
                 registered := ^environment.registration_graph
                 environment.registration_graph = None
                 staged_graph := ^registered ?? {
@@ -1978,18 +1983,30 @@ fn jet_driver_run_comptime(
                     result.internal_problem = Val("the staged comptime environment lost its registration graph")
                     return result
                 }
-                staged_modules := sema_comptime_modules_with_values(staged_graph, values)
-                environment.registration_graph = Val(^staged_graph)
-                if staged_modules.len() != graph.modules.len() {
-                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the staged comptime declaration graph lost a registered module", "temporary interpreter MIR retains every module identity from the registered graph", "preserve the complete resolved module set while applying staged values"))
-                    return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                if staged_count < 0 {
+                    staged_modules := sema_comptime_modules_with_values(staged_graph, values)
+                    environment.registration_graph = Val(^staged_graph)
+                    if staged_modules.len() != graph.modules.len() {
+                        &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the staged comptime declaration graph lost a registered module", "temporary interpreter MIR retains every module identity from the registered graph", "preserve the complete resolved module set while applying staged values"))
+                        return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                    }
+                    loop runtime_module in staged_modules {
+                        if runtime_module.module_identity != graph.canonical_effect_module_identity -> &staged_runtime_modules.push(runtime_module)
+                    }
+                    codegen.session = Val(jet_codegen_comptime_session(^staged_modules, load.source_files))
+                } else {
+                    staged_rows := sema_comptime_staged_constant_rows(staged_graph, values, staged_count)
+                    environment.registration_graph = Val(^staged_graph)
+                    taken_staged := ^codegen.session
+                    codegen.session = None
+                    staged_session := ^taken_staged ?? {
+                        result := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                        result.internal_problem = Val("the staged comptime lowering session was lost")
+                        return result
+                    }
+                    jet_codegen_comptime_session_add_constants(&staged_session, staged_rows)
+                    codegen.session = Val(^staged_session)
                 }
-                staged_runtime_modules = [SemaGraphModuleResult]{}
-                loop runtime_module in staged_modules {
-                    if runtime_module.module_identity != graph.canonical_effect_module_identity -> &staged_runtime_modules.push(runtime_module)
-                }
-                codegen.session = Val(jet_codegen_comptime_session(^staged_modules, load.source_files))
-                staged_foreign = None
                 staged_count = values.len()
             }
             taken_session := ^codegen.session

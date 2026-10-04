@@ -2225,14 +2225,24 @@ fn jet_codegen_comptime_item_function(request: SemaComptimeItemRequest, modules:
 
 // The lowering inputs of one staged module set, kept by a comptime run across
 // its items: the builder owns the modules (moved in once), their owner, field
-// and source indexes, all built once here. Each item lowers its closure and
-// itself on this one builder; per item only the closure-sized function index
-// and closure method set change, never a whole-program walk.
+// and source indexes, all built once here, and the staged values that land
+// later join it in place (jet_codegen_comptime_session_add_constants). Each
+// item lowers its closure and itself on this one builder; per item only the
+// closure-sized function index and closure method set change, never a
+// whole-program walk.
 pub struct JetCodegenComptimeSession {
     builder: JetCodegenBuilder
     // The staged modules' constant rows (jet_codegen_lower_constant_rows),
-    // lowered once per session; each item's program takes a copy.
+    // kept in canonical order; each item's program takes a copy.
     constants: [MIRConstantDef]
+    // The staged modules' declared types (jet_codegen_declared_type_slots),
+    // lowered once against no function: each item's program takes these rows
+    // and relowers only the definitions whose methods its closure lowers and
+    // those with a CLI entry or binding (jet_codegen_comptime_types).
+    type_slots: [JetCodegenTypeSlot]
+    // Qualified method key (jet_codegen_qualified_function_key) -> the
+    // positions in `type_slots` of the rows that list that method.
+    method_slots: [String:[Int]]
 }
 
 pub struct JetCodegenComptimeLowering {
@@ -2245,11 +2255,84 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
     source_index := jet_codegen_source_index(source_files)
     function_index := jet_codegen_function_index([TFunc]{})
     constants := jet_codegen_lower_constant_rows(modules)
+    // With no function and `closure_only`, a type row lists no method: the
+    // row any closure that lowers none of its methods also gets.
+    type_slots := jet_codegen_declared_type_slots(function_index, modules, true, true)
+    method_slots := [String:[Int]]{}
+    loop position in 0..<type_slots.len() {
+        slot :: type_slots[position]
+        if slot.module_index < 0 || slot.row == None -> next
+        definition :: modules[slot.module_index].declarations.type_defs[slot.definition_index]
+        method_keys := if definition.kind == {
+            .Struct(_, methods) | .Enum(_, methods) -> methods
+            else -> [String]{}
+        }
+        loop key in method_keys {
+            qualified :: jet_codegen_qualified_function_key(definition.module_identity, key)
+            positions := method_slots.get(qualified) ?? [Int]{}
+            &positions.push(position)
+            method_slots[qualified] = positions
+        }
+    }
     // Every lowering replaces this first function (jet_codegen_begin_function).
     first := jet_codegen_comptime_item_tfunc("", "", "", "", Span{start: 0, end: 0}, Type.Named{name: "Unit"})
     builder := jet_codegen_new_builder(first, ^function_index, ^modules, ^field_symbols, source_files, ^source_index)
     builder.owners.closure_only = true
-    JetCodegenComptimeSession{builder: ^builder, constants: ^constants}
+    JetCodegenComptimeSession{builder: ^builder, constants: ^constants, type_slots: ^type_slots, method_slots: ^method_slots}
+}
+
+// Joins the checked rows of staged constants that landed after the session
+// was built (sema_comptime_staged_constant_rows) to its modules, constant
+// index and constant rows, exactly as building the session with them would:
+// lowering finds a module constant only by its symbol key, and constant rows
+// keep canonical ID order, so where a row joins is unobservable. A key that
+// already has a row keeps it, as the first staged value of a key wins.
+pub fn jet_codegen_comptime_session_add_constants(session: &JetCodegenComptimeSession, definitions: [TConstantDef]) {
+    added := false
+    loop definition in definitions {
+        key :: jet_codegen_constant_symbol_key(definition)
+        if session.builder.owners.constants.rows.get(key) != None -> next
+        module_index := -1
+        loop index in 0..<session.builder.modules.len() {
+            if session.builder.modules[index].module_identity == definition.module_identity {
+                module_index = index
+                break
+            }
+        }
+        if module_index < 0 -> panic("a staged comptime constant has no staged module")
+        _ := &session.builder.owners.constants.rows.add(key, JetCodegenConstantRow{module_index: module_index, definition_index: session.builder.modules[module_index].declarations.constants.len()})
+        &session.builder.modules[module_index].declarations.constants.push(definition)
+        lowered :: jet_codegen_lower_constant_definition(definition, session.builder.modules) ?? next
+        &session.constants.push(lowered)
+        added = true
+    }
+    if added -> jet_codegen_sort_constant_definitions(&session.constants)
+}
+
+// The declared type rows of one closure's program: the session's rows, with
+// each definition whose methods the closure lowers, or that has a CLI entry
+// or binding, lowered against the closure (jet_codegen_lower_type_definition
+// with `closure_only`). Every other definition lowers to its session row,
+// because none of its methods is in the closure's function index.
+fn jet_codegen_comptime_types(session: JetCodegenComptimeSession) -> [MIRTypeDef] {
+    named := (loop _ in session.type_slots -> false)
+    loop function in session.builder.function_index.rows {
+        positions :: session.method_slots.get(jet_codegen_qualified_function_key(function.module_identity, function.key)) ?? next
+        loop position in positions -> named[position] = true
+    }
+    types := [MIRTypeDef]{}
+    loop position in 0..<session.type_slots.len() {
+        slot :: session.type_slots[position]
+        if !named[position] {
+            if slot.row == .Val(row) {
+                &types.push(row)
+                next
+            }
+        }
+        definition :: session.builder.modules[slot.module_index].declarations.type_defs[slot.definition_index]
+        &types.push(jet_codegen_lower_type_definition(definition, session.builder.function_index, session.builder.modules, true))
+    }
+    types
 }
 
 // The temporary interpreter lowering of one comptime item: its checked
@@ -2265,7 +2348,8 @@ pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, request: Sema
     session.builder.function_index = jet_codegen_function_index(~functions)
     rows := jet_codegen_lower_each_function(&session.builder, functions, None)
     constants := session.constants
-    lowered := jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, true, ^constants)
+    types := jet_codegen_comptime_types(session)
+    lowered := jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, ^types, ^constants)
     item_function := jet_codegen_comptime_item_function(request, session.builder.modules)
     item := jet_codegen_lower_function(&session.builder, item_function, [TStmt]{}, Val(request.expression), None)
     JetCodegenComptimeLowering{functions: lowered, item: item}
@@ -2908,13 +2992,14 @@ fn jet_codegen_retain_selected_derives(types: &[MIRTypeDef], impls: [MIRImplDef]
         if implementation.self_type.identity == .Val(self_id) -> selected["{trait_ref.id.value}:{self_id.value}"] = true
         if implementation.self_type.kind == .Apply(name, _) -> selected["{trait_ref.id.value}:{name.id.value}"] = true
     }
+    native := jet_codegen_native_rust_derive_ids()
     loop index in 0..<types.len() {
         derives :: types[index].derives
         if derives.len() == 0 -> next
         type_id :: types[index].id
         kept := [MIRTraitID]{}
         loop trait_id in derives {
-            if jet_codegen_native_rust_derive_name_for_id(trait_id) != None || selected.get("{trait_id.value}:{type_id.value}") != None -> &kept.push(trait_id)
+            if native.get(trait_id.value) != None || selected.get("{trait_id.value}:{type_id.value}") != None -> &kept.push(trait_id)
         }
         if kept.len() != derives.len() -> types[index].derives = kept
     }
@@ -3047,7 +3132,9 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], trace_sink: CompilerTraceSink?) -> JetCodegenFunctions {
     if functions.len() == 0 {
         constants := jet_codegen_lower_constant_rows(modules)
-        return jet_codegen_functions_from_rows([JetCodegenLoweredFunction]{}, functions, jet_codegen_function_index([TFunc]{}), modules, false, ^constants)
+        empty_index := jet_codegen_function_index([TFunc]{})
+        types := jet_codegen_declared_type_rows(empty_index, modules)
+        return jet_codegen_functions_from_rows([JetCodegenLoweredFunction]{}, functions, empty_index, modules, ^types, ^constants)
     }
     rows := [TFunc]{}
     jet_codegen_move_function_rows(&rows, &functions)
@@ -3060,7 +3147,8 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
     builder := jet_codegen_new_builder(first, ^function_index, ^builder_modules, ^field_symbols, source_files, ^source_index)
     lowered_rows := jet_codegen_lower_indexed_functions(&builder, trace_sink)
     constants := jet_codegen_lower_constant_rows(builder.modules)
-    lowered := jet_codegen_functions_from_rows(lowered_rows, builder.function_index.rows, builder.function_index, builder.modules, false, ^constants)
+    types := jet_codegen_declared_type_rows(builder.function_index, builder.modules)
+    lowered := jet_codegen_functions_from_rows(lowered_rows, builder.function_index.rows, builder.function_index, builder.modules, ^types, ^constants)
     jet_codegen_move_function_rows(&functions, &builder.function_index.rows)
     jet_codegen_move_module_rows(&modules, &builder.modules)
     lowered
@@ -3120,12 +3208,90 @@ fn jet_codegen_lower_each_function(builder: &JetCodegenBuilder, functions: [TFun
     lowered_rows
 }
 
+// One declared type row of a program, in program order: the definition's row,
+// or None for a comptime session's definition with a CLI entry or binding,
+// whose function IDs only a closure can lower. `module_index` and
+// `definition_index` place a declared definition in its modules (-1 for a
+// compiler-owned row).
+struct JetCodegenTypeSlot {
+    row: MIRTypeDef?
+    module_index: Int
+    definition_index: Int
+}
+
+// Rust `collect_items`: every module's type rows, then the compiler-owned
+// `Range` record and Core records, each unless a declaration already owns its
+// canonical key, then the compiler-owned `ParseError` alias. With
+// `defer_cli`, a definition with a CLI entry or binding keeps no row.
+fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], closure_only: Bool, defer_cli: Bool) -> [JetCodegenTypeSlot] {
+    slots := [JetCodegenTypeSlot]{}
+    declared_keys := [String:Bool]{}
+    parse_error_declared := false
+    loop module_index in 0..<modules.len() {
+        loop definition_index in 0..<modules[module_index].declarations.type_defs.len() {
+            definition :: modules[module_index].declarations.type_defs[definition_index]
+            // core.term stream handles lower to their native carrier, never a record row.
+            if jet_codegen_is_core_term_stream_carrier(modules, definition.module_identity, definition.name) -> next
+            declared_keys[definition.key] = true
+            if definition.key == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
+            row := MIRTypeDef?{None}
+            if !defer_cli || (definition.cli == None && definition.cli_bindings.len() == 0) -> row = Val(jet_codegen_lower_type_definition(definition, function_index, modules, closure_only))
+            &slots.push(JetCodegenTypeSlot{row: ^row, module_index: module_index, definition_index: definition_index})
+        }
+    }
+    if modules.len() > 0 {
+        record_module :: modules[0].module_identity
+        if declared_keys.get(JET_CODEGEN_RANGE_RECORD) == None {
+            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_record_definition(record_module, JET_CODEGEN_RANGE_RECORD, jet_codegen_range_record_fields())), module_index: -1, definition_index: -1})
+        }
+        loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS {
+            if declared_keys.get(record.name) != None -> next
+            if record.name == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
+            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_record_definition(record_module, record.name, jet_codegen_compiler_owned_core_record_fields(record))), module_index: -1, definition_index: -1})
+        }
+    }
+    // Rust `collect_items` (seed_parse_error): each module that declares no
+    // `ParseError` of its own seeds the compiler-owned alias row; rows dedupe
+    // by key, so the first such module owns it.
+    if !parse_error_declared {
+        loop semantic_module in modules {
+            owned := false
+            loop definition in semantic_module.declarations.type_defs {
+                if definition.name == JET_CODEGEN_PARSE_ERROR_ALIAS -> owned = true
+            }
+            if !owned {
+                &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_parse_error_alias_definition(semantic_module.module_identity)), module_index: -1, definition_index: -1})
+                break
+            }
+        }
+    }
+    slots
+}
+
+// The declared type rows of a whole program (jet_codegen_declared_type_slots),
+// each moved out of its slot.
+fn jet_codegen_declared_type_rows(function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult]) -> [MIRTypeDef] {
+    slots := jet_codegen_declared_type_slots(function_index, modules, false, false)
+    reversed := [MIRTypeDef]{}
+    loop slots.len() > 0 {
+        slot := &slots.pop() ?? { break }
+        row := ^slot.row ?? panic("a declared type slot of a whole program has no row")
+        &reversed.push(^row)
+    }
+    types := [MIRTypeDef]{}
+    loop reversed.len() > 0 {
+        row := &reversed.pop() ?? { break }
+        &types.push(^row)
+    }
+    types
+}
+
 // The program rows of `functions`, lowered as `lowered_rows`: their merged
-// function, callback and call rows, plus every module's type, trait and impl
-// rows, with `constants` (jet_codegen_lower_constant_rows of `modules`). With
-// `closure_only`, `functions` is a comptime closure and type rows list only
-// its methods (jet_codegen_type_method_ids).
-fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], closure_only: Bool, constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
+// function, callback and call rows, plus every module's trait and impl rows,
+// with `declared_types` (jet_codegen_declared_type_rows of `modules`, or a
+// comptime closure's jet_codegen_comptime_types) and `constants`
+// (jet_codegen_lower_constant_rows of `modules`).
+fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], declared_types: ^[MIRTypeDef], constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
     lowered_functions := [MIRFunction]{}
     prelude_calls := [MIRPreludeCall]{}
     core_calls := [MIRCoreCall]{}
@@ -3212,47 +3378,10 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     }
     jet_codegen_sort_core_owners(&core_owners)
 
-    types := [MIRTypeDef]{}
+    types := ^declared_types
     traits := [MIRTraitDef]{}
     loop semantic_module in modules {
-        loop definition in semantic_module.declarations.type_defs {
-            // core.term stream handles lower to their native carrier, never a record row.
-            if jet_codegen_is_core_term_stream_carrier(modules, definition.module_identity, definition.name) -> next
-            &types.push(jet_codegen_lower_type_definition(definition, function_index, modules, closure_only))
-        }
         loop definition in semantic_module.declarations.traits -> &traits.push(jet_codegen_lower_trait_definition(definition, function_index, modules))
-    }
-    // Rust `collect_items`: the compiler-owned `Range` record and Core records
-    // join the program once each, unless a declaration already owns the row's
-    // canonical key.
-    if modules.len() > 0 {
-        declared_keys := [String:Bool]{}
-        loop definition in types -> declared_keys[definition.key] = true
-        record_module :: modules[0].module_identity
-        if declared_keys.get(JET_CODEGEN_RANGE_RECORD) == None -> &types.push(jet_codegen_compiler_owned_record_definition(record_module, JET_CODEGEN_RANGE_RECORD, jet_codegen_range_record_fields()))
-        loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS {
-            if declared_keys.get(record.name) != None -> next
-            &types.push(jet_codegen_compiler_owned_record_definition(record_module, record.name, jet_codegen_compiler_owned_core_record_fields(record)))
-        }
-    }
-    // Rust `collect_items` (seed_parse_error): each module that declares no
-    // `ParseError` of its own seeds the compiler-owned alias row; rows dedupe
-    // by key, so the first such module owns it.
-    parse_error_declared := false
-    loop definition in types {
-        if definition.key == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
-    }
-    if !parse_error_declared {
-        loop semantic_module in modules {
-            owned := false
-            loop definition in semantic_module.declarations.type_defs {
-                if definition.name == JET_CODEGEN_PARSE_ERROR_ALIAS -> owned = true
-            }
-            if !owned {
-                &types.push(jet_codegen_parse_error_alias_definition(semantic_module.module_identity))
-                break
-            }
-        }
     }
     jet_codegen_ensure_builtin_debug_trait(&traits, types)
     jet_codegen_register_synthetic_unions(&types, all_function_rows)
