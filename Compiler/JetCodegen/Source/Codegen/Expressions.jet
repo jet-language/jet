@@ -5723,6 +5723,19 @@ fn jet_codegen_pattern_window(builder: JetCodegenBuilder, value: MIRValueID) -> 
     None
 }
 
+// Unregisters the pattern window of `value` and returns its place, so the
+// lowering treats `value` as a plain subject until the caller registers
+// the window again (an or-pattern's alternatives bind no window).
+fn jet_codegen_hide_pattern_window(builder: &JetCodegenBuilder, value: MIRValueID) -> MIRPlaceID? {
+    place :: jet_codegen_pattern_window(builder, value) ?? return None
+    kept := [JetCodegenPatternWindow]{}
+    loop window in builder.pattern_windows {
+        if window.value != value -> &kept.push(window)
+    }
+    builder.pattern_windows = kept
+    Val(place)
+}
+
 // `base` extended by one projection, typed `ty`: a write place under a write
 // window, a read place under a read window.
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::project_window_place
@@ -6084,17 +6097,14 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, pattern: TPattern, 
     join_block := jet_codegen_new_block(&builder, span, "pattern-or-join")
     incoming := [MIRPhiIncoming]{}
     // D-OPT-WRITE1 (#3974): one name cannot alias two payload slots, so an
-    // or-pattern under a `&place` subject binds read-only copies (sema
-    // declares them so): test an unregistered copy of the subject.
-    tested := subject_value
-    if jet_codegen_pattern_window(builder, subject_value) == .Val(place) {
-        // A read window's place cannot change: an unregistered second read
-        // of it binds payload copies without copying the whole subject.
-        tested = if jet_codegen_read_window_of(builder, subject_value) != None -> jet_codegen_emit_value(&builder, span, subject.ty, MIROperation.ReadPlace{place: place}) else -> jet_codegen_emit_value(&builder, span, subject.ty, MIROperation.Copy{value: subject_value, fact: MIRCopyFact.Materialize})
-    }
+    // or-pattern binds read-only values even under a `&place` subject (sema
+    // declares them so). The alternatives test the subject itself with its
+    // window hidden, never a copy of it.
+    // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_pattern_shape_condition (`Or` passes no window)
+    hidden := jet_codegen_hide_pattern_window(&builder, subject_value)
     index := 0
     loop index < alternatives.len() {
-        test := jet_codegen_lower_pattern_shape_condition(&builder, pattern, subject, tested, alternatives[index], bind_success, reuse_bindings || index > 0)
+        test := jet_codegen_lower_pattern_shape_condition(&builder, pattern, subject, subject_value, alternatives[index], bind_success, reuse_bindings || index > 0)
         matched_block := jet_codegen_new_block(&builder, span, "pattern-or-matched")
         next_block := jet_codegen_new_block(&builder, span, "pattern-or-next")
         jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: test, then_target: matched_block, else_target: next_block})
@@ -6106,6 +6116,7 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, pattern: TPattern, 
         jet_codegen_switch_block(&builder, next_block)
         index += 1
     }
+    if hidden == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: subject_value, place: place})
     false_value := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
     missed_predecessor := builder.current
     jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join_block})
