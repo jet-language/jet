@@ -32,6 +32,7 @@ use jet_foundation.[
     core_enum_variant_payload,
     core_enum_variants,
     diagnostic_with_edit,
+    diagnostic_with_source_derived_suggestion,
     type_identity_equal,
     type_name,
 ]
@@ -632,7 +633,39 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
     SemaPatternValidation{shape: TPatternShape.Struct{fields: tir_fields, rest: rest, span: span}, enum_type: None, bindings: facts, complete: complete}
 }
 
-fn sema_pattern_text(subject_ty: Type, parts: [StrMatchPart], span: Span, diagnostics: &[Diagnostic], mutable: Bool) -> SemaPatternValidation {
+// D-PATTERN-HOLE-NAME1=A. Validation happens before branch scopes or
+// Optional refinements, including tests whose bindings never escape.
+fn sema_pattern_hole_name_available(name: String, scopes: SemaScopeTable) -> Bool Never! {
+    if name == "_" -> return true
+    index :: sema_scope_resolve_index(scopes, name) ?? return true
+    !sema_scope_name_blocks_binding(scopes.bindings[index].symbol.kind)
+}
+
+fn sema_pattern_reused_hole(name: String, hole_span: Span, diagnostics: &[Diagnostic], pattern_span: Span, comparison: String?) {
+    fix :: if comparison != None -> "wrap the pattern text in parentheses to compare with the existing value, or pick a new hole name to capture" else -> "pick a new hole name to capture; to compare, build the expected text or bytes first and compare the two values"
+    diagnostic :: sema_error("E0118", hole_span, "pattern hole `{{{name}}}` would make a new `{name}`, but `{name}` already holds a value", "a pattern hole introduces a new name; it does not compare with an existing value or refine it", fix)
+    if comparison == {
+        .Val(text) -> &diagnostics.push(diagnostic_with_source_derived_suggestion(diagnostic, pattern_span, text))
+        .None -> &diagnostics.push(diagnostic)
+    }
+}
+
+fn sema_pattern_escape_literal(text: String) -> String Never! {
+    text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t").replace("{", "{{").replace("}", "}}")
+}
+
+fn sema_pattern_text_comparison(parts: [StrMatchPart]) -> String Never! {
+    text := ""
+    loop part in parts {
+        if part == {
+            .Lit(value) -> text += sema_pattern_escape_literal(value)
+            .Hole(name, _, _) -> text += "{{{name}}}"
+        }
+    }
+    "(\"{text}\")"
+}
+
+fn sema_pattern_text(subject_ty: Type, parts: [StrMatchPart], span: Span, diagnostics: &[Diagnostic], mutable: Bool, scopes: SemaScopeTable, introduces_names: Bool) -> SemaPatternValidation {
     if sema_pattern_unwrap_tags(subject_ty) != Type.String {
         &diagnostics.push(sema_error("E0305", span, "this pattern matches text, but the subject is `{type_name(subject_ty)}`", "a string-interpolation pattern only matches String", "match a String subject instead"))
         return SemaPatternValidation{shape: TPatternShape.Text{parts: [TTextPatternPart]{}, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
@@ -640,10 +673,22 @@ fn sema_pattern_text(subject_ty: Type, parts: [StrMatchPart], span: Span, diagno
     typed_parts := [TTextPatternPart]{}
     facts := [TPatternBindingFact]{}
     complete := true
+    offer_comparison_edit := true
+    loop part in parts {
+        if part == .Hole(_, .Val(_), _) -> offer_comparison_edit = false
+    }
     loop part in parts {
         if part == {
             .Lit(text) -> &typed_parts.push(TTextPatternPart.Literal{value: text})
             .Hole(name, ty, hole_span) -> {
+                if introduces_names {
+                    if !sema_pattern_hole_name_available(name, scopes) {
+                        comparison :: if offer_comparison_edit -> Val(sema_pattern_text_comparison(parts)) else -> None
+                        sema_pattern_reused_hole(name, hole_span, &diagnostics, span, comparison)
+                        complete = false
+                        next
+                    }
+                }
                 hole_ty := ty ?? Type.String
                 if !sema_pattern_is_text_hole_type(hole_ty) {
                     &diagnostics.push(sema_error("E0305", hole_span, "`{{{name}:{type_name(hole_ty)}}}` cannot read text as `{type_name(hole_ty)}`", "typed text holes support integer carriers, Float, Bool, and String", "use one of the supported hole types or omit the type"))
@@ -658,7 +703,7 @@ fn sema_pattern_text(subject_ty: Type, parts: [StrMatchPart], span: Span, diagno
     SemaPatternValidation{shape: TPatternShape.Text{parts: typed_parts, span: span}, enum_type: None, bindings: facts, complete: complete}
 }
 
-fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diagnostics: &[Diagnostic], mutable: Bool) -> SemaPatternValidation {
+fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diagnostics: &[Diagnostic], mutable: Bool, scopes: SemaScopeTable, introduces_names: Bool) -> SemaPatternValidation {
     normalized :: sema_pattern_unwrap_tags(subject_ty)
     bytes :: if normalized == {
         .List(element) -> element == Type.IntN{signed: false, bits: 8}
@@ -683,6 +728,14 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
                 offset += bytes_value.len() * 8
             }
             .Hole(name, spec, hole_span) -> {
+                available := true
+                if introduces_names {
+                    available = sema_pattern_hole_name_available(name, scopes)
+                    if !available {
+                        sema_pattern_reused_hole(name, hole_span, &diagnostics, span, None)
+                        complete = false
+                    }
+                }
                 if spec == {
                     .Rest -> {
                         if offset % 8 != 0 {
@@ -691,7 +744,7 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
                         }
                         rest_ty :: Type.List{element: Type.IntN{signed: false, bits: 8}}
                         &typed_parts.push(TBinaryPatternPart.Rest{name: name, ty: rest_ty, span: hole_span})
-                        &facts.push(sema_pattern_fact(name, hole_span, rest_ty, mutable))
+                        if available -> &facts.push(sema_pattern_fact(name, hole_span, rest_ty, mutable))
                     }
                     .Bits(width, endian) -> {
                         if width <= 0 || width > 64 {
@@ -710,7 +763,7 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
                         }
                         hole_ty :: Type.IntN{signed: false, bits: bits}
                         &typed_parts.push(TBinaryPatternPart.Bits{name: name, width: width, big_endian: endian == BinEndian.Big, ty: hole_ty, span: hole_span})
-                        &facts.push(sema_pattern_fact(name, hole_span, hole_ty, mutable))
+                        if available -> &facts.push(sema_pattern_fact(name, hole_span, hole_ty, mutable))
                         offset += width
                     }
                 }
@@ -849,8 +902,8 @@ fn sema_pattern_validate_internal(subject_ty: Type, pattern: Pattern, env: SemaS
             SemaPatternValidation{shape: TPatternShape.Range{lo: lo, hi: hi, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: complete}
         }
         .Struct(fields, rest, _) -> sema_pattern_struct(subject_ty, fields, rest, span, env, &writes, &state, &tail_store, &context, &diagnostics, mutable)
-        .StrMatch(parts, _) -> sema_pattern_text(subject_ty, parts, span, &diagnostics, mutable)
-        .BinMatch(parts, _) -> sema_pattern_binary(subject_ty, parts, span, &diagnostics, mutable)
+        .StrMatch(parts, _) -> sema_pattern_text(subject_ty, parts, span, &diagnostics, mutable, writes, true)
+        .BinMatch(parts, _) -> sema_pattern_binary(subject_ty, parts, span, &diagnostics, mutable, writes, true)
         .Variant(variant, slots, leading_dot, _) -> sema_pattern_validate_variant(subject_ty, variant, slots, leading_dot, span, env, &writes, &state, &tail_store, &context, &diagnostics, mutable)
         .Or(alternatives, _) -> {
             if alternatives.len() == 0 {
@@ -976,6 +1029,15 @@ pub fn sema_check_pattern(subject: TExpr, pattern: Pattern, position: TPatternPo
     sema_pattern_report_retired_outcome(pattern, subject.ty, env, &diagnostics)
     normalized :: sema_pattern_normalize_contextual(pattern, subject.ty, env)
     validation :: sema_pattern_validate_internal(subject.ty, normalized, env, &writes, &state, &tail_store, &context, &diagnostics, mutable)
+    if position == TPatternPosition.Binding {
+        loop index in before..<diagnostics.len() {
+            diagnostic :: diagnostics[index]
+            if diagnostic.code == "E0118" && diagnostic.edit != None {
+                // A parenthesized comparison is Bool, not a test-bind carrier.
+                diagnostics[index] = sema_error("E0118", diagnostic.span ?? sema_pattern_span(pattern), diagnostic.what, diagnostic.why, "pick a new hole name to capture; to compare, build the expected text or bytes first and compare the two values")
+            }
+        }
+    }
     complete :: validation.complete && diagnostics.len() == before
     checked :: if complete -> Val(SemaCheckedPattern{subject: subject, pattern: TPattern{shape: validation.shape, bindings: validation.bindings, enum_type: validation.enum_type, position: position, mutable: mutable, boxed: boxed}, bindings: validation.bindings}) else -> None
     SemaPatternCheck{complete: complete, checked: checked, bindings: validation.bindings}

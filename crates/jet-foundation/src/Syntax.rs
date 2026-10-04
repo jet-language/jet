@@ -376,6 +376,9 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
 // ordinary String values. They are not lexer tokens; the HTTP router consumes
 // them after String evaluation.
+// D-PATTERN-HOLE-NAME1=A adds no token: a text or byte pattern hole must
+// introduce a new name, not reuse a local, parameter, or module constant
+// (E0118). Parenthesize the right-hand literal for interpolated equality.
 // D-FLOWTYPE1=A adds no token: after a stable immutable `?T` name is checked
 // with `x != None` (true) or `x == None` (false/else), sema refines that name
 // to `T` for the proven branch and records an S31 Present unwrap for TIR.

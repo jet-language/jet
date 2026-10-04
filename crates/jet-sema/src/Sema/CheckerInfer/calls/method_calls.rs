@@ -5130,7 +5130,7 @@ impl<'a> Checker<'a> {
                     return Some(result_ty(unit_ty(), Type::String));
                 };
                 let _ = lit_span;
-                let holes = self.bin_match_hole_types(parts, span);
+                let holes = self.bin_match_hole_types(parts, span, false);
                 let ok_ty = if holes.is_empty() {
                     unit_ty()
                 } else {

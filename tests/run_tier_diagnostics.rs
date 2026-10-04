@@ -421,3 +421,52 @@ fn run() {}
         );
     }
 }
+
+#[test]
+fn pattern_hole_reuse_reports_and_repairs_match_run_tiers() {
+    std::thread::Builder::new()
+        .name("pattern-hole-reuse-parity".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            for position in ["if", "value", "route", "bytes", "or", "and", "optional", "constant", "typed"] {
+                let shown = format!("tests/ui/pattern_hole_reuse_{position}.jet");
+                let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&shown);
+                let path = file.to_string_lossy().into_owned();
+                let source = fs::read_to_string(&file).unwrap();
+                let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
+                let aot = jet::compile_with_path(&source, &path)
+                    .expect_err("a pattern hole cannot reuse an existing value");
+                let refusals = aot.iter().filter(|diag| diag.code == "E0118").collect::<Vec<_>>();
+                assert_eq!(refusals.len(), 1, "{position}: {aot:?}");
+                let refusal = refusals[0];
+                if matches!(position, "typed" | "bytes" | "route") {
+                    assert!(refusal.edit.is_none(), "{position} has no parenthesis-only repair");
+                } else {
+                    let edit = refusal.edit.as_ref().expect("plain text comparison has a structured repair");
+                    assert!(edit.new_text.starts_with('(') && edit.new_text.ends_with(')'));
+                    let mut fixed = source.clone();
+                    fixed.replace_range(edit.span.start..edit.span.end, &edit.new_text);
+                    jet::compile_with_path(&fixed, &path)
+                        .unwrap_or_else(|diags| panic!("{position} comparison repair failed: {diags:?}"));
+                }
+                let report_path = jet::Diagnostics::ReportPath::from_path(&file);
+                let expected_json = jet::render_all_json(&report_path, &source, &aot);
+                assert_eq!(jet::render_diagnostics(&shown, &source, &aot), snapshot);
+                let run = match run_jit_once(&path) {
+                    RunOutcome::Problems(diags) => diags,
+                    other => panic!("{position}: run must refuse the hole: {other:?}"),
+                };
+                let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+                    RunOutcome::Problems(diags) => diags,
+                    other => panic!("{position}: interpreter must refuse the hole: {other:?}"),
+                };
+                for diags in [run, interpreter] {
+                    assert_eq!(jet::render_all_json(&report_path, &source, &diags), expected_json);
+                    assert_eq!(jet::render_diagnostics(&shown, &source, &diags), snapshot);
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

@@ -246,6 +246,11 @@ are unique (E0105). A name that would shadow a built-in is rejected with E0106,
 including a type named after a built-in type such as `Unit`, `Queue`, or `Set`;
 unknown names and types are E0102/E0107 and E0119, with suggestions where the
 checker has a useful candidate.
+Text and byte pattern holes follow the same rule in every expression position:
+`symbol == "{root}jet"` is refused if `root` already names a local, parameter,
+or module constant. Use `symbol == ("{root}jet")` for interpolated equality,
+or a new hole name to capture text (D-PATTERN-HOLE-NAME1=A). A reused Optional
+name is not a flow refinement.
 
 A statement fence expands one complete binding or expression statement per
 entry. Multiple fences advance in lock-step. An ascending numbered range such
